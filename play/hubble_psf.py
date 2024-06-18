@@ -93,25 +93,38 @@ optics = dl.AngularOpticalSystem(
 
 transmission = optics.mask.transmission(coords,diam/npix) * optics.main_aperture.transmission(coords,diam/npix)
 
+spatial_extent = (-diam/2, diam/2, -diam/2, diam/2)
+
+ang = psf_npix*psf_pixel_scale/2 * 1e3
+angular_extent = (-ang/2, ang/2, -ang/2, ang/2)
+
 
 plt.figure(figsize=(14, 4))
 plt.suptitle("Hubble Optics")
 plt.subplot(1, 3, 1)
 plt.title("Aperture Transmission")
-plt.imshow(transmission)
+plt.imshow(transmission, extent=spatial_extent)
 plt.colorbar(label="Transmission")
+plt.xlabel("x (m)")
+plt.ylabel("y (m)")
+
 
 plt.subplot(1, 3, 2)
 plt.title("Aperture Abberations")
-plt.imshow(optics.aberrations.eval_basis(coords)*1e9)
+plt.imshow(optics.aberrations.eval_basis(coords)*1e9, extent=spatial_extent)
 plt.colorbar(label="OPD (nm)")
+plt.xlabel("x (m)")
+plt.ylabel("y (m)")
 
 
 wavels = 1e-6 * np.linspace(1, 1.2, 10)
 psf = optics.propagate(wavels)
 plt.subplot(1, 3, 3)
 plt.title("Sqrt PSF")
-plt.imshow(psf**0.5)
+plt.imshow(psf**0.5, extent=angular_extent)
 plt.colorbar(label="Sqrt Intensity")
+plt.xlabel("x (mas)")
+plt.ylabel("y (mas)")
 
+plt.tight_layout()
 plt.show()
