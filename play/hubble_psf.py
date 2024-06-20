@@ -31,7 +31,9 @@ spider_width = 0.038
 spider_angles = np.asarray([0, 90, 180, 270])
 secondary_diam = 0.305
 
-approx_pad = 0.2
+pad_size = 0.15
+pad_distance = 1
+pad_angles = np.asarray([0, 2*np.pi/3, 4*np.pi/3]) + np.pi/7
 
 coords = dlu.pixel_coords(npix, diam)
 
@@ -56,11 +58,12 @@ def hubble_pupil():
 
     return dl.layers.CompoundAperture([primary,*secondaries], normalise=True)
 
-#def hubble_pads():
+def hubble_pads():
+    pad_locs = [dl.CoordTransform(translation = (pad_distance*np.cos(angle),pad_distance*np.sin(angle)), rotation=-angle) for angle in pad_angles]
 
-    #pad_locs = [dl.CoordTransform(
+    pads = [dl.layers.RectangularAperture(width=pad_size, height=pad_size, occulting=True, transformation=transformation) for transformation in pad_locs]
 
-    #pads = [dl.layers.RectangularAperture(width=approx_pad, height=approx_pad, occulting=True))]
+    return pads
 
 
 psf_npix = 64  # Number of pixels in the PSF
@@ -79,7 +82,7 @@ layers = [
     ),
     (
         "mask",
-        dl.layers.CompoundAperture([*hubble_secondaries()], normalise=True,transformation=dl.CoordTransform([0.08,0])),
+        dl.layers.CompoundAperture([*hubble_secondaries(),*hubble_pads()], normalise=True,transformation=dl.CoordTransform(np.asarray([0.08,0]))),
     ),
     (
         "aberrations",
