@@ -70,8 +70,9 @@ psf_npix = 64  # Number of pixels in the PSF
 psf_pixel_scale = 50e-3  # 50 mili-arcseconds
 oversample = 3  # Oversampling factor for the PSF
 
-# add some abberations
-indices = np.array([2, 3, 7, 8, 9, 10])
+# add defocus and astigmatism, to match Jordan's existing work
+# NOTE: HST manuals mention known coma, perhaps that should be recovered as well
+indices = np.array([4, 5, 6])
 coefficients = 30e-9 * jr.normal(jr.PRNGKey(0), indices.shape)
 
 
