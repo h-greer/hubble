@@ -75,60 +75,69 @@ oversample = 3  # Oversampling factor for the PSF
 indices = np.array([4, 5, 6])
 coefficients = 30e-9 * jr.normal(jr.PRNGKey(0), indices.shape)
 
+def make_hubble_optics():
 
-layers = [
-    (
-        "main_aperture",
-        hubble_pupil(),
-    ),
-    (
-        "mask",
-        dl.layers.CompoundAperture([*hubble_secondaries(),*hubble_pads()], normalise=True,transformation=dl.CoordTransform(np.asarray([0.08,0]))),
-    ),
-    (
-        "aberrations",
-        dl.layers.AberratedAperture(dl.layers.CircularAperture(diam/2), noll_inds=indices, coefficients=coefficients)
+    layers = [
+        (
+            "main_aperture",
+            hubble_pupil(),
+        ),
+        (
+            "mask",
+            dl.layers.CompoundAperture([*hubble_secondaries(),*hubble_pads()], normalise=True,transformation=dl.CoordTransform(np.asarray([0.08,0]))),
+        ),
+        (
+            "aberrations",
+            dl.layers.AberratedAperture(dl.layers.CircularAperture(diam/2), noll_inds=indices, coefficients=coefficients)
+        )
+    ]
+
+    optics = dl.AngularOpticalSystem(
+        npix, diam, layers, psf_npix, psf_pixel_scale, oversample
     )
-]
 
-optics = dl.AngularOpticalSystem(
-    npix, diam, layers, psf_npix, psf_pixel_scale, oversample
-)
+    return optics
 
-transmission = optics.mask.transmission(coords,diam/npix) * optics.main_aperture.transmission(coords,diam/npix)
+
+
 
 spatial_extent = (-diam/2, diam/2, -diam/2, diam/2)
 
 ang = psf_npix*psf_pixel_scale/2 * 1e3
 angular_extent = (-ang/2, ang/2, -ang/2, ang/2)
 
+if __name__ == "__main__":
 
-plt.figure(figsize=(14, 4))
-plt.suptitle("Hubble Optics")
-plt.subplot(1, 3, 1)
-plt.title("Aperture Transmission")
-plt.imshow(transmission, extent=spatial_extent)
-plt.colorbar(label="Transmission")
-plt.xlabel("x (m)")
-plt.ylabel("y (m)")
+    optics = make_hubble_optics()
 
+    transmission = optics.mask.transmission(coords,diam/npix) * optics.main_aperture.transmission(coords,diam/npix)
 
-plt.subplot(1, 3, 2)
-plt.title("Aperture Abberations")
-plt.imshow(optics.aberrations.eval_basis(coords)*1e9, extent=spatial_extent)
-plt.colorbar(label="OPD (nm)")
-plt.xlabel("x (m)")
-plt.ylabel("y (m)")
+    plt.figure(figsize=(14, 4))
+    plt.suptitle("Hubble Optics")
+    plt.subplot(1, 3, 1)
+    plt.title("Aperture Transmission")
+    plt.imshow(transmission, extent=spatial_extent)
+    plt.colorbar(label="Transmission")
+    plt.xlabel("x (m)")
+    plt.ylabel("y (m)")
 
 
-wavels = 1e-6 * np.linspace(1, 1.2, 10)
-psf = optics.propagate(wavels)
-plt.subplot(1, 3, 3)
-plt.title("Sqrt PSF")
-plt.imshow(psf**0.5, extent=angular_extent)
-plt.colorbar(label="Sqrt Intensity")
-plt.xlabel("x (mas)")
-plt.ylabel("y (mas)")
+    plt.subplot(1, 3, 2)
+    plt.title("Aperture Abberations")
+    plt.imshow(optics.aberrations.eval_basis(coords)*1e9, extent=spatial_extent)
+    plt.colorbar(label="OPD (nm)")
+    plt.xlabel("x (m)")
+    plt.ylabel("y (m)")
 
-plt.tight_layout()
-plt.show()
+
+    wavels = 1e-6 * np.linspace(1, 1.2, 10)
+    psf = optics.propagate(wavels)
+    plt.subplot(1, 3, 3)
+    plt.title("Sqrt PSF")
+    plt.imshow(psf**0.5, extent=angular_extent)
+    plt.colorbar(label="Sqrt Intensity")
+    plt.xlabel("x (mas)")
+    plt.ylabel("y (mas)")
+
+    plt.tight_layout()
+    plt.show()
