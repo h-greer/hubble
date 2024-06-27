@@ -1,6 +1,6 @@
 # Set CPU count for numpyro multi-chain multi-thread
 import os
-os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=1'
+os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=4'
 
 
 # Basic imports
@@ -29,6 +29,8 @@ plt.rcParams['figure.dpi'] = 72
 
 import numpyro as npy
 import numpyro.distributions as dist
+
+import chainconsumer as cc
 
 # all the PSF things
 from hubble_psf import *
@@ -86,7 +88,7 @@ model_binary = dl.BinarySource(
     mean_flux = 1,
     contrast = 1,
     weights=weights,
-    separation=dlu.arcsec2rad(1),
+    separation=dlu.arcsec2rad(0.1),
     #position_angle=0,
 )
 
@@ -115,8 +117,8 @@ optim, opt_state = zdx.get_optimiser(
 )
 
 # Set up a progress bar
-pbar = tqdm(range(1000), desc="Loss: ")
-
+#pbar = tqdm(range(1000), desc="Loss: ")
+"""
 # A basic optimisation loop
 losses, models = [], []
 for i in pbar:
@@ -128,56 +130,53 @@ for i in pbar:
     # save results
     models.append(model)
     losses.append(loss)
-
+"""
 
 ### HMC STUFF AAAAAAAAAAAA
 
 source_paths = ["contrast","position_angle","separation","mean_flux"]
 
+#source_paths = ["contrast", "position_angle"]
 
-
-
-
-
-@zdx.filter_jit
-def run_model_psf(model,paths,params):
-    model.set(paths,params).model.flatten()
 
 def psf_model(data, model):
-    """source_params = [
-        npy.sample("contrast", dist.Uniform(1,10)),
-        npy.sample("theta", dist.Uniform(0, 2*np.pi)),
-        npy.sample("sep", dist.Uniform(0,1e-5)),
-        npy.sample("flux", dist.Uniform(0,1e6))
+    source_params = [
+        npy.sample("contrast", dist.Uniform(4.5, 5.5)),
+        npy.sample("theta", dist.Uniform(0, np.pi)),
+        npy.sample("sep", dist.Uniform(dlu.arcsec2rad(0.09),dlu.arcsec2rad(0.12))),#dist.Uniform(dlu.arcsec2rad(0.01),dlu.arcsec2rad(1))),
+        npy.sample("flux", dist.Uniform(0.9,1.1))
     ]
     aberration_params = np.asarray([
-        npy.sample("astig_x", dist.Normal(-1e-7,1e-7)),
-        npy.sample("astig_y", dist.Uniform(-1e-7,1e-7)),
-        npy.sample("defocus", dist.Uniform(-1e-7,1e-7)),
-    ])"""
+        npy.sample("astig_x", dist.Uniform(-1e-7, 1e-7)),
+        npy.sample("astig_y", dist.Uniform(-1e-7, 1e-7)),
+        npy.sample("defocus", dist.Uniform(-1e-7, 1e-7)),
+    ])
 
     cold_mask_offset = np.asarray([
-        npy.sample("cold_x", dist.Uniform(-0.5,0.5)),
-        npy.sample("cold_y", dist.Uniform(-0.5,0.5))
+        npy.sample("cold_x", dist.Uniform(0.07,0.09)),
+        npy.sample("cold_y", dist.Uniform(-0.02, 0.02))
     ])
 
     with npy.plate("data", len(data.flatten())):
         poisson_model = dist.Poisson(
-            #run_model_psf(model,source_paths,source_params)
-            #model.set(source_paths,source_params).model().flatten()#\
-            #.set("aberrations.coefficients",aberration_params)\
-            model.set("mask.transformation.translation",cold_mask_offset).model().flatten()
+            model.set(source_paths,source_params)
+            .set("aberrations.coefficients",aberration_params)\
+            .set("mask.transformation.translation",cold_mask_offset).model().flatten()
         )
         return npy.sample("psf", poisson_model, obs=data.flatten())
 
-"""sampler = npy.infer.MCMC(
+
+sampler = npy.infer.MCMC(
     npy.infer.NUTS(psf_model),
-    num_warmup=100,
-    num_samples=100,
+    num_warmup=200,
+    num_samples=200,
     num_chains=1,
     progress_bar=True,
-    init_params = 
 )
 
-sampler.run(jr.PRNGKey(0),data, model_system,init_params=)
-"""
+sampler.run(jr.PRNGKey(0), data, img_telescope)#, init_params = [5.0, dlu.arcsec2rad(0.1)])
+
+chain = cc.Chain.from_numpyro(sampler, "test", color="teal")
+consumer = cc.ChainConsumer().add_chain(chain)
+consumer.plotter.plot()
+plt.show()
