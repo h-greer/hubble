@@ -28,8 +28,8 @@ npix = 512
 # Hubble mirror parameters
 diam = 2.4
 spider_width = 0.038
-spider_angles = np.asarray([0, 90, 180, 270])
-secondary_diam = 0.305
+spider_angles = np.asarray([0, 90, 180, 270]) + 45
+secondary_diam = 0.6 # 0.305
 
 pad_size = 0.15
 pad_distance = 1
@@ -40,12 +40,12 @@ coords = dlu.pixel_coords(npix, diam)
 def hubble_secondaries():
     spider = dl.layers.Spider(
         width=spider_width,
-        angles=spider_angles
+        angles=spider_angles,
     )
 
     secondary = dl.layers.CircularAperture(
         radius=secondary_diam / 2,
-        occulting=True
+        occulting=True,
     )
 
     return [secondary, spider]
@@ -84,7 +84,7 @@ def make_hubble_optics():
         ),
         (
             "mask",
-            dl.layers.CompoundAperture([*hubble_secondaries(),*hubble_pads()], normalise=True,transformation=dl.CoordTransform(np.asarray([0.08,0]))),
+            dl.layers.CompoundAperture([*hubble_secondaries(),*hubble_pads()], normalise=True,transformation=dl.CoordTransform(np.asarray([0.06,0.06]))),
         ),
         (
             "aberrations",
