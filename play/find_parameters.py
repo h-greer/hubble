@@ -18,7 +18,7 @@ import dLux as dl
 import dLux.utils as dlu
 
 # Visualisation imports
-from tqdm import tqdm
+from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
 
 plt.rcParams['image.cmap'] = 'inferno'
@@ -47,7 +47,7 @@ weights = np.array([np.linspace(0.5, 1.5, 10), np.linspace(1.5, 0.5, 10)])
 
 binary = dl.BinarySource(
     wavels,
-    mean_flux = 1,
+    mean_flux = 1e7,
     contrast = 5,
     weights=weights,
     separation = dlu.arcsec2rad(0.1)
@@ -68,7 +68,7 @@ psf = img_telescope.model()
 psf_photon = jr.poisson(jr.PRNGKey(0), psf)
 bg_noise = 3*jr.normal(jr.PRNGKey(0), psf_photon.shape)
 
-data = psf#_photon #+ bg_noise
+data = psf_photon + np.abs(bg_noise)
 
 #plt.imshow(data)
 #plt.show()
@@ -85,16 +85,16 @@ new_model = model_optics.multiply(paths, 0)
 
 model_binary = dl.BinarySource(
     wavels,
-    mean_flux = 1,
+    mean_flux = 1e7,
     contrast = 1,
     weights=weights,
-    separation=dlu.arcsec2rad(0.1),
-    #position_angle=0,
+    separation=0,#dlu.arcsec2rad(1),
+    position_angle=0,
 )
 
-model_system = dl.Telescope(new_model, model_binary)#('source',model_binary))
+model_system = dl.Telescope(new_model, model_binary)
 
-paths = ["contrast","position_angle","separation","aberrations.coefficients", "mask.transformation.translation"]
+paths = ["contrast","position_angle","mean_flux","separation","aberrations.coefficients", "mask.transformation.translation"]
 
 @zdx.filter_value_and_grad(paths)
 def loss_fn(model,data):
@@ -106,9 +106,9 @@ jit_loss = zdx.filter_jit(loss_fn)
 
 model = model_system
 
-groups = [["contrast","position_angle"],"separation","aberrations.coefficients", "mask.transformation.translation"]
+groups = [["contrast","position_angle"],"mean_flux","separation","aberrations.coefficients", "mask.transformation.translation"]
 
-optimisers = [optax.adam(1e-1), optax.adam(1e-7), optax.adam(1e-9), optax.adam(1e-2)]
+optimisers = [optax.adam(1e-1), optax.adam(1e6), optax.adam(1e-7), optax.adam(1e-9), optax.adam(5e-2)]
 
 # Construct our optimiser objects
 optim, opt_state = zdx.get_optimiser(
@@ -116,12 +116,10 @@ optim, opt_state = zdx.get_optimiser(
     #model, paths, optax.adam(1e-8)
 )
 
-# Set up a progress bar
-#pbar = tqdm(range(1000), desc="Loss: ")
-"""
+
 # A basic optimisation loop
 losses, models = [], []
-for i in pbar:
+for i in tqdm(range(1000), desc="Loss: "):
     # Calculate the loss gradients, and update the model
     loss, grads = jit_loss(model, data)
     updates, opt_state = optim.update(grads, opt_state)
@@ -130,7 +128,7 @@ for i in pbar:
     # save results
     models.append(model)
     losses.append(loss)
-"""
+
 
 ### HMC STUFF AAAAAAAAAAAA
 
@@ -141,7 +139,7 @@ source_paths = ["contrast","position_angle","separation","mean_flux"]
 
 def psf_model(data, model):
     source_params = [
-        npy.sample("contrast", dist.Uniform(4.5, 5.5)),
+        npy.sample("contrast", dist.Uniform(4, 5)),
         npy.sample("theta", dist.Uniform(0, np.pi)),
         npy.sample("sep", dist.Uniform(dlu.arcsec2rad(0.09),dlu.arcsec2rad(0.12))),#dist.Uniform(dlu.arcsec2rad(0.01),dlu.arcsec2rad(1))),
         npy.sample("flux", dist.Uniform(0.9,1.1))
@@ -154,7 +152,7 @@ def psf_model(data, model):
 
     cold_mask_offset = np.asarray([
         npy.sample("cold_x", dist.Uniform(0.07,0.09)),
-        npy.sample("cold_y", dist.Uniform(-0.02, 0.02))
+        npy.sample("cold_y", dist.Uniform(0.0, 0.02))
     ])
 
     with npy.plate("data", len(data.flatten())):
@@ -166,10 +164,11 @@ def psf_model(data, model):
         return npy.sample("psf", poisson_model, obs=data.flatten())
 
 
+"""
 sampler = npy.infer.MCMC(
     npy.infer.NUTS(psf_model),
-    num_warmup=200,
-    num_samples=200,
+    num_warmup=1000,
+    num_samples=1000,
     num_chains=1,
     progress_bar=True,
 )
@@ -180,3 +179,4 @@ chain = cc.Chain.from_numpyro(sampler, "test", color="teal")
 consumer = cc.ChainConsumer().add_chain(chain)
 consumer.plotter.plot()
 plt.show()
+"""
