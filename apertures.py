@@ -13,13 +13,14 @@ Values in here *ARE NOT TO BE TRUSTED*, they are taken out of TinyTim and my ima
 class HSTMainAperture(dl.CompoundAperture):
     softening : float
     def __init__(self, transformation=dl.CoordTransform(rotation=-np.pi/4), softening=0.25):
-        self.normalise = False
+        self.normalise = True
         self.transformation = transformation
         self.softening = softening
         self.apertures = {
             "mirror" : dl.CircularAperture(
                 radius = 1.2,
-                softening=self.softening
+                softening=self.softening,
+                #normalise=True
             ),
             "spider" : dl.Spider(
                 width = 0.038,
@@ -58,16 +59,18 @@ class HSTMainAperture(dl.CompoundAperture):
         }
 
 
+
 class NICMOSColdMask(dl.CompoundAperture):
     softening : float
-    def __init__(self, transformation=dl.CoordTransform(rotation=-np.pi/4), softening=0.25):
-        self.normalise = False
+    def __init__(self, transformation=dl.CoordTransform(translation=np.asarray((0.0,0.0)),rotation=-np.pi/4), softening=0.25):
+        self.normalise = True
         self.transformation = transformation
         self.softening = softening
         self.apertures = {
             "outer" : dl.CircularAperture(
                 radius = 0.955,
                 softening = self.softening,
+                #normalise=True
             ),
             "spider" : dl.Spider(
                 width = 0.077,
