@@ -10,7 +10,7 @@ Values in here *ARE NOT TO BE TRUSTED*, they are taken out of TinyTim and my ima
 
 """
 
-class HSTAperture(dl.CompoundAperture):
+class HSTMainAperture(dl.CompoundAperture):
     def __init__(self, transformation=dl.CoordTransform(rotation=-np.pi/4)):
         self.normalise = False
         self.transformation = transformation
