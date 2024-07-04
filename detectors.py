@@ -18,8 +18,11 @@ class ApplyNonlinearity(dl.detector_layers.DetectorLayer):
         self.order = int(order)
 
     def apply(self, psf):
-        res = np.zeros(psf.shape)
+
+        psf_data = psf.data
+
+        res = psf_data*0.0
 
         for i in range(self.order):
-            res = res + self.coefficients[i]*psf**i
-        return res
+            res = res + self.coefficients[i]*psf_data**i
+        return psf.set("data", res)
