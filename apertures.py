@@ -84,32 +84,32 @@ class NICMOSColdMask(dl.CompoundAperture):
             ),
 
             "pad_1" : dl.RectangularAperture(
-                width = 0.065*2,
-                height = 0.065*2,
+                width = 0.1650,
+                height = 0.1410,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (0.8921, 0),
+                    translation = (0.9021, 0),
                     rotation=np.deg2rad(0)
                 ),
                 softening = self.softening
             ),
             "pad_2" : dl.RectangularAperture(
-                width = 0.065*2,
-                height = 0.065*2,
+                width = 0.1650,
+                height = 0.1410,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4615, 0.7555),
-                    rotation=np.deg2rad(-121)
+                    translation = (-0.4615, 0.7655),
+                    rotation=np.deg2rad(-121.15)
                 ),
                 softening = self.softening
             ),
             "pad_3" : dl.RectangularAperture(
-                width = 0.065*2,
-                height = 0.065*2,
+                width = 0.1650,
+                height = 0.1410,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4564, -0.7606),
-                    rotation=np.deg2rad(121)
+                    translation = (-0.4564, -0.7706),
+                    rotation=np.deg2rad(121.52)
                 ),
                 softening = self.softening
             )
