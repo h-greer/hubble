@@ -31,9 +31,9 @@ from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
 from astrocut import fits_cut
 
-ddir = './data/MAST_2024-07-03T0023/'
-fname = ddir + 'HST/n9nk01010/n9nk01010_mos.fits'
+ddir = './data/MAST_2024-07-03T0023-1/'
 #fname = ddir + 'HST/n9nk01010/n9nk01010_mos.fits'
+fname = ddir + 'HST/n8yj02010/n8yj02010_mos.fits'
 
 
 data = fits.getdata(fname, ext=1)
@@ -55,7 +55,11 @@ cropped_image_hdr = cutout[1].header
 
 #########################################################
 
+# F170M
 wavels = 1e-6 * np.linspace(1.60, 1.80, 20)
+
+# F110W
+#wavels = 1e-6 * np.linspace(0.8, 1.4, 20)
 
 weights = np.concatenate([np.linspace(0., 1., 10), np.linspace(1., 0., 10)])
 
@@ -70,8 +74,8 @@ optics = dl.AngularOpticalSystem(
     2.4,
     [
         dl.CompoundAperture([
-            ("main_aperture",HSTMainAperture(softening=0.01)),
-            ("cold_mask",NICMOSColdMask(softening=0.01))
+            ("main_aperture",HSTMainAperture(softening=0.25)),
+            ("cold_mask",NICMOSColdMask(softening=0.25))
         ],normalise=True),
         dl.AberratedAperture(
             dl.layers.CircularAperture(1.2), noll_inds=np.asarray([4,5,6,7,8,9,10])
@@ -83,8 +87,10 @@ optics = dl.AngularOpticalSystem(
 )
 
 detector = dl.LayeredDetector(
-    [#("pixel_response",dl.layers.ApplyPixelResponse(np.ones((64,64)))),
-     ("detector_response", ApplyNonlinearity(coefficients=np.ones(5)))
+    [
+        ("detector_response", ApplyNonlinearity(coefficients=np.zeros(3), order = 5)),
+        ("constant", dl.layers.AddConstant(value=0.0)),
+        ("pixel_response",dl.layers.ApplyPixelResponse(np.ones((64,64)))),
      ]
 )
 
@@ -92,7 +98,7 @@ detector = dl.LayeredDetector(
 telescope = dl.Telescope(
     optics,
     source,
-    #detector
+    detector
 )
 
 paths = [
@@ -112,15 +118,22 @@ paths = [
     "cold_mask.pad_1.width",
     "cold_mask.pad_2.width",
     "cold_mask.pad_3.width",
+    "cold_mask.pad_1.height",
+    "cold_mask.pad_2.height",
+    "cold_mask.pad_3.height",
+    "cold_mask.spider.width",
+    "constant.value",
+    "detector_response.coefficients",
+    #"pixel_response.pixel_response"
 ]
 
-cropped_data = np.asarray(cropped, dtype=float).clip(min=0)
+cropped_data = np.asarray(cropped, dtype=float)+0.1#.clip(min=0)
 
 @zdx.filter_jit
 @zdx.filter_value_and_grad(paths)
 def loss_fn(model,data):
     psf = model.model()
-    return -jsp.stats.poisson.logpmf(data,psf).mean()
+    return -jsp.stats.poisson.logpmf(data,psf).sum()
 
 groups = [
     "flux", "position",
@@ -131,9 +144,9 @@ groups = [
         "cold_mask.secondary.radius"
     ],
     [
-        "main_aperture.pad_1.translation",
-        "main_aperture.pad_2.translation",
-        "main_aperture.pad_3.translation",
+        #"main_aperture.pad_1.translation",
+        #"main_aperture.pad_2.translation",
+        #"main_aperture.pad_3.translation",
         "cold_mask.pad_1.translation",
         "cold_mask.pad_2.translation",
         "cold_mask.pad_3.translation"
@@ -146,18 +159,59 @@ groups = [
     [
         "cold_mask.pad_1.width",
         "cold_mask.pad_2.width",
-        "cold_mask.pad_3.width"
+        "cold_mask.pad_3.width",
+        "cold_mask.pad_1.height",
+        "cold_mask.pad_2.height",
+        "cold_mask.pad_3.height",
     ],
+    "cold_mask.spider.width",
+    "constant.value",
+    "detector_response.coefficients",
+    #"pixel_response.pixel_response"
 ]
 
-optimisers = [optax.adam(1e4),optax.adam(1e-8), optax.adam(8e-3), optax.adam(2e-4), optax.adam(2e-10), optax.adam(2e-3), optax.adam(2e-3), optax.adam(2e-4),optax.adam(2e-4)]#, optax.adam(1e-5)]
+"""optimisers = [
+    optax.adam(1e4),
+    optax.adam(1e-8),
+    optax.adam(8e-3),
+    optax.adam(2e-4),
+    optax.adam(2e-3),
+    optax.adam(1e-10),
+    optax.adam(2e-3),
+    optax.adam(2e-4),
+    optax.adam(2e-4)
+]"""
+
+
+pixel_opt = optax.piecewise_constant_schedule(init_value=1e-2*1e-8, 
+                             boundaries_and_scales={100 : int(1e8)})
+
+optimisers = [
+    optax.adam(1e4),
+    optax.adam(1e-8),
+    optax.adam(8e-3),
+    optax.adam(1e-4),
+    optax.adam(1e-10),
+    optax.adam(2e-3),
+    optax.adam(2e-3),
+    optax.adam(2e-4),
+    optax.adam(2e-3),
+    optax.adam(5e-4),
+    optax.adam(2e-3),
+    optax.adam(0e-10),
+    #optax.adam(pixel_opt)
+]
+
+
+#optimisers = [optax.adam(1e4),optax.adam(1e-8), optax.adam(8e-3), optax.adam(2e-4), optax.adam(2e-9), optax.adam(2e-3), optax.adam(2e-3), optax.adam(2e-4),optax.adam(2e-4)]#, optax.adam(1e-5)]
+
 
 optim, opt_state = zdx.get_optimiser(
     telescope, groups, optimisers
 )
 
 losses, models = [], []
-for i in tqdm(range(300)):
+for i in tqdm(range(100)):
     loss, grads = loss_fn(telescope,cropped_data)
     updates, opt_state = optim.update(grads, opt_state)
     telescope = zdx.apply_updates(telescope, updates)
@@ -176,7 +230,15 @@ for g in groups:
     else:
         print(g, telescope.get(g))
 
+fig, axs = plt.subplots(1,4)
+
 coords = dlu.pixel_coords(512, 2.4)
-plt.imshow(telescope.optics.transmission(coords,2.4/512))
+axs[0].imshow(cropped_data**0.25)
+axs[1].imshow(telescope.model()**0.25)
+axs[2].imshow(telescope.optics.transmission(coords,2.4/512))
+#axs[2].imshow(telescope.detector.pixel_response.pixel_response)
+axs[3].imshow(abs(cropped_data - telescope.model())**0.25)
+
+#axs[1].imshow(telescope.optics.aberrations.eval_basis(coords)*1e9)
 plt.show()
 #plt.imshow(np.abs(telescope.model()-cropped_data)**0.25)
