@@ -21,8 +21,8 @@ class ApplyNonlinearity(dl.detector_layers.DetectorLayer):
 
         psf_data = psf.data
 
-        res = psf_data*0.0
+        res = psf_data#*0.0
 
-        for i in range(self.order):
+        for i in range(2,self.order):
             res = res + self.coefficients[i]*psf_data**i
         return psf.set("data", res)
