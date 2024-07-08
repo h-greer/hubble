@@ -12,7 +12,7 @@ Values in here *ARE NOT TO BE TRUSTED*, they are taken out of TinyTim and my ima
 
 class HSTMainAperture(dl.CompoundAperture):
     softening : float
-    def __init__(self, transformation=dl.CoordTransform(rotation=-np.pi/4), softening=0.25):
+    def __init__(self, transformation=dl.CoordTransform(rotation=np.pi/4), softening=0.25):
         self.normalise = True
         self.transformation = transformation
         self.softening = softening
@@ -62,7 +62,7 @@ class HSTMainAperture(dl.CompoundAperture):
 
 class NICMOSColdMask(dl.CompoundAperture):
     softening : float
-    def __init__(self, transformation=dl.CoordTransform(translation=np.asarray((0.0,0.0)),rotation=-np.pi/4), softening=0.25):
+    def __init__(self, transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.04)),rotation=np.pi/4), softening=0.25):
         self.normalise = True
         self.transformation = transformation
         self.softening = softening
