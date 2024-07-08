@@ -16,6 +16,7 @@ import dLux.utils as dlu
 # Visualisation imports
 from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
+import matplotlib
 
 plt.rcParams['image.cmap'] = 'inferno'
 plt.rcParams["font.family"] = "serif"
@@ -33,9 +34,18 @@ from astrocut import fits_cut
 from astropy.nddata import Cutout2D
 
 ddir = './data/MAST_2024-07-03T0023-1/'
+
 #fname = ddir + 'HST/n9nk01010/n9nk01010_mos.fits'
 #fname = ddir + 'HST/n8yj02010/n8yj02010_mos.fits'
-fname = ddir + 'HST/n9nk14010/n9nk14010_mos.fits'
+#fname = ddir + 'HST/n9nk14010/n9nk14010_mos.fits'
+
+fname = ddir + 'HST/n9nk01020/n9nk01020_mos.fits'
+#fname = ddir + 'HST/n9nk14020/n9nk14020_mos.fits'
+#fname = ddir + 'HST/n8yj65020/n8yj65020_mos.fits'
+
+
+ddir = './data/MAST_2024-07-07T03_17_36.223Z/'
+fname = ddir + 'HST/n8ku01050_mos.fits'
 
 
 data = fits.getdata(fname, ext=1)
@@ -49,7 +59,9 @@ w = WCS(image_hdr)
 y,x = numpy.unravel_index(numpy.argmax(data),data.shape)
 centre = SkyCoord(w.pixel_to_world(x,y), unit='deg') # astropy wants to keep track of units
 
-wid = 80
+wid = 156
+
+oversample = 3
 
 # use fits_cut because we want WCS metadata cropped appropriately
 #cuts = fits_cut(fname, centre, 64, single_outfile=True, memory_only=True)
@@ -64,42 +76,46 @@ err_cropped = Cutout2D(err, centre, wid, wcs=w).data
 #########################################################
 
 # F170M
+
 wavels = 1e-6 * np.linspace(1.60, 1.80, 20)
 
 # F110W
-#wavels = 1e-6 * np.linspace(0.8, 1.4, 20)
+#wavels = 1e-6 * np.linspace(0.8, 1.35, 40)
 
 weights = np.concatenate([np.linspace(0., 1., 10), np.linspace(1., 0., 10)])
 
 source = dl.PointSource(
     wavelengths=wavels,
     #spectrum=dl.Spectrum(wavels, weights),
-    flux = 5000
+    flux = 50000
 )
 
 optics = dl.AngularOpticalSystem(
     512,
-    2.4,
+    2,
     [
         dl.CompoundAperture([
-            ("main_aperture",HSTMainAperture(softening=0.25)),
-            ("cold_mask",NICMOSColdMask(softening=0.25))
+            ("main_aperture",HSTMainAperture(softening=0.01)),
+            ("cold_mask",NICMOSColdMask(softening=0.01))
         ],normalise=True),
         dl.AberratedAperture(
-            dl.layers.CircularAperture(1.2), noll_inds=np.asarray([4,5,6,7,8,9,10])
+            dl.layers.CircularAperture(1.2),
+            noll_inds=np.asarray([4,5,6,7,8,9,10,11]),
+            #coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9
         )
     ],
     wid,
     0.043,
-    1
+    oversample
 )
 
 detector = dl.LayeredDetector(
     [
         ("detector_response", ApplyNonlinearity(coefficients=np.zeros(3), order = 5)),
         ("constant", dl.layers.AddConstant(value=0.0)),
-        ("pixel_response",dl.layers.ApplyPixelResponse(np.ones((wid,wid)))),
-        #("jitter", dl.layers.ApplyJitter(sigma=0.1))
+        ("pixel_response",dl.layers.ApplyPixelResponse(np.ones((wid*oversample,wid*oversample)))),
+        #("jitter", dl.layers.ApplyJitter(sigma=0.1)),
+        ("downsample", dl.layers.Downsample(oversample))
      ]
 )
 
@@ -116,21 +132,22 @@ paths = [
     "cold_mask.transformation.translation", "cold_mask.transformation.rotation",
     "AberratedAperture.coefficients",
     "cold_mask.outer.radius", "cold_mask.secondary.radius",
-    "main_aperture.pad_1.translation",
-    "main_aperture.pad_2.translation",
-    "main_aperture.pad_3.translation",
-    "cold_mask.pad_1.translation",
-    "cold_mask.pad_2.translation",
-    "cold_mask.pad_3.translation",
-    "cold_mask.pad_1.rotation",
-    "cold_mask.pad_2.rotation",
-    "cold_mask.pad_3.rotation",
+    #"main_aperture.mirror.radius", "main_aperture.secondary.radius",
+    #"main_aperture.pad_1.translation",
+    #"main_aperture.pad_2.translation",
+    #"main_aperture.pad_3.translation",
+    #"cold_mask.pad_1.translation",
+    #"cold_mask.pad_2.translation",
+    #"cold_mask.pad_3.translation",
+    #"cold_mask.pad_1.rotation",
+    #"cold_mask.pad_2.rotation",
+    #"cold_mask.pad_3.rotation",
     "cold_mask.pad_1.width",
     "cold_mask.pad_2.width",
     "cold_mask.pad_3.width",
-    "cold_mask.pad_1.height",
-    "cold_mask.pad_2.height",
-    "cold_mask.pad_3.height",
+    #"cold_mask.pad_1.height",
+    #"cold_mask.pad_2.height",
+    #"cold_mask.pad_3.height",
     "cold_mask.spider.width",
     "constant.value",
     "detector_response.coefficients",
@@ -141,7 +158,7 @@ paths = [
 cropped_data = np.asarray(cropped, dtype=float)#+0.1#.clip(min=0)
 cropped_err = np.asarray(err_cropped, dtype=float)
 
-cropped_err = np.where(cropped_err==0.0, 1e6,cropped_err)
+cropped_err = np.where(cropped_err==0.0, 1e10,cropped_err)
 
 @zdx.filter_jit
 @zdx.filter_value_and_grad(paths)
@@ -156,29 +173,31 @@ groups = [
     "AberratedAperture.coefficients",
     [
         "cold_mask.outer.radius",
-        "cold_mask.secondary.radius"
+        "cold_mask.secondary.radius",
+    #    "main_aperture.mirror.radius",
+    #    "main_aperture.secondary.radius"
     ],
-    [
-        #"main_aperture.pad_1.translation",
-        #"main_aperture.pad_2.translation",
-        #"main_aperture.pad_3.translation",
-        "cold_mask.pad_1.translation",
-        "cold_mask.pad_2.translation",
-        "cold_mask.pad_3.translation"
-    ],
-    [
-        "cold_mask.pad_1.rotation",
-        "cold_mask.pad_2.rotation",
-        "cold_mask.pad_3.rotation"
-    ],
-    [
-        "cold_mask.pad_1.width",
-        "cold_mask.pad_2.width",
-        "cold_mask.pad_3.width",
-        #"cold_mask.pad_1.height",
-        #"cold_mask.pad_2.height",
-        #"cold_mask.pad_3.height",
-    ],
+    #[
+    #    "main_aperture.pad_1.translation",
+    #    "main_aperture.pad_2.translation",
+    #    "main_aperture.pad_3.translation",
+    #    "cold_mask.pad_1.translation",
+    #    "cold_mask.pad_2.translation",
+    #    "cold_mask.pad_3.translation"
+    #],
+    #[
+    #    "cold_mask.pad_1.rotation",
+    #    "cold_mask.pad_2.rotation",
+    #    "cold_mask.pad_3.rotation"
+    #],
+    #[
+    #    "cold_mask.pad_1.width",
+    #    "cold_mask.pad_2.width",
+    #    "cold_mask.pad_3.width",
+    #    "cold_mask.pad_1.height",
+    #    "cold_mask.pad_2.height",
+    #    "cold_mask.pad_3.height",
+    #],
     "cold_mask.spider.width",
     "constant.value",
     "detector_response.coefficients",
@@ -203,17 +222,17 @@ pixel_opt = optax.piecewise_constant_schedule(init_value=1e-2*1e-8,
                              boundaries_and_scales={100 : int(1e8)})
 
 optimisers = [
-    optax.adam(1e3),
-    optax.adam(1e-8),
-    optax.adam(1e-2),
-    optax.adam(1e-4),
+    optax.adam(1e4),
+    optax.adam(1e-7),
+    optax.adam(1e-3),
+    optax.adam(5e-4),
     optax.adam(1e-10),
-    optax.adam(1e-3),
-    optax.adam(1e-3),
-    optax.adam(1e-4),
-    optax.adam(1e-3),
-    optax.adam(1e-3),
-    optax.adam(1e-2),
+    optax.adam(0e-4),
+    #optax.adam(1e-3),
+    #optax.adam(1e-4),
+    #optax.adam(1e-3),
+    optax.adam(0e-2),
+    optax.adam(0e-3),
     optax.adam(0e-10),
     #optax.adam(1e-2)
     #optax.adam(pixel_opt)
@@ -228,7 +247,7 @@ optim, opt_state = zdx.get_optimiser(
 )
 
 losses, models = [], []
-for i in tqdm(range(100)):
+for i in tqdm(range(1000)):
     loss, grads = loss_fn(telescope,(cropped_data,cropped_err))
     updates, opt_state = optim.update(grads, opt_state)
     telescope = zdx.apply_updates(telescope, updates)
@@ -250,12 +269,12 @@ for g in groups:
 fig, axs = plt.subplots(1,4)
 
 coords = dlu.pixel_coords(512, 2.4)
-axs[0].imshow((cropped_data+0.1)**0.25)
-axs[1].imshow((telescope.model()+0.1)**0.25)
+axs[0].imshow((cropped_data)**0.125)
+axs[1].imshow((telescope.model())**0.125)
 #axs[2].imshow(cropped_err)
 axs[2].imshow(telescope.optics.transmission(coords,2.4/512))
-#axs[2].imshow(telescope.detector.pixel_response.pixel_response)
-axs[3].imshow(abs(cropped_data - telescope.model())**0.25)
+#axs[4].imshow(telescope.detector.pixel_response.pixel_response)
+axs[3].imshow((cropped_data - telescope.model())/cropped_err, cmap='seismic')
 
 #axs[1].imshow(telescope.optics.aberrations.eval_basis(coords)*1e9)
 plt.show()
