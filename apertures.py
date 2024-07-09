@@ -36,7 +36,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 radius = 0.065,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (0.8921, 0),
+                    translation = (0.8921*1.2, 0),
                 ),
                 softening = self.softening
             ),
@@ -44,7 +44,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 radius = 0.065,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4615, 0.7555),
+                    translation = (-0.4615*1.2, 0.7555*1.2),
                 ),
                 softening = self.softening
             ),
@@ -52,7 +52,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 radius = 0.065,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4564, -0.7606),
+                    translation = (-0.4564*1.2, -0.7606*1.2),
                 ),
                 softening=self.softening
             )
@@ -68,7 +68,7 @@ class NICMOSColdMask(dl.CompoundAperture):
         self.softening = softening
         self.apertures = {
             "outer" : dl.CircularAperture(
-                radius = 0.955,
+                radius = 1.2*0.955,
                 softening = self.softening,
                 #normalise=True
             ),
@@ -88,7 +88,7 @@ class NICMOSColdMask(dl.CompoundAperture):
                 height = 0.1410,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (0.9021, 0),
+                    translation = (0.9021*1.2, 0),
                     rotation=np.deg2rad(0)
                 ),
                 softening = self.softening
@@ -98,7 +98,7 @@ class NICMOSColdMask(dl.CompoundAperture):
                 height = 0.1410,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4615, 0.7655),
+                    translation = (-0.4615*1.2, 0.7655*1.2),
                     rotation=np.deg2rad(-121.15)
                 ),
                 softening = self.softening
@@ -108,7 +108,7 @@ class NICMOSColdMask(dl.CompoundAperture):
                 height = 0.1410,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4564, -0.7706),
+                    translation = (-0.4564*1.2, -0.7706*1.2),
                     rotation=np.deg2rad(121.52)
                 ),
                 softening = self.softening
