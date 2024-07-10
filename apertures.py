@@ -23,17 +23,17 @@ class HSTMainAperture(dl.CompoundAperture):
                 #normalise=True
             ),
             "spider" : dl.Spider(
-                width = 0.038,
+                width = 0.038*1.2,
                 angles = np.asarray([0, 90, 180, 270]),
                 softening=self.softening,
             ),
             "secondary" : dl.CircularAperture(
-                radius = 0.330,
+                radius = 0.330*1.2,
                 occulting = True,
                 softening = self.softening
             ),
             "pad_1" : dl.CircularAperture(
-                radius = 0.065,
+                radius = 0.065*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
                     translation = (0.8921*1.2, 0),
@@ -41,7 +41,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 softening = self.softening
             ),
             "pad_2" : dl.CircularAperture(
-                radius = 0.065,
+                radius = 0.065*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
                     translation = (-0.4615*1.2, 0.7555*1.2),
@@ -49,7 +49,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 softening = self.softening
             ),
             "pad_3" : dl.CircularAperture(
-                radius = 0.065,
+                radius = 0.065*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
                     translation = (-0.4564*1.2, -0.7606*1.2),
@@ -73,19 +73,19 @@ class NICMOSColdMask(dl.CompoundAperture):
                 #normalise=True
             ),
             "spider" : dl.Spider(
-                width = 0.077,
+                width = 0.077*1.2,
                 angles = np.asarray([0, 90, 180, 270]),
                 softening = self.softening
             ),
             "secondary" : dl.CircularAperture(
-                radius = 0.372,
+                radius = 0.372*1.2,
                 occulting = True,
                 softening = self.softening
             ),
 
             "pad_1" : dl.RectangularAperture(
-                width = 0.1650,
-                height = 0.1410,
+                width = 0.1650*1.2,
+                height = 0.1410*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
                     translation = (0.9021*1.2, 0),
@@ -94,8 +94,8 @@ class NICMOSColdMask(dl.CompoundAperture):
                 softening = self.softening
             ),
             "pad_2" : dl.RectangularAperture(
-                width = 0.1650,
-                height = 0.1410,
+                width = 0.1650*1.2,
+                height = 0.1410*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
                     translation = (-0.4615*1.2, 0.7655*1.2),
@@ -104,8 +104,8 @@ class NICMOSColdMask(dl.CompoundAperture):
                 softening = self.softening
             ),
             "pad_3" : dl.RectangularAperture(
-                width = 0.1650,
-                height = 0.1410,
+                width = 0.1650*1.2,
+                height = 0.1410*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
                     translation = (-0.4564*1.2, -0.7706*1.2),
