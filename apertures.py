@@ -23,7 +23,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 #normalise=True
             ),
             "spider" : dl.Spider(
-                width = 0.038*1.2,
+                width = 0.025,#0.038*1.2,
                 angles = np.asarray([0, 90, 180, 270]),
                 softening=self.softening,
             ),
