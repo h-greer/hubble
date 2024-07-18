@@ -7,6 +7,7 @@
 #SBATCH -e slurm.%N.%j.err  # STDERR
 
 module load anaconda3/5.2.0
+source /opt/modules/Anaconda3/5.2.0/etc/profile.d/conda.sh
 conda activate /data/uqhgreer/repos/jax-cpu
 
 python hmc_single.py
