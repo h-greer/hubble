@@ -92,10 +92,10 @@ source = dl.PointSource(
     #wavelengths=wavels,
     spectrum=dl.Spectrum(wavels, weights),
     flux = 5000,
-    position = np.asarray([-5e-7,5e-7])
+    #position = np.asarray([-5e-7,5e-7])
 )
 
-source = dl.BinarySource(
+"""source = dl.BinarySource(
     #position = np.asarray([-5e-7,5e-7]),
     wavelengths=wavels,
     weights=weights,
@@ -104,7 +104,7 @@ source = dl.BinarySource(
     separation=dlu.arcsec2rad(0.042),
     #position_angle=7*np.pi/4,
     #contrast = 0.3,
-)
+)"""
 
 oversample = 3
 
@@ -147,14 +147,14 @@ telescope = dl.Telescope(
 
 def psf_model(data, model):
     samplers = {
-        "mean_flux": npy.sample("Flux", dist.Uniform(2000,6000)),
+        "flux": npy.sample("Flux", dist.Uniform(2000,6000)),
         "position": np.asarray([
             npy.sample("X", dist.Uniform(-1e-6,1e-6)),
             npy.sample("Y", dist.Uniform(-1e-6,1e-6))
         ]),
-        "separation": npy.sample("Separation", dist.Uniform(0,1e-6)),
-        "contrast": npy.sample("Contrast", dist.Uniform(0,20)),
-        "position_angle": npy.sample("Position Angle", dist.Uniform(0,np.pi)),
+        #"separation": npy.sample("Separation", dist.Uniform(0,1e-6)),
+        #"contrast": npy.sample("Contrast", dist.Uniform(0,20)),
+        #"position_angle": npy.sample("Position Angle", dist.Uniform(0,np.pi)),
         #"cold_mask.transformation.translation": np.asarray([
         #    npy.sample("Cold X", dist.Uniform(-1,1)),
         #    npy.sample("Cold Y", dist.Uniform(-1,1))
