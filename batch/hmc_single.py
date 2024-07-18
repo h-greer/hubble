@@ -155,13 +155,13 @@ def psf_model(data, model):
         "separation": npy.sample("Separation", dist.Uniform(0,1e-6)),
         "contrast": npy.sample("Contrast", dist.Uniform(0,20)),
         "position_angle": npy.sample("Position Angle", dist.Uniform(0,np.pi)),
-        "cold_mask.transformation.translation": np.asarray([
-            npy.sample("Cold X", dist.Uniform(-1,1)),
-            npy.sample("Cold Y", dist.Uniform(-1,1))
-        ]),
-        "cold_mask.transformation.rotation": npy.sample("Cold Rotation", dist.Uniform(-np.pi, np.pi)),
+        #"cold_mask.transformation.translation": np.asarray([
+        #    npy.sample("Cold X", dist.Uniform(-1,1)),
+        #    npy.sample("Cold Y", dist.Uniform(-1,1))
+        #]),
+        #"cold_mask.transformation.rotation": npy.sample("Cold Rotation", dist.Uniform(-np.pi, np.pi)),
         #"AberratedAperture.coefficients":
-        "constant.value": npy.sample("Detector Offset", dist.Uniform(-1,1))
+        #"constant.value": npy.sample("Detector Offset", dist.Uniform(-1,1))
     }
 
     for key in samplers:
@@ -179,7 +179,7 @@ sampler = npy.infer.MCMC(
     npy.infer.NUTS(psf_model),
     num_warmup=4000,
     num_samples=4000,
-    num_chains=4,
+    num_chains=1,
     progress_bar=True,
 )
 
