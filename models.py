@@ -27,8 +27,6 @@ class Exposure(zdx.Base):
 
     fit: object = eqx.field(static=True)
 
-    # WHERE DOES THE FIT GO
-
     def __init__(self, filename, name, filter, data, err, bad, fit):
         """
         Initialise exposure
@@ -41,6 +39,9 @@ class Exposure(zdx.Base):
         self.bad = bad
 
         self.fit = fit
+    
+    def map_param(self, param):
+        return self.fit.map_param(self, param)
     
     @property
     def key(self):
@@ -88,7 +89,7 @@ class ModelFit(zdx.Base):
                 return exposure.key
             #case _: raise ValueError(f"Parameter {param} has no key")
     
-    def map_keys(self, exposure, param):
+    def map_param(self, exposure, param):
         """
         currently everything's global so this is just a fallthrough
         """
