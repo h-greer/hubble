@@ -13,9 +13,20 @@ from astropy.wcs import WCS
 from astrocut import fits_cut
 from astropy.nddata import Cutout2D
 import numpy
+import pandas as pd
 
 from abc import abstractmethod
 
+from apertures import *
+from detectors import *
+
+
+filter_files = {
+    'F170M': np.asarray(pd.read_csv("../data/HST_NICMOS1.F170M.dat", sep=' ')),
+    'F095N': np.asarray(pd.read_csv("../data/HST_NICMOS1.F095N.dat", sep=' ')),
+    'F145M': np.asarray(pd.read_csv("../data/HST_NICMOS1.F145M.dat", sep=' ')),
+    'F190N': np.asarray(pd.read_csv("../data/HST_NICMOS1.F190N.dat", sep=' '))
+}
 
 class Exposure(zdx.Base):
     filename: str = eqx.field(static=True)
@@ -40,6 +51,9 @@ class Exposure(zdx.Base):
 
         self.fit = fit
     
+    def get_key(self, param):
+        return self.fit.get_key(self, param)
+
     def map_param(self, param):
         return self.fit.map_param(self, param)
     
@@ -80,21 +94,130 @@ class ModelFit(zdx.Base):
     def __call__(self, model, exposure):
         pass
 
-    def get_keys(self, exposure, param):
-        """
-        fallthrough at this stage, until we have more than single-filter-single-star images
-        """
+    def get_key(self, exposure, param):
         match param:
-            case _:
+            case "fluxes":
                 return exposure.key
-            #case _: raise ValueError(f"Parameter {param} has no key")
+            #case _:
+            #    return exposure.key
+            case _: raise ValueError(f"Parameter {param} has no key")
     
     def map_param(self, exposure, param):
         """
         currently everything's global so this is just a fallthrough
         """
+        if param == "fluxes":
+            return f"{param}.{exposure.get_key(param)}"
         return param
 
 class SinglePointFit(ModelFit):
+    source: dl.Telescope = eqx.field(static=True)
+    def __init__(self):
+        self.source = dl.PointSource(wavelengths=[1])
     def __call__(self, model, exposure):
-        return model.model()
+        filter = model.filters[exposure.filter]
+        source = self.source.set("spectrum", dl.Spectrum(filter[:,0], filter[:,1]))
+        source = source.set("flux", model.get(exposure.fit.map_param(exposure, "fluxes")))
+        source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions")))
+        #print(source.flux, source.spectrum)
+
+        #source = self.source
+
+        psfs = model.optics.model(source, return_psf=True)
+        psf = psfs.data.sum(tuple(range(psfs.ndim)))
+        pixel_scale = psfs.pixel_scale.mean()
+
+        psf_obj = dl.PSF(psf, pixel_scale)
+        return model.detector.model(psf_obj, return_psf=False)
+
+    
+
+class BaseModeller(zdx.Base):
+    params: dict
+
+    def __init__(self, params):
+        self.params = params
+
+    def __getattr__(self, key):
+        if key in self.params:
+            return self.params[key]
+        for k, val in self.params.items():
+            if hasattr(val, key):
+                return getattr(val, key)
+        raise AttributeError(
+            f"Attribute {key} not found in params of {self.__class__.__name__} object"
+        )
+
+    def __getitem__(self, key):
+
+        values = {}
+        for param, item in self.params.items():
+            if isinstance(item, dict) and key in item.keys():
+                values[param] = item[key]
+
+        return values
+
+
+class NICMOSModel(BaseModeller):
+    filters: dict
+    optics: NICMOSOptics
+    detector: NICMOSDetector
+
+    def __init__(self, exposures, params, optics, detector):
+        self.optics = optics
+        self.detector = detector
+        self.params = params
+        self.filters = {}
+
+        for filter in [e.filter for e in exposures]:
+            #print(filter)
+            spec = filter_files[filter]
+            spec = spec.at[:,0].divide(1e10)
+            self.filters[filter] = spec[::5,:]
+    
+
+
+class ModelParams(BaseModeller):
+
+    @property
+    def keys(self):
+        return list(self.params.keys())
+
+    @property
+    def values(self):
+        return list(self.params.values())
+
+    def __getattr__(self, key):
+        if key in self.keys:
+            return self.params[key]
+        for k, val in self.params.items():
+            if hasattr(val, key):
+                return getattr(val, key)
+        raise AttributeError(
+            f"Attribute {key} not found in params of {self.__class__.__name__} object"
+        )
+
+    def replace(self, values):
+        # Takes in a super-set class and updates this class with input values
+        return self.set("params", dict([(param, getattr(values, param)) for param in self.keys]))
+
+    def from_model(self, values):
+        return self.set("params", dict([(param, values.get(param)) for param in self.keys]))
+
+    def __add__(self, values):
+        matched = self.replace(values)
+        return jax.tree_map(lambda x, y: x + y, self, matched)
+
+    def __iadd__(self, values):
+        return self.__add__(values)
+
+    def __mul__(self, values):
+        matched = self.replace(values)
+        return jax.tree_map(lambda x, y: x * y, self, matched)
+
+    def __imul__(self, values):
+        return self.__mul__(values)
+
+    def inject(self, other):
+        # Injects the values of this class into another class
+        return other.set(self.keys, self.values)

@@ -114,3 +114,46 @@ class NICMOSColdMask(dl.CompoundAperture):
                 softening = self.softening
             )
         }
+
+"""
+optics = dl.AngularOpticalSystem(
+    512,
+    2.4,
+    [
+        dl.CompoundAperture([
+            ("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=0.1)),
+            ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4), softening=0.1))
+        ],normalise=True),
+        dl.AberratedAperture(
+            dl.layers.CircularAperture(1.2),
+            noll_inds=np.asarray([4,5,6,7,8,9,10,11]),#,12,13,14,15,16,17,18,19,20]),
+            coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
+        )
+    ],
+    wid,
+    0.0432,
+    oversample
+)
+"""
+
+
+class NICMOSOptics(dl.AngularOpticalSystem):
+    def __init__(self, wf_npixels, psf_npixels, oversample):
+        super().__init__(
+            wf_npixels,
+            2.4,
+            [
+                dl.CompoundAperture([
+                    ("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=0.1)),
+                    ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4), softening=0.1))
+                ],normalise=True),
+                dl.AberratedAperture(
+                    dl.layers.CircularAperture(1.2),
+                    noll_inds=np.asarray([4,5,6,7,8,9,10,11]),#,12,13,14,15,16,17,18,19,20]),
+                    coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
+                )
+            ],
+            psf_npixels,
+            0.0432,
+            oversample
+        )
