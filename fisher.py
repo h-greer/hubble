@@ -35,9 +35,9 @@ def calc_fisher(
         if not isinstance(leaf, np.ndarray):
             raise ValueError(f"Leaf at path '{param}' is not an array")
         N = leaf.size
-    except ValueError:
+    except ValueError as e:
         # Param doesn't exist, return None
-        print("uh oh")
+        print(e)
         return None
 
     # Check for cached fisher mats
