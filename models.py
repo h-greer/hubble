@@ -109,6 +109,33 @@ class ModelFit(zdx.Base):
         if param == "fluxes":
             return f"{param}.{exposure.get_key(param)}"
         return param
+    
+    def update_optics(self, model, exposure):
+        optics = model.optics
+        if "aberrations" in model.params.keys():
+            coefficients = model.get(self.map_param(exposure, "aberrations"))
+            optics = optics.set("AberratedAperture.coefficients", coefficients)
+        
+        if "cold_mask_shift" in model.params.keys():
+            translation = model.get(self.map_param(exposure, "cold_mask_shift"))
+            optics = optics.set("cold_mask.transformation.translation", translation)
+
+        if "cold_mask_rot" in model.params.keys():
+            rotation = model.get(self.map_param(exposure, "cold_mask_rot"))
+            optics = optics.set("cold_mask.transformation.rotation", rotation)
+        
+        if "outer_radius" in model.params.keys():
+            radius = model.get(self.map_param(exposure, "outer_radius"))
+            optics = optics.set("cold_mask.outer.radius", radius)
+        
+        if "secondary_radius" in model.params.keys():
+            radius = model.get(self.map_param(exposure, "secondary_radius"))
+            optics = optics.set("cold_mask.secondary.radius", radius)
+        
+        if "spider_width" in model.params.keys():
+            radius = model.get(self.map_param(exposure, "spider_width"))
+            optics = optics.set("cold_mask.spider.width", radius)
+        return optics
 
 class SinglePointFit(ModelFit):
     source: dl.Telescope = eqx.field(static=True)
@@ -122,8 +149,9 @@ class SinglePointFit(ModelFit):
         #print(source.flux, source.spectrum)
 
         #source = self.source
+        optics = self.update_optics(model, exposure)
 
-        psfs = model.optics.model(source, return_psf=True)
+        psfs = optics.model(source, return_psf=True)
         psf = psfs.data.sum(tuple(range(psfs.ndim)))
         pixel_scale = psfs.pixel_scale.mean()
 
