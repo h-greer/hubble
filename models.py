@@ -24,8 +24,10 @@ from detectors import *
 filter_files = {
     'F170M': np.asarray(pd.read_csv("../data/HST_NICMOS1.F170M.dat", sep=' ')),
     'F095N': np.asarray(pd.read_csv("../data/HST_NICMOS1.F095N.dat", sep=' ')),
-    'F145M': np.asarray(pd.read_csv("../data/HST_NICMOS1.F145M.dat", sep=' ')),
-    'F190N': np.asarray(pd.read_csv("../data/HST_NICMOS1.F190N.dat", sep=' '))
+    'F145M': np.asarray(pd.read_csv("../data/HST_NICMOS1.F145M.dat", sep=' '))[::5,:],
+    'F190N': np.asarray(pd.read_csv("../data/HST_NICMOS1.F190N.dat", sep=' ')),
+    'F108N': np.asarray(pd.read_csv("../data/HST_NICMOS1.F108N.dat", sep=' ')),
+    'F187N': np.asarray(pd.read_csv("../data/HST_NICMOS1.F187N.dat", sep=' '))
 }
 
 class Exposure(zdx.Base):
@@ -61,7 +63,7 @@ class Exposure(zdx.Base):
     def key(self):
         return self.filename
 
-def exposure_from_file(fname, crop=None):
+def exposure_from_file(fname, fit, crop=None):
     data = fits.getdata(fname, ext=1)
     err = fits.getdata(fname, ext=2)
     info = fits.getdata(fname, ext=3)
@@ -86,7 +88,7 @@ def exposure_from_file(fname, crop=None):
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
 
-    return Exposure(filename, name, filter, data, err, bad, SinglePointFit())
+    return Exposure(filename, name, filter, data, err, bad, fit)
 
 class ModelFit(zdx.Base):
 
@@ -98,6 +100,14 @@ class ModelFit(zdx.Base):
         match param:
             case "fluxes":
                 return exposure.key
+            case "positions":
+                return exposure.key
+            case "aberrations":
+                return exposure.key
+            case "cold_mask_shift":
+                return exposure.key
+            case "cold_mask_rot":
+                return exposure.key
             #case _:
             #    return exposure.key
             case _: raise ValueError(f"Parameter {param} has no key")
@@ -106,7 +116,7 @@ class ModelFit(zdx.Base):
         """
         currently everything's global so this is just a fallthrough
         """
-        if param == "fluxes":
+        if param in ["fluxes", "positions", "aberrations", "cold_mask_shift", "cold_mask_rot"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
@@ -159,6 +169,42 @@ class SinglePointFit(ModelFit):
         return model.detector.model(psf_obj, return_psf=False)
 
     
+class BinaryFit(ModelFit):
+    source: dl.BinarySource = eqx.field(static=True)
+    def __init__(self):
+        self.source = dl.BinarySource(wavelengths=[1])
+    
+    def get_key(self, exposure, param):
+        if param == "contrast":
+            return exposure.key
+        else:
+            return super().get_key(exposure, param)
+    
+    def map_param(self, exposure, param):
+        if param == "contrast":
+            return f"{param}.{exposure.get_key(param)}"
+        else:
+            return super().map_param(exposure, param)
+    
+    def __call__(self, model, exposure):
+        filter = model.filters[exposure.filter]
+        source = self.source.set("wavelengths", filter[:,0])
+        source = source.set("weights", filter[:,1])
+        source = source.set("mean_flux", model.get(exposure.fit.map_param(exposure, "fluxes")))
+        source = source.set("contrast", model.get(exposure.fit.map_param(exposure, "contrast")))
+        source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions")))
+        source = source.set("separation", model.get(exposure.fit.map_param(exposure, "separation")))
+        source = source.set("position_angle", model.get(exposure.fit.map_param(exposure, "position_angle")))
+        
+        optics = self.update_optics(model, exposure)
+
+        psfs = optics.model(source, return_psf=True)
+        psf = psfs.data.sum(tuple(range(psfs.ndim)))
+        pixel_scale = psfs.pixel_scale.mean()
+
+        psf_obj = dl.PSF(psf, pixel_scale)
+        return model.detector.model(psf_obj, return_psf=False)
+
 
 class BaseModeller(zdx.Base):
     params: dict
