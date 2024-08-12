@@ -10,7 +10,7 @@ import equinox as eqx
 from astropy.io import fits
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
-from astrocut import fits_cut
+#from astrocut import fits_cut
 from astropy.nddata import Cutout2D
 import numpy
 import pandas as pd
