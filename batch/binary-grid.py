@@ -34,15 +34,6 @@ from models import *
 from fisher import *
 from stats import posterior
 
-# the real world
-from astropy.io import fits
-from astropy.coordinates import SkyCoord
-from astropy.wcs import WCS
-from astrocut import fits_cut
-from astropy.nddata import Cutout2D
-
-import pandas as pd
-
 plt.rcParams['image.cmap'] = 'inferno'
 plt.rcParams["font.family"] = "serif"
 plt.rcParams["image.origin"] = 'lower'
