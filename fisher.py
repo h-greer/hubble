@@ -5,7 +5,7 @@ import jax.numpy as np
 from jax import jit, grad, jvp, linearize, lax, vmap
 import jax.tree_util as jtu
 import os
-from tqdm.notebook import tqdm
+from tqdm.auto import tqdm
 from stats import posterior
 
 import dLux as dl

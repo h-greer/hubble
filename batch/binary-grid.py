@@ -19,7 +19,7 @@ import dLux as dl
 import dLux.utils as dlu
 
 # Visualisation imports
-from tqdm import tqdm
+from tqdm.auto import tqdm
 import matplotlib.pyplot as plt
 import matplotlib
 
