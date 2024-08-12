@@ -1,5 +1,5 @@
 import sys
-sys.path.insert(0, '..')
+sys.path.insert(0, '../')
 
 # Basic imports
 import jax.numpy as np
@@ -19,7 +19,7 @@ import dLux as dl
 import dLux.utils as dlu
 
 # Visualisation imports
-from tqdm.auto import tqdm
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib
 
