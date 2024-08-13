@@ -71,7 +71,7 @@ ADD GRID SEARCH HERE-ISH
 
 """
 
-oversample = 8
+oversample = 4
 
 optics = NICMOSOptics(512, wid, oversample)
 
@@ -171,7 +171,7 @@ things_binary = {
     "position_angle": opt(g*1, 20),
     "cold_mask_shift": opt(g*100,130),
     "cold_mask_rot": opt(g*100,100),
-    "aberrations": opt(g*1,50),
+    "aberrations": opt(g*0.2,50),
     "outer_radius": opt(g*50, 100),
     "secondary_radius": opt(g*50,100),
     "spider_width": opt(g*10,100),
@@ -240,21 +240,8 @@ for i in tqdm(range(300)):
 print(losses_s[0], losses_s[-1])
 print(losses_b[0], losses_b[-1])
 
-for g in groups_s:
-    if type(g) == list:
-        for s in g:
-            print(s, point_model.get(s))
-    else:
-        print(g, point_model.get(g))
-
-print()
-
-for g in groups_b:
-    if type(g) == list:
-        for s in g:
-            print(s, binary_model.get(s))
-    else:
-        print(g, binary_model.get(g))
+print(params_s.params)
+print(params_b.params)
 
 fig, axs = plt.subplots(1,2, figsize=(18,8))
 axs[0].plot(losses_s)
