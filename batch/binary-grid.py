@@ -240,6 +240,22 @@ for i in tqdm(range(300)):
 print(losses_s[0], losses_s[-1])
 print(losses_b[0], losses_b[-1])
 
+for g in groups_s:
+    if type(g) == list:
+        for s in g:
+            print(s, point_model.get(s))
+    else:
+        print(g, point_model.get(g))
+
+print()
+
+for g in groups_b:
+    if type(g) == list:
+        for s in g:
+            print(s, binary_model.get(s))
+    else:
+        print(g, binary_model.get(g))
+
 fig, axs = plt.subplots(1,2, figsize=(18,8))
 axs[0].plot(losses_s)
 axs[1].plot(losses_s[-60:])
@@ -247,7 +263,7 @@ axs[0].plot(losses_b)
 axs[1].plot(losses_b[-60:])
 fig.tight_layout()
 
-fig.savefig("out/loss_curves.png")
+fig.savefig(f"out/{number}.loss_curves.png")
 
 fig, axs = plt.subplots(3,3,figsize=(30*0.8,22*0.8))
 
@@ -357,7 +373,7 @@ for i in range(3):
 
 fig.tight_layout()
 
-fig.savefig("out/model_comparison.png")
+fig.savefig(f"out/{number}.model_comparison.png")
 
 
 xw = 3
@@ -384,7 +400,7 @@ for i, param in enumerate(groups_s):
         sp.plot([x.get(param) for x in models_s])
     
 fig.tight_layout()
-fig.savefig("out/single.png")
+fig.savefig(f"out/{number}.single.png")
 
 xw = 4
 yw = int(np.ceil(len(groups_b)/xw))
@@ -410,4 +426,4 @@ for i, param in enumerate(groups_b):
     
 fig.tight_layout()
 
-plt.savefig("out/binary.png")
+plt.savefig(f"out/{number}.binary.png")
