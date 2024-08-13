@@ -1,6 +1,8 @@
 import sys
 sys.path.insert(0, '../')
 
+number = int(sys.argv[1])-1
+
 # Basic imports
 import jax.numpy as np
 import jax.random as jr
@@ -100,11 +102,13 @@ params_b = {
     "spider_width": 0.077*1.2,
 }
 
+actual_offset = [-0.1,-0.05,0,0.05,0.1][number]
+
 for exp in exposures_s:
     params_s["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([0.,0.])
     params_s["fluxes"][exp.fit.get_key(exp, "fluxes")] = np.nansum(exp.data)
     params_s["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(8)
-    params_s["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-0.05,-0.05])
+    params_s["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([actual_offset, actual_offset])
     params_s["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = np.pi/4
 
 for exp in exposures_b:
@@ -112,7 +116,7 @@ for exp in exposures_b:
     params_b["fluxes"][exp.fit.get_key(exp, "fluxes")] = np.nansum(exp.data)/2
     params_b["contrast"][exp.fit.get_key(exp, "contrast")] = 0.3
     params_b["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(8)
-    params_b["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-0.05,-0.05])
+    params_b["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([actual_offset, actual_offset])
     params_b["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = np.pi/4
 
 def set_array(pytree):
@@ -243,7 +247,7 @@ axs[0].plot(losses_b)
 axs[1].plot(losses_b[-60:])
 fig.tight_layout()
 
-fig.savefig("loss_curves.png")
+fig.savefig("out/loss_curves.png")
 
 fig, axs = plt.subplots(3,3,figsize=(30*0.8,22*0.8))
 
@@ -353,7 +357,7 @@ for i in range(3):
 
 fig.tight_layout()
 
-fig.savefig("model_comparison.png")
+fig.savefig("out/model_comparison.png")
 
 
 xw = 3
@@ -380,7 +384,7 @@ for i, param in enumerate(groups_s):
         sp.plot([x.get(param) for x in models_s])
     
 fig.tight_layout()
-fig.save("single.png")
+fig.savefig("out/single.png")
 
 xw = 4
 yw = int(np.ceil(len(groups_b)/xw))
@@ -406,4 +410,4 @@ for i, param in enumerate(groups_b):
     
 fig.tight_layout()
 
-plt.save("binary.png")
+plt.savefig("out/binary.png")
