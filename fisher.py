@@ -61,7 +61,7 @@ def calc_fisher(
         fisher = self_fisher_fn(model, exposure, [param], new_diag=new_diag)
         if save:
             np.save(file_path, fisher)
-    print(fisher)
+    #print(fisher)
     return fisher
 
 

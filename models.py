@@ -63,6 +63,23 @@ class Exposure(zdx.Base):
     def key(self):
         return self.filename
 
+class InjectedExposure(Exposure):
+    def __init__(self, name, filter, fit):
+        self.filter = filter
+        self.filename = f"{name}_{filter}"
+        self.target = name
+        self.fit = fit
+        self.bad = None
+        self.data = None
+        self.err = None
+    
+    def inject(self, model, n_exp):
+        object.__setattr__(self, 'data', self.fit(model,self))
+        object.__setattr__(self, 'bad', np.zeros(self.data.shape))
+        err = (np.sqrt(self.data) + 10)/np.sqrt(n_exp)
+        object.__setattr__(self, 'err', err) 
+
+
 def exposure_from_file(fname, fit, crop=None):
     data = fits.getdata(fname, ext=1)
     err = fits.getdata(fname, ext=2)
@@ -247,8 +264,7 @@ class NICMOSModel(BaseModeller):
             #print(filter)
             spec = filter_files[filter]
             spec = spec.at[:,0].divide(1e10)
-            self.filters[filter] = spec[::5,:]
-    
+            self.filters[filter] = spec[::5,:]    
 
 
 class ModelParams(BaseModeller):
