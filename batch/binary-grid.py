@@ -56,14 +56,14 @@ exposure_108 = exposure_from_file(fname_108, SinglePointFit(), wid)
 exposure_187 = exposure_from_file(fname_187, SinglePointFit(), wid)
 exposure_190 = exposure_from_file(fname_190, SinglePointFit(), wid)
 
-exposures_s = [exposure_095]#, exposure_190]#,exposure_108, exposure_187]
+exposures_s = [exposure_095, exposure_190]#,exposure_108, exposure_187]
 
 exposure_095 = exposure_from_file(fname_095, BinaryFit(), wid)
 exposure_108 = exposure_from_file(fname_108, BinaryFit(), wid)
 exposure_187 = exposure_from_file(fname_187, BinaryFit(), wid)
 exposure_190 = exposure_from_file(fname_190, BinaryFit(), wid)
 
-exposures_b = [exposure_095]#, exposure_190]#, exposure_108, exposure_187]
+exposures_b = [exposure_095, exposure_190]#, exposure_108, exposure_187]
 
 """
 
@@ -102,7 +102,7 @@ params_b = {
     "spider_width": 0.077*1.2,
 }
 
-actual_offset = [-0.1,-0.05,0,0.05,0.1][number]
+actual_offset = np.linspace(-0.2,0.2,20)[number]
 
 for exp in exposures_s:
     params_s["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([0.,0.])
@@ -152,29 +152,29 @@ g = 3e-2
 
 things_single = {
     "fluxes" : opt(g*20,10),
-    "positions": opt(g*1, 0),
-    "cold_mask_shift": opt(g*100, 100),
-    "cold_mask_rot": opt(g*100, 100),
-    "aberrations": opt(g*0.12,50),
-    "outer_radius": opt(g*200, 130),
-    "secondary_radius": opt(g*100,130),
-    "spider_width": opt(g*200,130),
+    "positions": opt(g*10, 0),
+    "cold_mask_shift": opt(g*60, 50),
+    "cold_mask_rot": opt(g*50, 50),
+    "aberrations": opt(g*0.6,30),
+    #"outer_radius": opt(g*200, 130),
+    #"secondary_radius": opt(g*100,130),
+    #"spider_width": opt(g*100,70),
 }
 
 g = 2e-2
 
 things_binary = {
-    "fluxes" : opt(g*10,10),
-    "positions": opt(g*1, 0),
-    "separation": opt(g*5, 20),
-    "contrast": opt(g*8, 20),
-    "position_angle": opt(g*1, 20),
-    "cold_mask_shift": opt(g*100,130),
-    "cold_mask_rot": opt(g*100,100),
-    "aberrations": opt(g*0.2,50),
-    "outer_radius": opt(g*50, 100),
-    "secondary_radius": opt(g*50,100),
-    "spider_width": opt(g*10,100),
+    "fluxes" : opt(g*20,10),
+    "positions": opt(g*10, 0),
+    "separation": opt(g*10, 20),
+    "contrast": opt(g*10, 20),
+    "position_angle": opt(g*3, 20),
+    "cold_mask_shift": opt(g*50,60),
+    "cold_mask_rot": opt(g*50,60),
+    "aberrations": opt(g*1,40),
+    #"outer_radius": opt(g*50, 100),
+    #"secondary_radius": opt(g*50,100),
+    #"spider_width": opt(g*10,100),
 }
 
 groups_s = list(things_single.keys())
