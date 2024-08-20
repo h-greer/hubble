@@ -1,4 +1,5 @@
 import jax.numpy as np
+import jax.random as jr
 from jax import Array
 
 import dLux as dl
@@ -74,9 +75,11 @@ class InjectedExposure(Exposure):
         self.err = None
     
     def inject(self, model, n_exp):
-        object.__setattr__(self, 'data', self.fit(model,self))
+        generated_data = self.fit(model,self)
+        err = (np.sqrt(generated_data) + 10)/np.sqrt(n_exp)
+        data = jr.normal(jr.key(0),generated_data.shape)*err + generated_data
+        object.__setattr__(self, 'data', data)
         object.__setattr__(self, 'bad', np.zeros(self.data.shape))
-        err = (np.sqrt(self.data) + 10)/np.sqrt(n_exp)
         object.__setattr__(self, 'err', err) 
 
 
