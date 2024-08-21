@@ -10,7 +10,7 @@ import jax.scipy as jsp
 import jax
 import numpy
 
-jax.config.update("jax_enable_x64", True)
+#jax.config.update("jax_enable_x64", True)
 
 # Optimisation imports
 import zodiax as zdx
@@ -156,9 +156,9 @@ things_single = {
     "cold_mask_shift": opt(g*60, 50),
     "cold_mask_rot": opt(g*50, 50),
     "aberrations": opt(g*0.6,30),
-    #"outer_radius": opt(g*200, 130),
-    #"secondary_radius": opt(g*100,130),
-    #"spider_width": opt(g*100,70),
+    "outer_radius": opt(g*100, 90),
+    "secondary_radius": opt(g*100,90),
+    "spider_width": opt(g*50,90),
 }
 
 g = 2e-2
@@ -169,14 +169,13 @@ things_binary = {
     "separation": opt(g*10, 20),
     "contrast": opt(g*10, 20),
     "position_angle": opt(g*3, 20),
-    "cold_mask_shift": opt(g*50,60),
-    "cold_mask_rot": opt(g*50,60),
+    "cold_mask_shift": opt(g*80,60),
+    "cold_mask_rot": opt(g*80,60),
     "aberrations": opt(g*1,40),
-    #"outer_radius": opt(g*50, 100),
-    #"secondary_radius": opt(g*50,100),
-    #"spider_width": opt(g*10,100),
+    "outer_radius": opt(g*100, 100),
+    "secondary_radius": opt(g*100,100),
+    "spider_width": opt(g*50,100),
 }
-
 groups_s = list(things_single.keys())
 paths_s = flatten(groups_s)
 optimisers_s = [things_single[i] for i in groups_s]
@@ -212,7 +211,7 @@ optim_s, opt_state_s = zdx.get_optimiser(
 
 
 losses_s, models_s = [], []
-for i in tqdm(range(300)):
+for i in tqdm(range(500)):
     loss, grads = loss_fn_s(params_s,exposures_s)
     grads = jtu.tree_map(lambda x, y: x * np.abs(y), grads, ModelParams(lrs_s.params))
     updates, opt_state_s = optim_s.update(grads, opt_state_s)
@@ -227,7 +226,7 @@ optim_b, opt_state_b = zdx.get_optimiser(
 
 
 losses_b, models_b = [], []
-for i in tqdm(range(300)):
+for i in tqdm(range(500)):
     loss, grads = loss_fn_b(params_b,exposures_b)
     grads = jtu.tree_map(lambda x, y: x * np.abs(y), grads, ModelParams(lrs_b.params))
     updates, opt_state_b = optim_b.update(grads, opt_state_b)
