@@ -56,14 +56,14 @@ exposure_108 = exposure_from_file(fname_108, SinglePointFit(), wid)
 exposure_187 = exposure_from_file(fname_187, SinglePointFit(), wid)
 exposure_190 = exposure_from_file(fname_190, SinglePointFit(), wid)
 
-exposures_s = [exposure_095, exposure_190]#,exposure_108, exposure_187]
+exposures_s = [exposure_095, exposure_190,exposure_108, exposure_187]
 
 exposure_095 = exposure_from_file(fname_095, BinaryFit(), wid)
 exposure_108 = exposure_from_file(fname_108, BinaryFit(), wid)
 exposure_187 = exposure_from_file(fname_187, BinaryFit(), wid)
 exposure_190 = exposure_from_file(fname_190, BinaryFit(), wid)
 
-exposures_b = [exposure_095, exposure_190]#, exposure_108, exposure_187]
+exposures_b = [exposure_095, exposure_190, exposure_108, exposure_187]
 
 """
 
@@ -76,6 +76,9 @@ oversample = 4
 optics = NICMOSOptics(512, wid, oversample)
 
 detector = NICMOSDetector(oversample, wid)
+
+actual_offset = [-0.1,-0.5, 0.5, 0.1,-0.1,-0.5, 0.5, 0.1,-0.1,-0.5, 0.5, 0.1,-0.1,-0.5, 0.5, 0.1,][number]
+actual_angle = [0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3][number]*np.pi/2
 
 params_s = {
     "fluxes": {},
@@ -102,7 +105,6 @@ params_b = {
     "spider_width": 0.077*1.2,
 }
 
-actual_offset = np.linspace(-0.2,0.2,20)[number]
 
 for exp in exposures_s:
     params_s["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([0.,0.])
@@ -259,107 +261,107 @@ binary_model = params_b.inject(binary_model)
 cmap = matplotlib.colormaps['inferno']
 cmap.set_bad('k',1)
 
-ind = 0
+for ind in range(2):
 
-coords = dlu.pixel_coords(512, 2.4)
-cropped_frame = exposures_s[ind].data**0.125
+    coords = dlu.pixel_coords(512, 2.4)
+    cropped_frame = exposures_s[ind].data**0.125
 
-exposure_s = exposures_s[ind]
-exposure_b = exposures_b[ind]
+    exposure_s = exposures_s[ind]
+    exposure_b = exposures_b[ind]
 
-point_frame = exposure_s.fit(point_model, exposure_s)**0.125
-binary_frame = exposure_b.fit(binary_model, exposure_b)**0.125
+    point_frame = exposure_s.fit(point_model, exposure_s)**0.125
+    binary_frame = exposure_b.fit(binary_model, exposure_b)**0.125
 
-single_resid = (exposure_s.data-exposure_s.fit(point_model, exposure_s))/exposure_s.err
-binary_resid = (exposure_b.data-exposure_b.fit(binary_model, exposure_b))/exposure_b.err
+    single_resid = (exposure_s.data-exposure_s.fit(point_model, exposure_s))/exposure_s.err
+    binary_resid = (exposure_b.data-exposure_b.fit(binary_model, exposure_b))/exposure_b.err
 
-vm = max(np.nanmax(cropped_frame),np.nanmax(point_frame), np.nanmax(binary_frame))
+    vm = max(np.nanmax(cropped_frame),np.nanmax(point_frame), np.nanmax(binary_frame))
 
 
-axs[0,0].imshow(cropped_frame,cmap=cmap, vmin=0, vmax=vm)
-axs[0,1].imshow(point_frame,cmap=cmap, vmin=0, vmax=vm)
-rlim = np.nanmax(np.abs(single_resid))
-resid = axs[0,2].imshow(single_resid, vmin=-rlim, vmax=rlim, cmap='seismic')
-plt.colorbar(resid,ax=axs[0,2])
+    axs[0,0].imshow(cropped_frame,cmap=cmap, vmin=0, vmax=vm)
+    axs[0,1].imshow(point_frame,cmap=cmap, vmin=0, vmax=vm)
+    rlim = np.nanmax(np.abs(single_resid))
+    resid = axs[0,2].imshow(single_resid, vmin=-rlim, vmax=rlim, cmap='seismic')
+    plt.colorbar(resid,ax=axs[0,2])
 
-axs[1,0].imshow(cropped_frame,cmap=cmap, vmin=0, vmax=vm)
-axs[1,1].imshow(binary_frame,cmap=cmap, vmin=0, vmax=vm)
+    axs[1,0].imshow(cropped_frame,cmap=cmap, vmin=0, vmax=vm)
+    axs[1,1].imshow(binary_frame,cmap=cmap, vmin=0, vmax=vm)
 
-rlim = np.nanmax(np.abs(binary_resid))
-resid = axs[1,2].imshow(binary_resid, vmin=-rlim, vmax=rlim, cmap='seismic')
-plt.colorbar(resid,ax=axs[1,2])
+    rlim = np.nanmax(np.abs(binary_resid))
+    resid = axs[1,2].imshow(binary_resid, vmin=-rlim, vmax=rlim, cmap='seismic')
+    plt.colorbar(resid,ax=axs[1,2])
 
-#f095n = np.asarray(pd.read_csv("../data/HST_NICMOS1.F095N.dat", sep=' '))
+    #f095n = np.asarray(pd.read_csv("../data/HST_NICMOS1.F095N.dat", sep=' '))
 
-e_filter = binary_model.filters[exposure_b.filter]
+    e_filter = binary_model.filters[exposure_b.filter]
 
-wavels = e_filter[:,0]
-weights = e_filter[:,1]
+    wavels = e_filter[:,0]
+    weights = e_filter[:,1]
 
-positions = dlu.positions_from_sep(
-        binary_model.get(exposure_b.map_param("positions")),
-        binary_model.params["separation"],
-        binary_model.params["position_angle"]
+    positions = dlu.positions_from_sep(
+            binary_model.get(exposure_b.map_param("positions")),
+            binary_model.params["separation"],
+            binary_model.params["position_angle"]
+        )
+
+    binary_primary_source = dl.PointSource(
+        spectrum=dl.Spectrum(wavels,weights),
+        position = positions[1],
+        flux = dlu.fluxes_from_contrast(
+            binary_model.get(exposure_b.map_param("fluxes")),
+            binary_model.get(exposure_b.map_param("contrast")),
+        )[1]
     )
 
-binary_primary_source = dl.PointSource(
-    spectrum=dl.Spectrum(wavels,weights),
-    position = positions[1],
-    flux = dlu.fluxes_from_contrast(
-        binary_model.get(exposure_b.map_param("fluxes")),
-        binary_model.get(exposure_b.map_param("contrast")),
-    )[1]
-)
-
-binary_optics = exp.fit.update_optics(binary_model, exp)
+    binary_optics = exp.fit.update_optics(binary_model, exp)
 
 
-binary_primary_system = dl.Telescope(
-    binary_optics,
-    #binary_model.optics,
-    binary_primary_source,
-    binary_model.detector
-)
+    binary_primary_system = dl.Telescope(
+        binary_optics,
+        #binary_model.optics,
+        binary_primary_source,
+        binary_model.detector
+    )
 
-binary_primary_frame = binary_primary_system.model()**0.125
+    binary_primary_frame = binary_primary_system.model()**0.125
 
-axs[2,0].imshow(cropped_frame,cmap=cmap, vmin=0, vmax=vm)
-axs[2,1].imshow(binary_primary_frame,cmap=cmap, vmin=0, vmax=vm)
+    axs[2,0].imshow(cropped_frame,cmap=cmap, vmin=0, vmax=vm)
+    axs[2,1].imshow(binary_primary_frame,cmap=cmap, vmin=0, vmax=vm)
 
-bp_resid = (exposure_b.data-binary_primary_system.model())/exposure_b.err
-rlim = np.nanmax(np.abs(bp_resid))
-resid = axs[2,2].imshow(bp_resid, vmin=-rlim, vmax=rlim, cmap='seismic')
-plt.colorbar(resid,ax=axs[2,2])
+    bp_resid = (exposure_b.data-binary_primary_system.model())/exposure_b.err
+    rlim = np.nanmax(np.abs(bp_resid))
+    resid = axs[2,2].imshow(bp_resid, vmin=-rlim, vmax=rlim, cmap='seismic')
+    plt.colorbar(resid,ax=axs[2,2])
 
-x, y = dlu.rad2arcsec(positions[0])/0.042 + wid/2
+    x, y = dlu.rad2arcsec(positions[0])/0.042 + wid/2
 
-print(x,y)
+    print(x,y)
 
-axs[2,2].axvline(x, color='k',linestyle='--')
-axs[2,2].axhline(y, color='k',linestyle='--')
+    axs[2,2].axvline(x, color='k',linestyle='--')
+    axs[2,2].axhline(y, color='k',linestyle='--')
 
-axs[0,0].set_title("Exposure")
-axs[1,0].set_title("Exposure (again)")
-axs[2,0].set_title("Exposure (yet again)")
+    axs[0,0].set_title("Exposure")
+    axs[1,0].set_title("Exposure (again)")
+    axs[2,0].set_title("Exposure (yet again)")
 
-axs[0,1].set_title("Single star fit")
-axs[1,1].set_title("Binary star fit")
-axs[2,1].set_title("Binary primary")
+    axs[0,1].set_title("Single star fit")
+    axs[1,1].set_title("Binary star fit")
+    axs[2,1].set_title("Binary primary")
 
-axs[0,2].set_title("Single star Residuals")
-axs[1,2].set_title("Binary star Residuals")
-axs[2,2].set_title("Binary primary Residuals")
+    axs[0,2].set_title("Single star Residuals")
+    axs[1,2].set_title("Binary star Residuals")
+    axs[2,2].set_title("Binary primary Residuals")
 
 
 
-for i in range(3):
-    for j in range(3):
-        axs[i,j].set_xticks([])
-        axs[i,j].set_yticks([])
+    for i in range(3):
+        for j in range(3):
+            axs[i,j].set_xticks([])
+            axs[i,j].set_yticks([])
 
-fig.tight_layout()
+    fig.tight_layout()
 
-fig.savefig(f"out/{number}.model_comparison.png")
+    fig.savefig(f"out/{number}.{ind}.model_comparison.png")
 
 
 xw = 3

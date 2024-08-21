@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name binary_grid
-#SBATCH --array=1-20                    
+#SBATCH --array=1-16                    
 #SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=6G
 #SBATCH --time=1-0:00
