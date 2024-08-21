@@ -253,15 +253,15 @@ fig.tight_layout()
 
 fig.savefig(f"out/{number}.loss_curves.png")
 
-fig, axs = plt.subplots(3,3,figsize=(30*0.8,22*0.8))
+for ind in range(len(exposures_s)):
 
-point_model = params_s.inject(point_model)
-binary_model = params_b.inject(binary_model)
+    fig, axs = plt.subplots(3,3,figsize=(30*0.8,22*0.8))
 
-cmap = matplotlib.colormaps['inferno']
-cmap.set_bad('k',1)
+    point_model = params_s.inject(point_model)
+    binary_model = params_b.inject(binary_model)
 
-for ind in range(2):
+    cmap = matplotlib.colormaps['inferno']
+    cmap.set_bad('k',1)
 
     coords = dlu.pixel_coords(512, 2.4)
     cropped_frame = exposures_s[ind].data**0.125
