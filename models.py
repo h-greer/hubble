@@ -83,7 +83,7 @@ class InjectedExposure(Exposure):
         object.__setattr__(self, 'err', err) 
 
 
-def exposure_from_file(fname, fit, crop=None):
+def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     data = fits.getdata(fname, ext=1)
     err = fits.getdata(fname, ext=2)
     info = fits.getdata(fname, ext=3)
@@ -104,6 +104,8 @@ def exposure_from_file(fname, fit, crop=None):
         info = Cutout2D(info, centre, crop, wcs=w).data
 
     bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32))
+    if extra_bad is not None:
+        bad = bad | extra_bad
 
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
