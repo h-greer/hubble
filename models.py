@@ -78,10 +78,12 @@ class InjectedExposure(Exposure):
         generated_data = self.fit(model,self)
         err = (np.sqrt(generated_data) + 10)/np.sqrt(n_exp)
         data = jr.normal(jr.key(0),generated_data.shape)*err + generated_data
-        object.__setattr__(self, 'data', data)
-        object.__setattr__(self, 'bad', np.zeros(self.data.shape))
-        object.__setattr__(self, 'err', err) 
+        object.__setattr__(self, 'data', np.flip(data))
+        object.__setattr__(self, 'bad', np.flip(np.zeros(self.data.shape)))
+        object.__setattr__(self, 'err', np.flip(err)) 
 
+
+tf = lambda x: x#np.flip(x, axis=0)
 
 def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     data = fits.getdata(fname, ext=1)
@@ -110,7 +112,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
 
-    return Exposure(filename, name, filter, data, err, bad, fit)
+    return Exposure(filename, name, filter, tf(data), tf(err), tf(bad), fit)
 
 class ModelFit(zdx.Base):
 
@@ -167,6 +169,9 @@ class ModelFit(zdx.Base):
         if "spider_width" in model.params.keys():
             radius = model.get(self.map_param(exposure, "spider_width"))
             optics = optics.set("cold_mask.spider.width", radius)
+        if "scale" in model.params.keys():
+            scale = model.get(self.map_param(exposure, "scale"))
+            optics = optics.set("psf_pixel_scale", scale)
         return optics
 
 class SinglePointFit(ModelFit):
