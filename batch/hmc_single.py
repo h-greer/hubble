@@ -190,11 +190,12 @@ def psf_model(data, model):
 
 
 sampler = npy.infer.MCMC(
-    npy.infer.NUTS(psf_model),
+    npy.infer.BarkerMH(psf_model),
     num_warmup=4000,
     num_samples=4000,
-    num_chains=1,
-#    progress_bar=False,
+    #num_chains=2,
+    #chain_method='vectorized'
+    progress_bar=False,
 )
 
 sampler.run(jr.PRNGKey(0),(cropped_data, cropped_err, bad_pix), telescope)
