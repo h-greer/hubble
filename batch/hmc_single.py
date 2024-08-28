@@ -43,10 +43,12 @@ import pandas as pd
 
 import chainconsumer as cc
 
+ddir = "../data/MAST_2024-08-27T07_49_07.684Z/"
+fname = ddir + 'HST/n8ku01ffq_cal.fits'
 
 
-ddir = '../data/MAST_2024-07-11T09_26_05.575Z/'
-fname = ddir + 'HST/N43CA5020/n43ca5020_mos.fits'
+#ddir = '../data/MAST_2024-07-11T09_26_05.575Z/'
+#fname = ddir + 'HST/N43CA5020/n43ca5020_mos.fits'
 
 data = fits.getdata(fname, ext=1)
 err = fits.getdata(fname, ext=2)
@@ -75,17 +77,17 @@ bad_pix = cropped_err==0.0
 
 bad_pix_2 = (info_cropped&256) | (info_cropped&64) | (info_cropped&32)
 
-cropped_err = np.where(bad_pix | bad_pix_2, np.nan,cropped_err)
-cropped_data = np.where(bad_pix | bad_pix_2 , np.nan, cropped_data)
+cropped_err = np.where(bad_pix | bad_pix_2, 1e10,cropped_err)
+cropped_data = np.where(bad_pix | bad_pix_2 , 0, cropped_data)
 
 #f170m = np.asarray(pd.read_csv("../data/HST_NICMOS1.F170M.dat", sep=' '))
-f095n = np.asarray(pd.read_csv("../data/HST_NICMOS1.F095N.dat", sep=' '))
-#f145m = np.asarray(pd.read_csv("../data/HST_NICMOS1.F145M.dat", sep=' '))
+#f095n = np.asarray(pd.read_csv("../data/HST_NICMOS1.F095N.dat", sep=' '))
+f145m = np.asarray(pd.read_csv("../data/HST_NICMOS1.F145M.dat", sep=' '))
 
 
 
-wavels = f095n[::5,0]/1e10
-weights = f095n[::5,1]
+wavels = f145m[::20,0]/1e10
+weights = f145m[::20,1]
 
 
 source = dl.PointSource(
@@ -106,20 +108,20 @@ source = dl.PointSource(
     #contrast = 0.3,
 )"""
 
-oversample = 3
+oversample = 4
 
 optics = dl.AngularOpticalSystem(
     512,
     2.4,
     [
         dl.CompoundAperture([
-            ("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=0.1)),
-            ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4), softening=0.1))
+            ("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=0.5)),
+            ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4), softening=0.5))
         ],normalise=True),
         dl.AberratedAperture(
             dl.layers.CircularAperture(1.2),
             noll_inds=np.asarray([4,5,6,7,8,9,10,11]),#,12,13,14,15,16,17,18,19,20]),
-            #coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
+            coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
         )
     ],
     wid,
@@ -129,9 +131,9 @@ optics = dl.AngularOpticalSystem(
 
 detector = dl.LayeredDetector(
     [
-        ("detector_response", ApplyNonlinearity(coefficients=np.zeros(1), order = 3)),
-        ("constant", dl.layers.AddConstant(value=0.0)),
-        ("pixel_response",dl.layers.ApplyPixelResponse(np.ones((wid*oversample,wid*oversample)))),
+        #("detector_response", ApplyNonlinearity(coefficients=np.zeros(1), order = 3)),
+        #("constant", dl.layers.AddConstant(value=0.0)),
+        #("pixel_response",dl.layers.ApplyPixelResponse(np.ones((wid*oversample,wid*oversample)))),
         #("jitter", dl.layers.ApplyJitter(sigma=0.1)),
         ("downsample", dl.layers.Downsample(oversample))
      ]
@@ -146,33 +148,45 @@ telescope = dl.Telescope(
 
 
 def psf_model(data, model):
+
+    f = npy.sample("log flux", dist.Uniform(5,5.5))
+
+    x = npy.sample("X", dist.Uniform(-1,1))
+    y = npy.sample("Y", dist.Uniform(-1,1))
+
     samplers = {
-        "flux": npy.sample("Flux", dist.Uniform(2000,6000)),
+        "flux": 10**f,
         "position": np.asarray([
-            npy.sample("X", dist.Uniform(-1e-6,1e-6)),
-            npy.sample("Y", dist.Uniform(-1e-6,1e-6))
+            x*1e-7,
+            y*1e-7,
         ]),
         #"separation": npy.sample("Separation", dist.Uniform(0,1e-6)),
         #"contrast": npy.sample("Contrast", dist.Uniform(0,20)),
         #"position_angle": npy.sample("Position Angle", dist.Uniform(0,np.pi)),
-        #"cold_mask.transformation.translation": np.asarray([
-        #    npy.sample("Cold X", dist.Uniform(-1,1)),
-        #    npy.sample("Cold Y", dist.Uniform(-1,1))
-        #]),
-        #"cold_mask.transformation.rotation": npy.sample("Cold Rotation", dist.Uniform(-np.pi, np.pi)),
+        "cold_mask.transformation.translation": np.asarray([
+            npy.sample("Cold X", dist.Uniform(-0.2,0.2)),
+            npy.sample("Cold Y", dist.Uniform(-0.2,0.2))
+        ]),
+        "cold_mask.transformation.rotation": npy.sample("Cold Rotation", dist.Uniform(0, np.pi/2)),
         #"AberratedAperture.coefficients":
         #"constant.value": npy.sample("Detector Offset", dist.Uniform(-1,1))
     }
 
-    for key in samplers:
-        model = model.set(key, samplers[key])
+    model = model.set(list(samplers.keys()),list(samplers.values()))
 
-    img, err = data
+    #for key in samplers:
+    #    model = model.set(key, samplers[key])
 
+    model_data = model.model().flatten()
 
-    image = dist.Normal(img.flatten(), err.flatten())
+    img, err, bad = data
 
-    return npy.sample("psf", image, obs=model.model().flatten())
+    #img = np.where(bad, 0, img)
+    #err = np.where(bad, 1e10, err)
+
+    with npy.plate("data", size=len(img.flatten())):
+        image = dist.Normal(img.flatten(), err.flatten())
+        return npy.sample("psf", image, obs=model_data)
 
 
 sampler = npy.infer.MCMC(
@@ -180,15 +194,16 @@ sampler = npy.infer.MCMC(
     num_warmup=4000,
     num_samples=4000,
     num_chains=1,
-    progress_bar=True,
+#    progress_bar=False,
 )
 
-sampler.run(jr.PRNGKey(0),(cropped_data, cropped_err), telescope)
+sampler.run(jr.PRNGKey(0),(cropped_data, cropped_err, bad_pix), telescope)
 
 sampler.print_summary()
 
-chain = cc.Chain.from_numpyro(sampler, "test", color="teal")
+chain = cc.Chain.from_numpyro(sampler, "numpyro chain", color="teal")
 consumer = cc.ChainConsumer().add_chain(chain)
-plot = consumer.plotter.plot()
-plt.savefig("chains.png")
+
+fig = consumer.plotter.plot()
+fig.savefig("chains.png")
 plt.close()
