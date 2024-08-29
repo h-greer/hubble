@@ -126,7 +126,7 @@ def psf_model(data, model):
         return npy.sample("psf", image, obs=model_data)
 
 
-nlive = (4000 + 4000)//4
+nlive = (1000)//4
 
 ns = NestedSampler(psf_model,
                    constructor_kwargs={"num_live_points" : nlive, "max_samples": nlive*4},
