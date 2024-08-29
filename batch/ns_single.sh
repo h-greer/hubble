@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name ns
 #SBATCH --cpus-per-task=8
-#SBATCH --mem-per-cpu=4G
+#SBATCH --mem-per-cpu=8G
 #SBATCH --time=1-0:00
 #SBATCH -o slurm.%N.%j.out  # STDOUT
 #SBATCH -e slurm.%N.%j.err  # STDERR
