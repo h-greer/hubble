@@ -126,7 +126,7 @@ def psf_model(data, model):
 
 
 sampler = npy.infer.MCMC(
-    npy.infer.BarkerMH(psf_model),
+    npy.infer.SA(psf_model),
     num_warmup=1000,
     num_samples=1000,
     #num_chains=6,

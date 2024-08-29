@@ -78,9 +78,9 @@ class InjectedExposure(Exposure):
         generated_data = self.fit(model,self)
         err = (np.sqrt(generated_data) + 10)/np.sqrt(n_exp)
         data = jr.normal(jr.key(0),generated_data.shape)*err + generated_data
-        object.__setattr__(self, 'data', np.flip(data))
-        object.__setattr__(self, 'bad', np.flip(np.zeros(self.data.shape)))
-        object.__setattr__(self, 'err', np.flip(err)) 
+        object.__setattr__(self, 'data', data)#np.flip(data))
+        object.__setattr__(self, 'bad', np.zeros(self.data.shape))#np.flip(np.zeros(self.data.shape)))
+        object.__setattr__(self, 'err',err)#np.flip(err)) 
 
 
 tf = lambda x: x#np.flip(x, axis=0)
