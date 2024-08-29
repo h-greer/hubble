@@ -3,8 +3,8 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=8G
 #SBATCH --time=1-0:00
-#SBATCH -o slurm.%N.%j.out  # STDOUT
-#SBATCH -e slurm.%N.%j.err  # STDERR
+#SBATCH -o ns.%j.out  # STDOUT
+#SBATCH -e ns.%j.err  # STDERR
 
 module load anaconda3/5.2.0
 source /opt/modules/Anaconda3/5.2.0/etc/profile.d/conda.sh
