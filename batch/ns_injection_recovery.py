@@ -18,6 +18,7 @@ import numpy
 
 import numpyro as npy
 import numpyro.distributions as dist
+from numpyro.contrib.nested_sampling import NestedSampler
 
 # Optimisation imports
 import zodiax as zdx
@@ -125,22 +126,22 @@ def psf_model(data, model):
         return npy.sample("psf", image, obs=model_data)
 
 
-sampler = npy.infer.MCMC(
-    npy.infer.NUTS(psf_model),
-    num_warmup=500,
-    num_samples=500,
-    #num_chains=6,
-    #chain_method='vectorized'
-    #progress_bar=False,
-)
+nlive = (4000 + 4000)//4
 
-sampler.run(jr.PRNGKey(10),exposures[0], model)
+ns = NestedSampler(psf_model,
+                   constructor_kwargs={"num_live_points" : nlive, "max_samples": nlive*4},
+                   termination_kwargs={'live_evidence_frac': 0.01})
 
-sampler.print_summary()
+ns.run(jr.PRNGKey(100),exposures[0], model)
 
-chain = cc.Chain.from_numpyro(sampler, "numpyro chain", color="teal")
+ns.print_summary()
+
+
+samples = ns.get_samples(jr.PRNGKey(1), num_samples=nlive)
+
+chain = cc.Chain.from_numpyro(samples, "numpyro chain", color="teal")
 consumer = cc.ChainConsumer().add_chain(chain)
 
 fig = consumer.plotter.plot()
-fig.savefig("chains_hmc.png")
-plt.close()
+fig.savefig("ns_test.png")
+plt.show()
