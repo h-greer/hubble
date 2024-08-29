@@ -93,7 +93,7 @@ weights = f145m[::20,1]
 source = dl.PointSource(
     #wavelengths=wavels,
     spectrum=dl.Spectrum(wavels, weights),
-    flux = 5000,
+    flux = 180369.28,
     #position = np.asarray([-5e-7,5e-7])
 )
 
@@ -149,25 +149,25 @@ telescope = dl.Telescope(
 
 def psf_model(data, model):
 
-    f = npy.sample("log flux", dist.Uniform(5,5.5))
+    f = npy.sample("flux", dist.Uniform(1e5,1e6))
 
-    x = npy.sample("X", dist.Uniform(-1,1))
-    y = npy.sample("Y", dist.Uniform(-1,1))
+    x = npy.sample("X", dist.Uniform(-5,5))
+    y = npy.sample("Y", dist.Uniform(-5,5))
 
     samplers = {
-        "flux": 10**f,
+        "flux": f,
         "position": np.asarray([
-            x*1e-7,
-            y*1e-7,
+            x*dlu.arcsec2rad(0.042),
+            y*dlu.arcsec2rad(0.042),
         ]),
         #"separation": npy.sample("Separation", dist.Uniform(0,1e-6)),
         #"contrast": npy.sample("Contrast", dist.Uniform(0,20)),
         #"position_angle": npy.sample("Position Angle", dist.Uniform(0,np.pi)),
         "cold_mask.transformation.translation": np.asarray([
-            npy.sample("Cold X", dist.Uniform(-0.2,0.2)),
-            npy.sample("Cold Y", dist.Uniform(-0.2,0.2))
+            npy.sample("Cold X", dist.Uniform(0,0.15)),
+            npy.sample("Cold Y", dist.Uniform(0,0.15))
         ]),
-        "cold_mask.transformation.rotation": npy.sample("Cold Rotation", dist.Uniform(0, np.pi/2)),
+        #"cold_mask.transformation.rotation": npy.sample("Cold Rotation", dist.Uniform(0, np.pi/2)),
         #"AberratedAperture.coefficients":
         #"constant.value": npy.sample("Detector Offset", dist.Uniform(-1,1))
     }
@@ -190,15 +190,15 @@ def psf_model(data, model):
 
 
 sampler = npy.infer.MCMC(
-    npy.infer.BarkerMH(psf_model),
-    num_warmup=4000,
-    num_samples=4000,
-    #num_chains=2,
+    npy.infer.SA(psf_model),
+    num_warmup=8000,
+    num_samples=8000,
+    #num_chains=6,
     #chain_method='vectorized'
-    progress_bar=False,
+    #progress_bar=False,
 )
 
-sampler.run(jr.PRNGKey(0),(cropped_data, cropped_err, bad_pix), telescope)
+sampler.run(jr.PRNGKey(100),(cropped_data, cropped_err, bad_pix), telescope)
 
 sampler.print_summary()
 
@@ -206,5 +206,5 @@ chain = cc.Chain.from_numpyro(sampler, "numpyro chain", color="teal")
 consumer = cc.ChainConsumer().add_chain(chain)
 
 fig = consumer.plotter.plot()
-fig.savefig("chains.png")
+fig.savefig("chains_hmc.png")
 plt.close()
