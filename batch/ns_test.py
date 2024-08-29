@@ -190,13 +190,16 @@ def psf_model(data, model):
         return npy.sample("psf", image, obs=model_data)
 
 
-ns = NestedSampler(psf_model)
+nlive = (4000 + 4000)//4
+
+ns = NestedSampler(psf_model,constructor_kwargs={"num_live_points" : nlive, "max_samples": nlive*4})
 
 ns.run(jr.PRNGKey(100),(cropped_data, cropped_err, bad_pix), telescope)
 
 ns.print_summary()
 
-samples = ns.get_samples(jr.PRNGKey(1), num_samples=2000)
+
+samples = ns.get_samples(jr.PRNGKey(1), num_samples=nlive)
 
 chain = cc.Chain.from_numpyro(samples, "numpyro chain", color="teal")
 consumer = cc.ChainConsumer().add_chain(chain)
