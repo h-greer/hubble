@@ -96,7 +96,7 @@ def psf_model(data, model):
 
     for exp in exposures:
         params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Uniform(-2, 2))*pixel_scale,npy.sample("Y", dist.Uniform(-2,2))*pixel_scale])
-        params["fluxes"][exp.fit.get_key(exp, "fluxes")] = 5e8#npy.sample("flux", dist.Uniform(4, 6))*1e8
+        params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("flux", dist.Uniform(4, 6))*1e8
         params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19)
         params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-0.05,-0.05])
         params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = np.pi/4
@@ -127,8 +127,8 @@ def psf_model(data, model):
 
 sampler = npy.infer.MCMC(
     npy.infer.NUTS(psf_model),
-    num_warmup=500,
-    num_samples=500,
+    num_warmup=1000,
+    num_samples=1000,
     #num_chains=6,
     #chain_method='vectorized'
     #progress_bar=False,
