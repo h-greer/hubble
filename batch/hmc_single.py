@@ -7,7 +7,13 @@ sys.path.insert(0, '../')
 import jax.numpy as np
 import jax.random as jr
 import jax.scipy as jsp
+import jax
+
+jax.config.update("jax_enable_x64", True)
+
 import numpy
+
+
 
 import numpyro as npy
 import numpyro.distributions as dist
@@ -191,14 +197,14 @@ def psf_model(data, model):
 
 sampler = npy.infer.MCMC(
     npy.infer.SA(psf_model),
-    num_warmup=8000,
-    num_samples=8000,
+    num_warmup=4000,
+    num_samples=4000,
     #num_chains=6,
     #chain_method='vectorized'
     #progress_bar=False,
 )
 
-sampler.run(jr.PRNGKey(100),(cropped_data, cropped_err, bad_pix), telescope)
+sampler.run(jr.PRNGKey(10),(cropped_data, cropped_err, bad_pix), telescope)
 
 sampler.print_summary()
 
