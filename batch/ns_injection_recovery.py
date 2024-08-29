@@ -129,7 +129,7 @@ def psf_model(data, model):
 nlive = (1000)//4
 
 ns = NestedSampler(psf_model,
-                   constructor_kwargs={"num_live_points" : nlive, "max_samples": nlive*4},
+                   constructor_kwargs={"num_live_points" : nlive, "max_samples": nlive*10},
                    termination_kwargs={'live_evidence_frac': 0.01})
 
 ns.run(jr.PRNGKey(100),exposures[0], model)
@@ -139,7 +139,10 @@ ns.print_summary()
 
 samples = ns.get_samples(jr.PRNGKey(1), num_samples=nlive)
 
-chain = cc.Chain.from_numpyro(samples, "numpyro chain", color="teal")
+import pandas as pd
+chain = cc.Chain(pd.DataFrame.from_dict(samples))
+
+#chain = cc.Chain.#from_numpyro(samples, "numpyro chain", color="teal")
 consumer = cc.ChainConsumer().add_chain(chain)
 
 fig = consumer.plotter.plot()
