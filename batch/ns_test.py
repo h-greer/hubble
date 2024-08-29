@@ -196,7 +196,7 @@ ns.run(jr.PRNGKey(100),(cropped_data, cropped_err, bad_pix), telescope)
 
 ns.print_summary()
 
-samples = ns.get_samples(jr.PRNGKey(1), num_samples=500)
+samples = ns.get_samples(jr.PRNGKey(1), num_samples=2000)
 
 chain = cc.Chain.from_numpyro(samples, "numpyro chain", color="teal")
 consumer = cc.ChainConsumer().add_chain(chain)
