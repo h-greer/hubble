@@ -98,7 +98,7 @@ def psf_model(data, model):
         params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([-3e-7,1e-7])#np.asarray([npy.sample("X", dist.Uniform(-2, 2))*pixel_scale,npy.sample("Y", dist.Uniform(-2,2))*pixel_scale])
         params["fluxes"][exp.fit.get_key(exp, "fluxes")] = np.asarray(5e8)#npy.sample("flux", dist.Uniform(4, 6))*1e8
         params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19)
-        params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Uniform(-0.1, -0.04)),npy.sample("Cold Y", dist.Uniform(-0.1, -0.04))])
+        params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-npy.sample("Cold X", dist.HalfNormal(0.1)),-npy.sample("Cold Y", dist.HalfNormal(0.1))])
         params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = np.pi/4
 
 
@@ -142,5 +142,5 @@ chain = cc.Chain.from_numpyro(sampler, "numpyro chain", color="teal")
 consumer = cc.ChainConsumer().add_chain(chain)
 
 fig = consumer.plotter.plot()
-fig.savefig("chains_hmc.png")
+fig.savefig("chains_hmc_weak_priors.png")
 plt.close()
