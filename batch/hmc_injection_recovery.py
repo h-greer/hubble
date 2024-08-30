@@ -64,7 +64,7 @@ injected_params = {
     "positions": {f"injected_{flt}": np.asarray([-3e-7,1e-7])},
     "aberrations": {f"injected_{flt}":np.zeros(19)},#np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9},
     "cold_mask_shift": {f"injected_{flt}":np.asarray([-0.05, -0.05])},
-    "cold_mask_rot": {f"injected_{flt}":np.asarray([np.pi/4+dlu.deg2rad(0.8)])},
+    "cold_mask_rot": {f"injected_{flt}":np.asarray([np.pi/4])},#np.asarray([np.pi/4+dlu.deg2rad(0.8)])},
     "outer_radius": 1.2*0.955,
     "secondary_radius": 0.372*1.2,
     "spider_width": 0.077*1.2,
@@ -95,8 +95,8 @@ def psf_model(data, model):
     }
 
     for exp in exposures:
-        params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Uniform(-2, 2))*pixel_scale,npy.sample("Y", dist.Uniform(-2,2))*pixel_scale])
-        params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("flux", dist.Uniform(4, 6))*1e8
+        params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([-3e-7,1e-7])#np.asarray([npy.sample("X", dist.Uniform(-2, 2))*pixel_scale,npy.sample("Y", dist.Uniform(-2,2))*pixel_scale])
+        params["fluxes"][exp.fit.get_key(exp, "fluxes")] = np.asarray(5e8)#npy.sample("flux", dist.Uniform(4, 6))*1e8
         params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19)
         params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Uniform(-0.1, 0.0)),npy.sample("Cold Y", dist.Uniform(-0.1, 0.0))])
         params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = np.pi/4
