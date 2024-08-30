@@ -95,8 +95,8 @@ def psf_model(data, model):
     }
 
     for exp in exposures:
-        params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([-3e-7,1e-7])#np.asarray([npy.sample("X", dist.Uniform(-2, 2))*pixel_scale,npy.sample("Y", dist.Uniform(-2,2))*pixel_scale])
-        params["fluxes"][exp.fit.get_key(exp, "fluxes")] = np.asarray(5e8)#npy.sample("flux", dist.Uniform(4, 6))*1e8
+        params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Uniform(-2, 2))*pixel_scale,npy.sample("Y", dist.Uniform(-2,2))*pixel_scale])
+        params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Uniform(4, 6))*1e8
         params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19)
         params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-npy.sample("Cold X", dist.HalfNormal(0.1)),-npy.sample("Cold Y", dist.HalfNormal(0.1))])
         params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = np.pi/4
@@ -127,8 +127,8 @@ def psf_model(data, model):
 
 sampler = npy.infer.MCMC(
     npy.infer.NUTS(psf_model, dense_mass=True),
-    num_warmup=1000,
-    num_samples=1000,
+    num_warmup=2000,
+    num_samples=2000,
     #num_chains=6,
     #chain_method='vectorized'
     #progress_bar=False,
@@ -140,6 +140,7 @@ sampler.print_summary()
 
 chain = cc.Chain.from_numpyro(sampler, "numpyro chain", color="teal")
 consumer = cc.ChainConsumer().add_chain(chain)
+consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5e8,"Cold X":0.08, "Cold Y":0.08}))
 
 fig = consumer.plotter.plot()
 fig.savefig("chains_hmc_weak_priors.png")
