@@ -98,7 +98,7 @@ def psf_model(data, model):
         params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Uniform(-2, 2))*pixel_scale,npy.sample("Y", dist.Uniform(-2,2))*pixel_scale])
         params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("flux", dist.Uniform(4, 6))*1e8
         params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19)
-        params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-0.05,-0.05])
+        params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Uniform(-0.5, 0.5)),npy.sample("Cold Y", dist.Uniform(-0.5, 0.5))])
         params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = np.pi/4
 
 
