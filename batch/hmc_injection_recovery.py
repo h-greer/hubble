@@ -10,7 +10,7 @@ import jax.scipy as jsp
 import jax
 import jax.tree_util as jtu
 
-jax.config.update("jax_enable_x64", True)
+#jax.config.update("jax_enable_x64", True)
 
 import numpy
 
