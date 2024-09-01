@@ -97,9 +97,9 @@ def psf_model(data, model):
     for exp in exposures:
         params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Normal(0, 1))*pixel_scale,npy.sample("Y", dist.Normal(0,1))*pixel_scale])
         params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Uniform(4, 6))*1e5
-        params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19)#.at[0].set(npy.sample("Defocus", dist.Normal(0, 1e-8)))
+        params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19).at[0].set(npy.sample("Defocus", dist.Normal(0, 1e-8)))
         params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-npy.sample("Cold X", dist.HalfNormal(0.1)),-npy.sample("Cold Y", dist.HalfNormal(0.1))])
-        params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = npy.sample("Cold Rot", dist.Normal(np.pi/4, np.deg2rad(0.3)))
+        params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = np.pi/4#npy.sample("Cold Rot", dist.Normal(np.pi/4, np.deg2rad(0.3)))
 
 
     params = ModelParams(params)
