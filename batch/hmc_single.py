@@ -8,6 +8,7 @@ import jax.numpy as np
 import jax.random as jr
 import jax.scipy as jsp
 import jax
+import jax.tree_util as jtu
 
 jax.config.update("jax_enable_x64", True)
 
@@ -38,179 +39,119 @@ plt.rcParams['figure.dpi'] = 72
 
 from detectors import *
 from apertures import *
-
-# the real world
-from astropy.io import fits
-from astropy.coordinates import SkyCoord
-from astropy.wcs import WCS
-from astropy.nddata import Cutout2D
-
-import pandas as pd
+from models import *
 
 import chainconsumer as cc
+
+
+def set_array(pytree):
+    dtype = np.float64 if jax.config.x64_enabled else np.float32
+    floats, other = eqx.partition(pytree, eqx.is_inexact_array_like)
+    floats = jtu.tree_map(lambda x: np.array(x, dtype=dtype), floats)
+    return eqx.combine(floats, other)
+
+wid = 64
+oversample = 4
+
+optics = NICMOSOptics(512, wid, oversample)
+
+detector = NICMOSDetector(oversample, wid)
+
+flt = "F145M"
 
 ddir = "../data/MAST_2024-08-27T07_49_07.684Z/"
 fname = ddir + 'HST/n8ku01ffq_cal.fits'
 
 
-#ddir = '../data/MAST_2024-07-11T09_26_05.575Z/'
-#fname = ddir + 'HST/N43CA5020/n43ca5020_mos.fits'
+exposure = exposure_from_file(fname,SinglePointFit(),crop=wid)
+exposures = [exposure]
 
-data = fits.getdata(fname, ext=1)
-err = fits.getdata(fname, ext=2)
-info = fits.getdata(fname, ext=3)
+plt.imshow(exposure.data)
+plt.show()
 
-image_hdr = fits.getheader(fname, ext=1) # this is the header for just the image in particular
+params = {
+    "fluxes": {},
+    "positions": {},
+    "aberrations": {},#np.zeros(8),#np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9,
+    "cold_mask_shift": {}, #np.asarray([-0.05, -0.05]),
+    "cold_mask_rot": {},#np.asarray([np.pi/4]),
+    "outer_radius": 1.2*0.955,
+    "secondary_radius": 0.372*1.2,
+    "spider_width": 0.077*1.2,
+    "scale": 0.0431
+}
 
-# rather than manipulate WCS coordinates ourselves, can use https://docs.astropy.org/en/stable/wcs/
-w = WCS(image_hdr)
+for exp in exposures:
+    params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([0.,0.])
+    params["fluxes"][exp.fit.get_key(exp, "fluxes")] = np.nansum(exp.data)
+    params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19)
+    params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-0.12,-0.12])
+    params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = np.pi/4
 
-y,x = numpy.unravel_index(numpy.argmax(data),data.shape)
-centre = SkyCoord(w.pixel_to_world(x,y), unit='deg') # astropy wants to keep track of units
-
-wid = 64
-
-
-cropped = Cutout2D(data, centre, wid, wcs=w).data
-err_cropped = Cutout2D(err, centre, wid, wcs=w).data
-info_cropped = Cutout2D(info, centre, wid, wcs=w).data
-
-cropped_data = np.asarray(cropped, dtype=float)#+0.1#.clip(min=0)
-cropped_err = np.asarray(err_cropped, dtype=float)
-
-bad_pix = cropped_err==0.0
-
-
-bad_pix_2 = (info_cropped&256) | (info_cropped&64) | (info_cropped&32)
-
-cropped_err = np.where(bad_pix | bad_pix_2, 1e10,cropped_err)
-cropped_data = np.where(bad_pix | bad_pix_2 , 0, cropped_data)
-
-#f170m = np.asarray(pd.read_csv("../data/HST_NICMOS1.F170M.dat", sep=' '))
-#f095n = np.asarray(pd.read_csv("../data/HST_NICMOS1.F095N.dat", sep=' '))
-f145m = np.asarray(pd.read_csv("../data/HST_NICMOS1.F145M.dat", sep=' '))
+model = set_array(NICMOSModel(exposures, params, optics, detector))
 
 
+pixel_scale = dlu.arcsec2rad(0.0432)
 
-wavels = f145m[::20,0]/1e10
-weights = f145m[::20,1]
-
-
-source = dl.PointSource(
-    #wavelengths=wavels,
-    spectrum=dl.Spectrum(wavels, weights),
-    flux = 180369.28,
-    #position = np.asarray([-5e-7,5e-7])
-)
-
-"""source = dl.BinarySource(
-    #position = np.asarray([-5e-7,5e-7]),
-    wavelengths=wavels,
-    weights=weights,
-    spectrum=dl.Spectrum(wavels, weights),
-    mean_flux=5000,
-    separation=dlu.arcsec2rad(0.042),
-    #position_angle=7*np.pi/4,
-    #contrast = 0.3,
-)"""
-
-oversample = 4
-
-optics = dl.AngularOpticalSystem(
-    512,
-    2.4,
-    [
-        dl.CompoundAperture([
-            ("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=0.5)),
-            ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4), softening=0.5))
-        ],normalise=True),
-        dl.AberratedAperture(
-            dl.layers.CircularAperture(1.2),
-            noll_inds=np.asarray([4,5,6,7,8,9,10,11]),#,12,13,14,15,16,17,18,19,20]),
-            coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
-        )
-    ],
-    wid,
-    0.0432,
-    oversample
-)
-
-detector = dl.LayeredDetector(
-    [
-        #("detector_response", ApplyNonlinearity(coefficients=np.zeros(1), order = 3)),
-        #("constant", dl.layers.AddConstant(value=0.0)),
-        #("pixel_response",dl.layers.ApplyPixelResponse(np.ones((wid*oversample,wid*oversample)))),
-        #("jitter", dl.layers.ApplyJitter(sigma=0.1)),
-        ("downsample", dl.layers.Downsample(oversample))
-     ]
-)
-
-
-telescope = dl.Telescope(
-    optics,
-    source,
-    detector
-)
-
+print("yes")
 
 def psf_model(data, model):
 
-    f = npy.sample("flux", dist.Uniform(1e5,1e6))
-
-    x = npy.sample("X", dist.Uniform(-5,5))
-    y = npy.sample("Y", dist.Uniform(-5,5))
-
-    samplers = {
-        "flux": f,
-        "position": np.asarray([
-            x*dlu.arcsec2rad(0.042),
-            y*dlu.arcsec2rad(0.042),
-        ]),
-        #"separation": npy.sample("Separation", dist.Uniform(0,1e-6)),
-        #"contrast": npy.sample("Contrast", dist.Uniform(0,20)),
-        #"position_angle": npy.sample("Position Angle", dist.Uniform(0,np.pi)),
-        "cold_mask.transformation.translation": np.asarray([
-            npy.sample("Cold X", dist.Uniform(0,0.15)),
-            npy.sample("Cold Y", dist.Uniform(0,0.15))
-        ]),
-        #"cold_mask.transformation.rotation": npy.sample("Cold Rotation", dist.Uniform(0, np.pi/2)),
-        #"AberratedAperture.coefficients":
-        #"constant.value": npy.sample("Detector Offset", dist.Uniform(-1,1))
+    params = {
+        "fluxes": {},
+        "positions": {},
+        "aberrations": {},
+        "cold_mask_shift": {}, 
+        "cold_mask_rot": {},
+        "outer_radius": 1.2*0.955,
+        "secondary_radius": 0.372*1.2,
+        "spider_width": 0.077*1.2,
     }
 
-    model = model.set(list(samplers.keys()),list(samplers.values()))
+    for exp in exposures:
+        params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Normal(0, 1))*pixel_scale,npy.sample("Y", dist.Normal(0,1))*pixel_scale])
+        params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Uniform(0, 3))*1e5
+        params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19).at[0].set(npy.sample("Defocus", dist.Normal(0, 10))*1e-9)
+        params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-npy.sample("Cold X", dist.HalfNormal(0.1)),-npy.sample("Cold Y", dist.HalfNormal(0.1))])
+        params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = npy.sample("Cold Rot", dist.Normal(np.pi/4, np.deg2rad(0.3)))
 
-    #for key in samplers:
-    #    model = model.set(key, samplers[key])
 
-    model_data = model.model().flatten()
+    params = ModelParams(params)
 
-    img, err, bad = data
+    mdl = params.inject(model)
 
-    #img = np.where(bad, 0, img)
-    #err = np.where(bad, 1e10, err)
+    model_data = data.fit(mdl, data).flatten()
 
-    with npy.plate("data", size=len(img.flatten())):
-        image = dist.Normal(img.flatten(), err.flatten())
-        return npy.sample("psf", image, obs=model_data)
+
+    img, err, bad = data.data.flatten(), data.err.flatten(), data.bad.flatten()
+
+    image = np.where(bad, 0, img)
+    error = np.where(bad, 1, err)
+
+
+    with npy.plate("data", size=len(image)):
+        image_d = dist.Normal(image, error)
+        return npy.sample("psf", image_d, obs=model_data)
+
 
 
 sampler = npy.infer.MCMC(
-    npy.infer.SA(psf_model),
-    num_warmup=4000,
-    num_samples=4000,
+    npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_mean, dense_mass=False),
+    num_warmup=100,
+    num_samples=100,
     #num_chains=6,
     #chain_method='vectorized'
-    #progress_bar=False,
+    progress_bar=True,
 )
 
-sampler.run(jr.PRNGKey(10),(cropped_data, cropped_err, bad_pix), telescope)
+sampler.run(jr.PRNGKey(1),exposures[0], model)
 
 sampler.print_summary()
 
-chain = cc.Chain.from_numpyro(sampler, "numpyro chain", color="teal")
+chain = cc.Chain.from_numpyro(sampler, name="numpyro chain", color="teal")
 consumer = cc.ChainConsumer().add_chain(chain)
+#consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
 fig = consumer.plotter.plot()
-fig.savefig("chains_hmc.png")
+fig.savefig("chains_hmc_data.png")
 plt.close()
