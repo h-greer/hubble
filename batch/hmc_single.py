@@ -137,8 +137,8 @@ def psf_model(data, model):
 
 sampler = npy.infer.MCMC(
     npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_mean, dense_mass=False),
-    num_warmup=100,
-    num_samples=100,
+    num_warmup=500,
+    num_samples=500,
     #num_chains=6,
     #chain_method='vectorized'
     progress_bar=True,
