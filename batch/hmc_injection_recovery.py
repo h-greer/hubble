@@ -99,7 +99,7 @@ def psf_model(data, model):
         params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Uniform(4, 6))*1e9
         params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19).at[0].set(npy.sample("Defocus", dist.Uniform(-10, 10))*1e-9)
         params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-npy.sample("Cold X", dist.HalfNormal(0.08)),-npy.sample("Cold Y", dist.HalfNormal(0.08))])
-        params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = npy.sample("Cold Rot", dist.Normal(np.pi/4, np.deg2rad(0.3)))
+        params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = np.pi/4#npy.sample("Cold Rot", dist.Normal(np.pi/4, np.deg2rad(0.3)))
 
 
     params = ModelParams(params)
@@ -129,8 +129,8 @@ def psf_model(data, model):
 sampler = npy.infer.MCMC(
     npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_value(site=None,values={"Cold X":0.05,"Cold Y":0.05, "X":0.0, "Y": 0.0, "Flux":np.nansum(exposures[0].data)/1e9, "Cold Rot": np.pi/4}), dense_mass=False),
     #npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_mean),
-    num_warmup=1000,
-    num_samples=1000,
+    num_warmup=100,
+    num_samples=100,
     #num_chains=6,
     #chain_method='vectorized'
     #progress_bar=False,
