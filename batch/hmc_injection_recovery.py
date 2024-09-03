@@ -145,5 +145,5 @@ consumer = cc.ChainConsumer().add_chain(chain)
 consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
 fig = consumer.plotter.plot()
-fig.savefig("chains_hmc.png")
+fig.savefig("chains_hmc_no_rot.png")
 plt.close()
