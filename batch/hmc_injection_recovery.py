@@ -129,8 +129,8 @@ def psf_model(data, model):
 sampler = npy.infer.MCMC(
     npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_value(site=None,values={"Cold X":0.05,"Cold Y":0.05, "X":0.0, "Y": 0.0, "Flux":np.nansum(exposures[0].data)/1e9, "Cold Rot": np.pi/4}), dense_mass=False),
     #npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_mean),
-    num_warmup=100,
-    num_samples=100,
+    num_warmup=500,
+    num_samples=500,
     #num_chains=6,
     #chain_method='vectorized'
     #progress_bar=False,
