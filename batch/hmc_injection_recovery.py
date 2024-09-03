@@ -97,8 +97,8 @@ def psf_model(data, model):
     for exp in exposures:
         params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Normal(0, 1))*pixel_scale,npy.sample("Y", dist.Normal(0,1))*pixel_scale])
         params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Uniform(4, 6))*1e9
-        params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19).at[0].set(npy.sample("Defocus", dist.Normal(0, 5))*1e-9)
-        params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-npy.sample("Cold X", dist.HalfNormal(0.1)),-npy.sample("Cold Y", dist.HalfNormal(0.1))])
+        params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19).at[0].set(npy.sample("Defocus", dist.Uniform(-10, 10))*1e-9)
+        params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-npy.sample("Cold X", dist.HalfNormal(0.08)),-npy.sample("Cold Y", dist.HalfNormal(0.08))])
         params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = npy.sample("Cold Rot", dist.Normal(np.pi/4, np.deg2rad(0.3)))
 
 
@@ -127,9 +127,9 @@ def psf_model(data, model):
 
 
 sampler = npy.infer.MCMC(
-    npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_mean, dense_mass=False),
-    num_warmup=1000,
-    num_samples=1000,
+    npy.infer.SA(psf_model, init_strategy=npy.infer.init_to_mean, dense_mass=False),
+    num_warmup=4000,
+    num_samples=4000,
     #num_chains=6,
     #chain_method='vectorized'
     #progress_bar=False,
@@ -144,5 +144,5 @@ consumer = cc.ChainConsumer().add_chain(chain)
 consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
 fig = consumer.plotter.plot()
-fig.savefig("chains_hmc_more.png")
+fig.savefig("chains_sa.png")
 plt.close()
