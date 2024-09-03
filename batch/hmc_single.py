@@ -66,8 +66,8 @@ fname = ddir + 'HST/n8ku01ffq_cal.fits'
 exposure = exposure_from_file(fname,SinglePointFit(),crop=wid)
 exposures = [exposure]
 
-plt.imshow(exposure.data)
-plt.show()
+#plt.imshow(exposure.data)
+#plt.show()
 
 params = {
     "fluxes": {},
