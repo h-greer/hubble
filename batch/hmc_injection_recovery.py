@@ -127,9 +127,10 @@ def psf_model(data, model):
 
 
 sampler = npy.infer.MCMC(
-    npy.infer.SA(psf_model, init_strategy=npy.infer.init_to_mean, dense_mass=False),
-    num_warmup=4000,
-    num_samples=4000,
+    npy.infer.BarkerMH(psf_model, init_strategy=npy.infer.init_to_value(site=None,values={"Cold X":0.08,"Cold Y":0.08}), dense_mass=False),
+    #npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_mean),
+    num_warmup=1000,
+    num_samples=1000,
     #num_chains=6,
     #chain_method='vectorized'
     #progress_bar=False,
@@ -144,5 +145,5 @@ consumer = cc.ChainConsumer().add_chain(chain)
 consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
 fig = consumer.plotter.plot()
-fig.savefig("chains_sa.png")
+fig.savefig("chains_bmh.png")
 plt.close()
