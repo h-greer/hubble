@@ -62,7 +62,7 @@ flt = "F145M"
 injected_params = {
     "fluxes": {f"injected_{flt}": np.asarray(5e9)},
     "positions": {f"injected_{flt}": np.asarray([-3e-7,1e-7])},
-    "aberrations": {f"injected_{flt}":np.zeros(19).at[0].set(5e-9)},#np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9},
+    "aberrations": {f"injected_{flt}":np.zeros(19).at[0].set(5e-8)},#np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9},
     "cold_mask_shift": {f"injected_{flt}":np.asarray([-0.08, -0.08])},
     "cold_mask_rot": {f"injected_{flt}":np.asarray([np.pi/4])},#np.asarray([np.pi/4+dlu.deg2rad(0.8)])},
     "outer_radius": 1.2*0.955,
@@ -97,7 +97,7 @@ def psf_model(data, model):
     for exp in exposures:
         params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Normal(0, 1))*pixel_scale,npy.sample("Y", dist.Normal(0,1))*pixel_scale])
         params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Uniform(4, 6))*1e9
-        params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19).at[0].set(npy.sample("Defocus", dist.Uniform(-10, 10))*1e-9)
+        params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19).at[0].set(npy.sample("Defocus", dist.Uniform(-100, 100))*1e-9)
         params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-npy.sample("Cold X", dist.HalfNormal(0.08)),-npy.sample("Cold Y", dist.HalfNormal(0.08))])
         params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = np.pi/4#npy.sample("Cold Rot", dist.Normal(np.pi/4, np.deg2rad(0.3)))
 
@@ -106,21 +106,12 @@ def psf_model(data, model):
 
     mdl = params.inject(model)
 
-    model_data = data.fit(mdl, data).flatten()
-
-    #model = model.set(list(samplers.keys()),list(samplers.values()))
-
-    #for key in samplers:
-    #    model = model.set(key, samplers[key])
-
-    #model_data = model.model().flatten()
+    
 
     img, err, bad = data.data.flatten(), data.err.flatten(), data.bad.flatten()
 
-    #img = np.where(bad, 0, img)
-    #err = np.where(bad, 1e10, err)
-
     with npy.plate("data", size=len(img.flatten())):
+        model_data = data.fit(mdl, data).flatten()
         image = dist.Normal(img.flatten(), err.flatten())
         return npy.sample("psf", image, obs=model_data)
 
@@ -142,7 +133,7 @@ sampler.print_summary()
 
 chain = cc.Chain.from_numpyro(sampler, name="numpyro chain", color="teal")
 consumer = cc.ChainConsumer().add_chain(chain)
-consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
+consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":50, "Cold Rot":np.pi/4}))
 
 fig = consumer.plotter.plot()
 fig.savefig("chains_hmc_no_rot.png")
