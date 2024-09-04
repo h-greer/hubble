@@ -144,8 +144,8 @@ class NICMOSOptics(dl.AngularOpticalSystem):
             2.4,
             [
                 dl.CompoundAperture([
-                    ("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=0.5)),
-                    ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4), softening=0.5)),
+                    ("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=2)),
+                    ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4), softening=2)),
                     #("bar",dl.Spider(width=2.4,angles=[90],))
                 ],normalise=True),
                 dl.AberratedAperture(

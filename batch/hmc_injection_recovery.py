@@ -75,7 +75,7 @@ exposures = [injected_exposure]
 
 model = set_array(NICMOSModel(exposures, injected_params, optics, detector))
 for e in exposures:
-    e.inject(model, 1)
+    e.inject(model, 100)
 
 
 pixel_scale = dlu.arcsec2rad(0.0432)
@@ -127,7 +127,7 @@ def psf_model(data, model):
 
 
 sampler = npy.infer.MCMC(
-    npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_value(site=None,values={"Cold X":0.05,"Cold Y":0.05, "X":0.0, "Y": 0.0, "Flux":np.nansum(exposures[0].data)/1e9, "Cold Rot": np.pi/4}), dense_mass=False),
+    npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_value(site=None,values={"Cold X":0.05,"Cold Y":0.05, "X":0.0, "Y": 0.0, "Flux":np.nansum(exposures[0].data)/1e9, "Cold Rot": np.pi/4}), dense_mass=True),
     #npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_mean),
     num_warmup=500,
     num_samples=500,
