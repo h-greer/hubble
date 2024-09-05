@@ -119,7 +119,7 @@ def psf_model(data, model):
 
 sampler = npy.infer.MCMC(
     #npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_value(site=None,values={"Cold X":-0.08,"Cold Y":-0.08, "X":0.0, "Y": 0.0, "Flux":np.nansum(exposures[0].data)/1e9, "Cold Rot": np.pi/4}), dense_mass=False),
-    npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_mean),
+    npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_mean, dense_mass=True),
     num_warmup=500,
     num_samples=500,
     #num_chains=6,
@@ -133,8 +133,8 @@ sampler.print_summary()
 
 chain = cc.Chain.from_numpyro(sampler, name="numpyro chain", color="teal")
 consumer = cc.ChainConsumer().add_chain(chain)
-consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
+consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":-0.08, "Cold Y":-0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
 fig = consumer.plotter.plot()
-fig.savefig("chains_hmc_no_rot_uniform.png")
+fig.savefig("chains_hmc_no_rot_uniform_dense.png")
 plt.close()
