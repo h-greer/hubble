@@ -83,36 +83,36 @@ class NICMOSColdMask(dl.CompoundAperture):
                 softening = self.softening
             ),
 
-            "pad_1" : dl.RectangularAperture(
-                width = 0.1650*1.2,
-                height = 0.1410*1.2,
-                occulting = True,
-                transformation=dl.CoordTransform(
-                    translation = (0.9021*1.2, 0),
-                    rotation=np.deg2rad(0)
-                ),
-                softening = self.softening
-            ),
-            "pad_2" : dl.RectangularAperture(
-                width = 0.1650*1.2,
-                height = 0.1410*1.2,
-                occulting = True,
-                transformation=dl.CoordTransform(
-                    translation = (-0.4615*1.2, 0.7655*1.2),
-                    rotation=np.deg2rad(-121.15)
-                ),
-                softening = self.softening
-            ),
-            "pad_3" : dl.RectangularAperture(
-                width = 0.1650*1.2,
-                height = 0.1410*1.2,
-                occulting = True,
-                transformation=dl.CoordTransform(
-                    translation = (-0.4564*1.2, -0.7706*1.2),
-                    rotation=np.deg2rad(121.52)
-                ),
-                softening = self.softening
-            )
+            # "pad_1" : dl.RectangularAperture(
+            #     width = 0.1650*1.2,
+            #     height = 0.1410*1.2,
+            #     occulting = True,
+            #     transformation=dl.CoordTransform(
+            #         translation = (0.9021*1.2, 0),
+            #         rotation=np.deg2rad(0)
+            #     ),
+            #     softening = self.softening
+            # ),
+            # "pad_2" : dl.RectangularAperture(
+            #     width = 0.1650*1.2,
+            #     height = 0.1410*1.2,
+            #     occulting = True,
+            #     transformation=dl.CoordTransform(
+            #         translation = (-0.4615*1.2, 0.7655*1.2),
+            #         rotation=np.deg2rad(-121.15)
+            #     ),
+            #     softening = self.softening
+            # ),
+            # "pad_3" : dl.RectangularAperture(
+            #     width = 0.1650*1.2,
+            #     height = 0.1410*1.2,
+            #     occulting = True,
+            #     transformation=dl.CoordTransform(
+            #         translation = (-0.4564*1.2, -0.7706*1.2),
+            #         rotation=np.deg2rad(121.52)
+            #     ),
+            #     softening = self.softening
+            # )
         }
 
 """
