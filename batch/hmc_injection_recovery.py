@@ -95,11 +95,11 @@ def psf_model(data, model):
     }
 
     for exp in exposures:
-        params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Uniform(-2, 2))*pixel_scale,npy.sample("Y", dist.Uniform(-2,2))*pixel_scale])
-        params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Uniform(4, 6))*1e9
+        params["positions"]=injected_params["positions"]#[exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Normal(0, 0.8))*pixel_scale,npy.sample("Y", dist.Normal(0,0.8))*pixel_scale])
+        params["fluxes"]=injected_params["fluxes"]#[exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Uniform(4, 6))*1e9
         params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(19).at[0].set(npy.sample("Defocus", dist.Uniform(-10, 10))*1e-9)
-        params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Uniform(-0.1,0.)),npy.sample("Cold Y", dist.Uniform(-0.1, 0.0))])
-        params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = np.pi/4#npy.sample("Cold Rot", dist.Normal(np.pi/4, np.deg2rad(0.3)))
+        params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Uniform(-10, -6))*1e-2,npy.sample("Cold Y", dist.Uniform(-10, -6))*1e-2])
+        params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = np.pi/4# npy.sample("Cold Rot", dist.Normal(np.pi/4, np.deg2rad(0.3)))
 
 
     params = ModelParams(params)
@@ -118,10 +118,10 @@ def psf_model(data, model):
 
 
 sampler = npy.infer.MCMC(
-    #npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_value(site=None,values={"Cold X":-0.08,"Cold Y":-0.08, "X":0.0, "Y": 0.0, "Flux":np.nansum(exposures[0].data)/1e9, "Cold Rot": np.pi/4}), dense_mass=False),
-    npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_mean, dense_mass=True),
-    num_warmup=500,
-    num_samples=500,
+    #npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_value(site=None,values={"Cold X":-8,"Cold Y":-8, "X":0.0, "Y": 0.0, "Flux":np.nansum(exposures[0].data)/1e9, "Cold Rot": np.pi/4}), dense_mass=False),
+    npy.infer.BarkerMH(psf_model, init_strategy=npy.infer.init_to_sample, dense_mass=False),
+    num_warmup=2000,
+    num_samples=2000,
     #num_chains=6,
     #chain_method='vectorized'
     #progress_bar=False,
@@ -136,5 +136,5 @@ consumer = cc.ChainConsumer().add_chain(chain)
 consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":-0.08, "Cold Y":-0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
 fig = consumer.plotter.plot()
-fig.savefig("chains_hmc_no_rot_uniform_dense.png")
+fig.savefig("chains_hmc_new.png")
 plt.close()
