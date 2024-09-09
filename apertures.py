@@ -23,7 +23,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 #normalise=True
             ),
             "spider" : dl.Spider(
-                width = 0.025,#0.038*1.2,
+                width = 0.022*1.2,#0.038*1.2,
                 angles = np.asarray([0, 90, 180, 270]),
                 softening=self.softening,
             ),
@@ -145,9 +145,9 @@ class NICMOSOptics(dl.AngularOpticalSystem):
             [
                 dl.CompoundAperture([
                     ("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=2)),
-                    ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4), softening=2)),
+                    ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=2)),
                     #("bar",dl.Spider(width=2.4,angles=[90],))
-                ],normalise=True),
+                ],normalise=True, transformation=dl.CoordTransform(rotation=0)),
                 dl.AberratedAperture(
                     dl.layers.CircularAperture(1.2),
                     noll_inds=np.asarray([4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22]),

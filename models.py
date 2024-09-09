@@ -83,7 +83,7 @@ class InjectedExposure(Exposure):
         object.__setattr__(self, 'err',err)#np.flip(err)) 
 
 
-tf = lambda x: x#np.flip(x, axis=0)
+tf = lambda x: x#np.rot90(x,k=3)#np.flip(x)#, axis=0)
 
 def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     data = fits.getdata(fname, ext=1)
@@ -132,6 +132,8 @@ class ModelFit(zdx.Base):
                 return exposure.key
             case "cold_mask_rot":
                 return exposure.key
+            case "cold_mask_scale":
+                return exposure.key
             #case _:
             #    return exposure.key
             case _: raise ValueError(f"Parameter {param} has no key")
@@ -140,22 +142,26 @@ class ModelFit(zdx.Base):
         """
         currently everything's global so this is just a fallthrough
         """
-        if param in ["fluxes", "positions", "aberrations", "cold_mask_shift", "cold_mask_rot"]:
+        if param in ["fluxes", "positions", "aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
     def update_optics(self, model, exposure):
         optics = model.optics
         if "aberrations" in model.params.keys():
-            coefficients = model.get(self.map_param(exposure, "aberrations"))
+            coefficients = model.get(self.map_param(exposure, "aberrations"))*1e-9
             optics = optics.set("AberratedAperture.coefficients", coefficients)
         
         if "cold_mask_shift" in model.params.keys():
-            translation = model.get(self.map_param(exposure, "cold_mask_shift"))
+            translation = model.get(self.map_param(exposure, "cold_mask_shift"))*1e-2
             optics = optics.set("cold_mask.transformation.translation", translation)
 
+        if "cold_mask_scale" in model.params.keys():
+            compression = model.get(self.map_param(exposure, "cold_mask_scale"))
+            optics = optics.set("cold_mask.transformation.compression", compression)
+
         if "cold_mask_rot" in model.params.keys():
-            rotation = model.get(self.map_param(exposure, "cold_mask_rot"))
+            rotation = dlu.deg2rad(model.get(self.map_param(exposure, "cold_mask_rot")))
             optics = optics.set("cold_mask.transformation.rotation", rotation)
         
         if "outer_radius" in model.params.keys():
@@ -169,6 +175,9 @@ class ModelFit(zdx.Base):
         if "spider_width" in model.params.keys():
             radius = model.get(self.map_param(exposure, "spider_width"))
             optics = optics.set("cold_mask.spider.width", radius)
+        if "rot" in model.params.keys():
+            rot = dlu.deg2rad(model.get(self.map_param(exposure, "rot")))
+            optics = optics.set("CompoundAperture.transformation.rotation", rot)
         if "scale" in model.params.keys():
             scale = model.get(self.map_param(exposure, "scale"))
             optics = optics.set("psf_pixel_scale", scale)
@@ -181,8 +190,8 @@ class SinglePointFit(ModelFit):
     def __call__(self, model, exposure):
         filter = model.filters[exposure.filter]
         source = self.source.set("spectrum", dl.Spectrum(filter[:,0], filter[:,1]))
-        source = source.set("flux", model.get(exposure.fit.map_param(exposure, "fluxes")))
-        source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions")))
+        source = source.set("flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
+        source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
         #print(source.flux, source.spectrum)
 
         #source = self.source
@@ -217,7 +226,7 @@ class BinaryFit(ModelFit):
         filter = model.filters[exposure.filter]
         source = self.source.set("wavelengths", filter[:,0])
         source = source.set("weights", filter[:,1])
-        source = source.set("mean_flux", model.get(exposure.fit.map_param(exposure, "fluxes")))
+        source = source.set("mean_flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
         source = source.set("contrast", model.get(exposure.fit.map_param(exposure, "contrast")))
         source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions")))
         source = source.set("separation", model.get(exposure.fit.map_param(exposure, "separation")))
