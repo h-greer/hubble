@@ -21,14 +21,32 @@ from abc import abstractmethod
 from apertures import *
 from detectors import *
 
+def get_filter(file):
+    flt = np.asarray(pd.read_csv(file, sep=' '))#[::20,:]
+
+    wv = flt[:,0]
+    bp = flt[:,1]
+
+    ebp = bp/(wv/1e4)
+
+    nebp = ebp/np.sum(ebp)*(np.max(wv)-np.min(wv))*0.01
+    final = flt.at[:,1].set(nebp)
+    return final
+
 
 filter_files = {
-    'F170M': np.asarray(pd.read_csv("../data/HST_NICMOS1.F170M.dat", sep=' ')),
-    'F095N': np.asarray(pd.read_csv("../data/HST_NICMOS1.F095N.dat", sep=' ')),
-    'F145M': np.asarray(pd.read_csv("../data/HST_NICMOS1.F145M.dat", sep=' '))[::5,:],
-    'F190N': np.asarray(pd.read_csv("../data/HST_NICMOS1.F190N.dat", sep=' ')),
-    'F108N': np.asarray(pd.read_csv("../data/HST_NICMOS1.F108N.dat", sep=' ')),
-    'F187N': np.asarray(pd.read_csv("../data/HST_NICMOS1.F187N.dat", sep=' '))
+    'F170M': get_filter("../data/HST_NICMOS1.F170M.dat"),
+    'F095N': get_filter("../data/HST_NICMOS1.F095N.dat"),
+    'F145M': get_filter("../data/HST_NICMOS1.F145M.dat")[::5,:],
+    'F190N': get_filter("../data/HST_NICMOS1.F190N.dat"),
+    'F108N': get_filter("../data/HST_NICMOS1.F108N.dat"),
+    'F187N': get_filter("../data/HST_NICMOS1.F187N.dat"),
+    'F090M': get_filter("../data/HST_NICMOS1.F090M.dat")[::5,:],
+    #'F110W': np.asarray(pd.read_csv("../data/HST_NICMOS1.F110W.dat", sep=' '))[::20,:],
+    'F110W': get_filter("../data/HST_NICMOS1.F110W.dat")[::20,:],
+    'F160W': get_filter("../data/HST_NICMOS1.F160W.dat")[::20,:],
+    'POL0S': get_filter("../data/HST_NICMOS1.POL0S.dat")[::20,:],
+    'POL240S': get_filter("../data/HST_NICMOS1.POL240S.dat")[::20,:],
 }
 
 class Exposure(zdx.Base):
@@ -90,6 +108,11 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     err = fits.getdata(fname, ext=2)
     info = fits.getdata(fname, ext=3)
 
+    bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32))
+    err = np.where(bad, np.nan, np.asarray(err, dtype=float))
+    data = np.where(bad, np.nan, np.asarray(data, dtype=float))
+
+
     hdr = fits.getheader(fname, ext=0)
     image_hdr = fits.getheader(fname, ext=1)
 
@@ -99,15 +122,15 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
     if crop:
         w = WCS(image_hdr)
-        y,x = numpy.unravel_index(numpy.argmax(data),data.shape)
+        y,x = numpy.unravel_index(numpy.nanargmax(data),data.shape)
         centre = SkyCoord(w.pixel_to_world(x,y), unit='deg') # astropy wants to keep track of units
         data = Cutout2D(data, centre, crop, wcs=w).data
         err = Cutout2D(err, centre, crop, wcs=w).data
         info = Cutout2D(info, centre, crop, wcs=w).data
 
     bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32))
-    if extra_bad is not None:
-        bad = bad | extra_bad
+    #if extra_bad is not None:
+    #    bad = bad | extra_bad
 
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
@@ -123,17 +146,29 @@ class ModelFit(zdx.Base):
     def get_key(self, exposure, param):
         match param:
             case "fluxes":
-                return exposure.key
+                return exposure.filter
             case "positions":
                 return exposure.key
             case "aberrations":
                 return exposure.key
+            case "breathing":
+                return exposure.key
             case "cold_mask_shift":
-                return exposure.key
+                return exposure.filter
             case "cold_mask_rot":
-                return exposure.key
+                return exposure.filter
             case "cold_mask_scale":
-                return exposure.key
+                return exposure.filter
+            case "cold_mask_shear":
+                return exposure.filter
+            case "primary_rot":
+                return exposure.filter
+            case "primary_scale":
+                return exposure.filter
+            case "primary_shear":
+                return exposure.filter
+            case "slope":
+                return exposure.filter
             #case _:
             #    return exposure.key
             case _: raise ValueError(f"Parameter {param} has no key")
@@ -142,7 +177,7 @@ class ModelFit(zdx.Base):
         """
         currently everything's global so this is just a fallthrough
         """
-        if param in ["fluxes", "positions", "aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale"]:
+        if param in ["fluxes", "positions", "aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "breathing", "slope"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
@@ -163,6 +198,10 @@ class ModelFit(zdx.Base):
         if "cold_mask_rot" in model.params.keys():
             rotation = dlu.deg2rad(model.get(self.map_param(exposure, "cold_mask_rot")))
             optics = optics.set("cold_mask.transformation.rotation", rotation)
+
+        if "cold_mask_shear" in model.params.keys():
+            rotation = dlu.deg2rad(model.get(self.map_param(exposure, "cold_mask_shear")))
+            optics = optics.set("cold_mask.transformation.shear", rotation)
         
         if "outer_radius" in model.params.keys():
             radius = model.get(self.map_param(exposure, "outer_radius"))
@@ -175,12 +214,33 @@ class ModelFit(zdx.Base):
         if "spider_width" in model.params.keys():
             radius = model.get(self.map_param(exposure, "spider_width"))
             optics = optics.set("cold_mask.spider.width", radius)
+
+        if "primary_scale" in model.params.keys():
+            compression = model.get(self.map_param(exposure, "primary_scale"))
+            optics = optics.set("main_aperture.transformation.compression", compression)
+            optics = optics.set("AberratedAperture.aperture.transformation.compression", compression)
+
+        if "primary_rot" in model.params.keys():
+            rotation = dlu.deg2rad(model.get(self.map_param(exposure, "primary_rot")))
+            optics = optics.set("main_aperture.transformation.rotation", rotation)
+            optics = optics.set("AberratedAperture.aperture.transformation.rotation", rotation)
+
+        if "primary_shear" in model.params.keys():
+            rotation = dlu.deg2rad(model.get(self.map_param(exposure, "primary_shear")))
+            optics = optics.set("main_aperture.transformation.shear", rotation)
+            optics = optics.set("AberratedAperture.aperture.transformation.shear", rotation)
+        
         if "rot" in model.params.keys():
             rot = dlu.deg2rad(model.get(self.map_param(exposure, "rot")))
             optics = optics.set("CompoundAperture.transformation.rotation", rot)
         if "scale" in model.params.keys():
             scale = model.get(self.map_param(exposure, "scale"))
             optics = optics.set("psf_pixel_scale", scale)
+        if "softening" in model.params.keys():
+            softening = model.get(self.map_param(exposure, "softening"))
+            optics = optics.set("main_aperture.softening", softening)
+            optics = optics.set("cold_mask.softening", softening)
+            optics = optics.set("AberratedAperture.aperture.softness", softening)
         return optics
 
 class SinglePointFit(ModelFit):
@@ -189,7 +249,21 @@ class SinglePointFit(ModelFit):
         self.source = dl.PointSource(wavelengths=[1])
     def __call__(self, model, exposure):
         filter = model.filters[exposure.filter]
-        source = self.source.set("spectrum", dl.Spectrum(filter[:,0], filter[:,1]))
+        slope = model.get(exposure.fit.map_param(exposure, "slope"))
+
+        wv = filter[:,0]
+        inten = filter[:,1]
+        swv = wv/1e-9
+
+        sloped = inten * (1 + slope[0]*1e-3*swv + slope[1]*1e-6*swv**2 
+                          + slope[2]*1e-9*swv**3 + slope[3]*1e-12*swv**4 + slope[4]*1e-15*swv**5)
+
+        #sloped = inten * (1 + slope[0] + slope[1]*1e-3*swv + slope[2]*1e-6*swv**2 
+        #                  + slope[3]*1e-9*swv**3 + slope[4]*1e-12*swv**4 + slope[5]*1e-15*swv**5)
+
+        sloped = sloped/np.sum(sloped)
+
+        source = self.source.set("spectrum", dl.Spectrum(wv, sloped))
         source = source.set("flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
         source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
         #print(source.flux, source.spectrum)
@@ -204,6 +278,46 @@ class SinglePointFit(ModelFit):
         psf_obj = dl.PSF(psf, pixel_scale)
         return model.detector.model(psf_obj, return_psf=False)
 
+class BreathingSinglePointFit(ModelFit):
+    source: dl.Telescope = eqx.field(static=True)
+    ns: int = eqx.field(static=True)
+    def __init__(self):
+        self.source = dl.PointSource(wavelengths=[1])
+        self.ns = 6
+    def __call__(self, model, exposure):
+        filter = model.filters[exposure.filter]
+        slope = model.get(exposure.fit.map_param(exposure, "slope"))
+
+        wv = filter[:,0]
+        inten = filter[:,1]
+        swv = wv/1e-9
+
+        sloped = inten * (1 + slope[0]*1e-3*swv + slope[1]*1e-6*swv**2 
+                          + slope[2]*1e-9*swv**3 + slope[3]*1e-12*swv**4 + slope[4]*1e-15*swv**5)# + slope[2]*swv**2 + slope[3]*swv**3)
+
+        sloped = sloped/np.sum(sloped)
+
+        source = self.source.set("spectrum", dl.Spectrum(wv, sloped))
+        source = source.set("flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
+        source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
+
+        breathing = model.get(exposure.fit.map_param(exposure, "breathing"))#*1e-9
+        aberrations = model.get(exposure.fit.map_param(exposure, "aberrations"))
+
+        psf = 0.0
+
+        for i in range(self.ns):
+            ab = aberrations - breathing/2 + i * (breathing)/(self.ns-1)
+            model = model.set(exposure.fit.map_param(exposure, "aberrations"), ab)
+            #print(model.params)
+            optics = self.update_optics(model, exposure)
+            psfs = optics.model(source, return_psf=True)
+            psf = psf + psfs.data.sum(tuple(range(psfs.ndim)))/self.ns
+        
+        pixel_scale = psfs.pixel_scale.mean()
+
+        psf_obj = dl.PSF(psf, pixel_scale)
+        return model.detector.model(psf_obj, return_psf=False)
     
 class BinaryFit(ModelFit):
     source: dl.BinarySource = eqx.field(static=True)
@@ -212,7 +326,7 @@ class BinaryFit(ModelFit):
     
     def get_key(self, exposure, param):
         if param == "contrast":
-            return exposure.key
+            return exposure.filter
         else:
             return super().get_key(exposure, param)
     
@@ -228,9 +342,9 @@ class BinaryFit(ModelFit):
         source = source.set("weights", filter[:,1])
         source = source.set("mean_flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
         source = source.set("contrast", model.get(exposure.fit.map_param(exposure, "contrast")))
-        source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions")))
-        source = source.set("separation", model.get(exposure.fit.map_param(exposure, "separation")))
-        source = source.set("position_angle", model.get(exposure.fit.map_param(exposure, "position_angle")))
+        source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
+        source = source.set("separation", model.get(exposure.fit.map_param(exposure, "separation"))*dlu.arcsec2rad(0.0432))
+        source = source.set("position_angle", dlu.deg2rad(model.get(exposure.fit.map_param(exposure, "position_angle"))))
         
         optics = self.update_optics(model, exposure)
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name hmc_ir
-#SBATCH --cpus-per-task=8
-#SBATCH --mem-per-cpu=2G
+#SBATCH --cpus-per-task=12
+#SBATCH --mem-per-cpu=4G
 #SBATCH --time=1-0:00
 #SBATCH -o ir.%j.out  # STDOUT
 #SBATCH -e ir.%j.err  # STDERR

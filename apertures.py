@@ -149,9 +149,9 @@ class NICMOSOptics(dl.AngularOpticalSystem):
                     #("bar",dl.Spider(width=2.4,angles=[90],))
                 ],normalise=True, transformation=dl.CoordTransform(rotation=0)),
                 dl.AberratedAperture(
-                    dl.layers.CircularAperture(1.2),
-                    noll_inds=np.asarray([4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22]),
-                    coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
+                    dl.layers.CircularAperture(1.2, transformation=dl.CoordTransform()),
+                    noll_inds=np.arange(4,30),#,12,13,14,15,16,17,18,19,20,21,22]),
+                    coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9,#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
                 )
             ],
             psf_npixels,
