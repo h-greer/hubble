@@ -174,7 +174,7 @@ things = {
     "primary_rot": opt(g*100, 150),
     "primary_shear": opt(g*100, 150),
     "aberrations": opt(g*1,120),
-    #"slope": opt(g*20, 50),
+    "slope": opt(g*20, 50),
     #"softening": opt(g*1e3, 200),
     #"breathing": opt(g*1000,150),
     #"rot": opt(g*100, 50),
