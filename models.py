@@ -35,7 +35,7 @@ def get_filter(file):
 
 
 filter_files = {
-    'F170M': get_filter("../data/HST_NICMOS1.F170M.dat"),
+    'F170M': get_filter("../data/HST_NICMOS1.F170M.dat")[::5,:],
     'F095N': get_filter("../data/HST_NICMOS1.F095N.dat"),
     'F145M': get_filter("../data/HST_NICMOS1.F145M.dat")[::5,:],
     'F190N': get_filter("../data/HST_NICMOS1.F190N.dat"),
@@ -53,13 +53,14 @@ class Exposure(zdx.Base):
     filename: str = eqx.field(static=True)
     target: str = eqx.field(static=True)
     filter: str = eqx.field(static=True)
+    mjd: str = eqx.field(static=True)
     data: Array
     err: Array
     bad: Array
 
     fit: object = eqx.field(static=True)
 
-    def __init__(self, filename, name, filter, data, err, bad, fit):
+    def __init__(self, filename, name, filter, data, err, bad, fit, mjd):
         """
         Initialise exposure
         """
@@ -69,6 +70,8 @@ class Exposure(zdx.Base):
         self.data = data
         self.err = err
         self.bad = bad
+
+        self.mjd = mjd
 
         self.fit = fit
     
@@ -120,6 +123,8 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     name = hdr['TARGNAME']
     filter = hdr['FILTER']
 
+    mjd = hdr['EXPSTART']
+
     if crop:
         w = WCS(image_hdr)
         y,x = numpy.unravel_index(numpy.nanargmax(data),data.shape)
@@ -135,7 +140,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
 
-    return Exposure(filename, name, filter, tf(data), tf(err), tf(bad), fit)
+    return Exposure(filename, name, filter, tf(data), tf(err), tf(bad), fit, mjd)
 
 class ModelFit(zdx.Base):
 
