@@ -343,8 +343,18 @@ class BinaryFit(ModelFit):
     
     def __call__(self, model, exposure):
         filter = model.filters[exposure.filter]
-        source = self.source.set("wavelengths", filter[:,0])
-        source = source.set("weights", filter[:,1])
+        slope = model.get(exposure.fit.map_param(exposure, "slope"))
+
+        wv = filter[:,0]
+        inten = filter[:,1]
+        swv = wv/1e-9
+
+        sloped = inten * (1 + slope[0]*1e-3*swv + slope[1]*1e-6*swv**2 
+                          + slope[2]*1e-9*swv**3 + slope[3]*1e-12*swv**4 + slope[4]*1e-15*swv**5)# + slope[2]*swv**2 + slope[3]*swv**3)
+
+        sloped = sloped/np.sum(sloped)
+
+        source = self.source.set("spectrum", dl.Spectrum(wv, sloped))
         source = source.set("mean_flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
         source = source.set("contrast", model.get(exposure.fit.map_param(exposure, "contrast")))
         source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
