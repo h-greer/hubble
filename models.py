@@ -1,6 +1,7 @@
 import jax.numpy as np
 import jax.random as jr
 from jax import Array
+import jax
 
 import dLux as dl
 import dLux.utils as dlu
@@ -47,6 +48,7 @@ filter_files = {
     'F160W': get_filter("../data/HST_NICMOS1.F160W.dat")[::20,:],
     'POL0S': get_filter("../data/HST_NICMOS1.POL0S.dat")[::20,:],
     'POL240S': get_filter("../data/HST_NICMOS1.POL240S.dat")[::20,:],
+    'POL120S': get_filter("../data/HST_NICMOS1.POL120S.dat")[::20,:],
 }
 
 class Exposure(zdx.Base):
@@ -94,6 +96,7 @@ class InjectedExposure(Exposure):
         self.bad = None
         self.data = None
         self.err = None
+        self.mjd = 0.0
     
     def inject(self, model, n_exp):
         generated_data = self.fit(model,self)
@@ -104,9 +107,17 @@ class InjectedExposure(Exposure):
         object.__setattr__(self, 'err',err)#np.flip(err)) 
 
 
-tf = lambda x: x#np.rot90(x,k=3)#np.flip(x)#, axis=0)
+tf = lambda x: np.flip(x)#np.rot90(x,k=3)#np.flip(x)#, axis=0)
 
 def exposure_from_file(fname, fit, extra_bad=None, crop=None):
+
+    hdr = fits.getheader(fname, ext=0)
+    image_hdr = fits.getheader(fname, ext=1)
+    #print(image_hdr)
+
+    with fits.open(fname) as hdul:
+        print(hdul.info())
+
     data = fits.getdata(fname, ext=1)
     err = fits.getdata(fname, ext=2)
     info = fits.getdata(fname, ext=3)
@@ -116,8 +127,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
 
 
-    hdr = fits.getheader(fname, ext=0)
-    image_hdr = fits.getheader(fname, ext=1)
+    
 
     filename = hdr['ROOTNAME']
     name = hdr['TARGNAME']
@@ -151,7 +161,7 @@ class ModelFit(zdx.Base):
     def get_key(self, exposure, param):
         match param:
             case "fluxes":
-                return exposure.filter
+                return f"{exposure.target}_{exposure.filter}"
             case "positions":
                 return exposure.key
             case "aberrations":
@@ -173,7 +183,9 @@ class ModelFit(zdx.Base):
             case "primary_shear":
                 return exposure.filter
             case "slope":
-                return exposure.filter
+                return f"{exposure.target}_{exposure.filter}"
+            case "spectrum":
+                return f"{exposure.target}_{exposure.filter}"
             #case _:
             #    return exposure.key
             case _: raise ValueError(f"Parameter {param} has no key")
@@ -182,7 +194,7 @@ class ModelFit(zdx.Base):
         """
         currently everything's global so this is just a fallthrough
         """
-        if param in ["fluxes", "positions", "aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "breathing", "slope"]:
+        if param in ["fluxes", "positions", "aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "breathing", "slope", "spectrum"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
@@ -282,6 +294,48 @@ class SinglePointFit(ModelFit):
 
         psf_obj = dl.PSF(psf, pixel_scale)
         return model.detector.model(psf_obj, return_psf=False)
+    
+class SinglePointSpectrumFit(ModelFit):
+    source: dl.Telescope = eqx.field(static=True)
+    nwavels: int = eqx.field(static=True)
+    def __init__(self, nwavels):
+        self.source = dl.PointSource(wavelengths=[1])
+        self.nwavels = nwavels
+    def __call__(self, model, exposure):
+        filter = model.filters[exposure.filter]
+        spectrum = np.abs(model.get(exposure.fit.map_param(exposure, "spectrum")))
+
+
+        wv = filter[:,0]
+        inten = filter[:,1]
+        swv = wv/1e-9
+
+        wmin = np.min(swv)
+        wmax = np.max(swv)
+        woff = (wmax-wmin)*0.1
+
+        wavels = np.linspace(wmin+woff, wmax-woff, self.nwavels)
+        inten = inten * np.interp(swv, wavels, spectrum)
+
+        source = self.source.set("spectrum", dl.Spectrum(wv, inten))
+        source = source.set("flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
+        source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
+        #print(source.flux, source.spectrum)
+
+        #source = self.source
+        optics = self.update_optics(model, exposure)
+
+        psfs = optics.model(source, return_psf=True)
+        psf = psfs.data.sum(tuple(range(psfs.ndim)))
+        pixel_scale = psfs.pixel_scale.mean()
+
+        psf_obj = dl.PSF(psf, pixel_scale)
+        
+        return model.detector.model(psf_obj, return_psf=False)
+    
+    #def get_spectrum(self, model, exposure):
+
+
 
 class BreathingSinglePointFit(ModelFit):
     source: dl.Telescope = eqx.field(static=True)

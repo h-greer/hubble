@@ -50,6 +50,8 @@ def set_array(pytree):
 
 number = int(sys.argv[1])-1
 
+is_binary = (number % 2) == 0
+
 
 
 
@@ -68,8 +70,6 @@ dfiles = glob.glob(ddir+"*_asc.fits")
 
 files = [x[0]+"_cal.fits" for x in fits.getdata(dfiles[number], ext=1)[0:2]]
 print(files)
-
-exposures = [exposure_from_file(ddir + x, SinglePointFit(), crop=wid) for x in files]
 
 params = {
     "fluxes": {},
@@ -90,6 +90,13 @@ params = {
     "rot": 0.,
     "softening": 2.
 }
+
+if is_binary:
+    exposures = [exposure_from_file(ddir + x, BinaryFit(), crop=wid) for x in files]
+else:
+    exposures = [exposure_from_file(ddir + x, SinglePointFit(), crop=wid) for x in files]
+    params[""]
+
 
 for exp in exposures:
     params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([0.,0.])
@@ -260,7 +267,7 @@ for i, param in enumerate(groups):
     
 fig.tight_layout()
 
-fig.savefig(f"dwarf/{number}_params.png")
+fig.savefig(f"dwarf/{number+1}_params.png")
 
 print(f"{float(losses[0]):e}, {float(losses[-1]):e}")
 
@@ -326,4 +333,4 @@ for i in range(4):
     axs[i].set_yticks([])
 
 
-fig.savefig(f"dwarf/{number}_model.png")
+fig.savefig(f"dwarf/{number+1}_model.png")

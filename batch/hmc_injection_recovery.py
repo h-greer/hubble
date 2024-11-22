@@ -119,9 +119,9 @@ def psf_model(data, model):
 
 sampler = npy.infer.MCMC(
     #npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_value(site=None,values={"Cold X":-8,"Cold Y":-8, "X":0.0, "Y": 0.0, "Flux":np.nansum(exposures[0].data)/1e9, "Cold Rot": np.pi/4}), dense_mass=False),
-    npy.infer.BarkerMH(psf_model, init_strategy=npy.infer.init_to_sample, dense_mass=False),
-    num_warmup=2000,
-    num_samples=2000,
+    npy.infer.NUTS(psf_model, init_strategy=npy.infer.init_to_sample, dense_mass=False),
+    num_warmup=1000,
+    num_samples=1000,
     #num_chains=6,
     #chain_method='vectorized'
     #progress_bar=False,
