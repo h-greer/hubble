@@ -87,6 +87,7 @@ class Exposure(zdx.Base):
     def key(self):
         return self.filename
 
+"""
 class InjectedExposure(Exposure):
     def __init__(self, name, filter, fit):
         self.filter = filter
@@ -105,6 +106,26 @@ class InjectedExposure(Exposure):
         object.__setattr__(self, 'data', data)#np.flip(data))
         object.__setattr__(self, 'bad', np.zeros(self.data.shape))#np.flip(np.zeros(self.data.shape)))
         object.__setattr__(self, 'err',err)#np.flip(err)) 
+
+"""
+
+class InjectedExposure(Exposure):
+    def __init__(self, name, filter, fit, model, t_exp, n_exp):
+        self.filter = filter
+        self.filename = f"{name}_{filter}"
+        self.target = name
+        self.fit = fit
+        self.mjd = 0.0
+
+        generated_data = self.fit(model, self) * t_exp
+        err = np.sqrt(generated_data + 10**2)/np.sqrt(n_exp)
+        data = jr.normal(jr.key(0),generated_data.shape)*err + generated_data
+
+        self.data = data/t_exp
+        self.err = err/t_exp
+        self.bad = np.zeros(self.data.shape)
+
+
 
 
 tf = lambda x: np.flip(x)#np.rot90(x,k=3)#np.flip(x)#, axis=0)
@@ -169,7 +190,7 @@ class ModelFit(zdx.Base):
             case "breathing":
                 return exposure.key
             case "cold_mask_shift":
-                return exposure.filter
+                return exposure.key
             case "cold_mask_rot":
                 return exposure.filter
             case "cold_mask_scale":
@@ -186,6 +207,8 @@ class ModelFit(zdx.Base):
                 return f"{exposure.target}_{exposure.filter}"
             case "spectrum":
                 return f"{exposure.target}_{exposure.filter}"
+            #case "displacement":
+            #    return exposure.filter
             #case _:
             #    return exposure.key
             case _: raise ValueError(f"Parameter {param} has no key")
@@ -258,6 +281,9 @@ class ModelFit(zdx.Base):
             optics = optics.set("main_aperture.softening", softening)
             optics = optics.set("cold_mask.softening", softening)
             optics = optics.set("AberratedAperture.aperture.softness", softening)
+        if "displacement" in model.params.keys():
+            disp = model.get(self.map_param(exposure, "displacement"))
+            optics = optics.set("defocus", disp)
         return optics
 
 class SinglePointFit(ModelFit):
@@ -266,19 +292,26 @@ class SinglePointFit(ModelFit):
         self.source = dl.PointSource(wavelengths=[1])
     def __call__(self, model, exposure):
         filter = model.filters[exposure.filter]
-        slope = model.get(exposure.fit.map_param(exposure, "slope"))
+        slope = model.get(exposure.fit.map_param(exposure, "spectrum"))
 
         wv = filter[:,0]
         inten = filter[:,1]
-        swv = wv/1e-9
 
-        sloped = inten * (1 + slope[0]*1e-3*swv + slope[1]*1e-6*swv**2 
-                          + slope[2]*1e-9*swv**3 + slope[3]*1e-12*swv**4 + slope[4]*1e-15*swv**5)
+        wmax = np.max(wv)
+        wmin = np.min(wv)
+
+        swv = (wv-wmin)/(wmax-wmin)
+
+        poly = dl.PolySpectrum(swv, slope)
+        sloped = inten * poly.weights
+
+        #sloped = inten * (1 + slope[0]*1e-3*swv + slope[1]*1e-6*swv**2 
+        #                  + slope[2]*1e-9*swv**3 + slope[3]*1e-12*swv**4 + slope[4]*1e-15*swv**5)
 
         #sloped = inten * (1 + slope[0] + slope[1]*1e-3*swv + slope[2]*1e-6*swv**2 
         #                  + slope[3]*1e-9*swv**3 + slope[4]*1e-12*swv**4 + slope[5]*1e-15*swv**5)
 
-        sloped = sloped/np.sum(sloped)
+        #sloped = sloped/np.sum(sloped)
 
         source = self.source.set("spectrum", dl.Spectrum(wv, sloped))
         source = source.set("flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
@@ -294,7 +327,13 @@ class SinglePointFit(ModelFit):
 
         psf_obj = dl.PSF(psf, pixel_scale)
         return model.detector.model(psf_obj, return_psf=False)
-    
+
+def nearest_interpolate(x, xp, fp):
+    dists = x - xp.reshape((-1,1))
+    locs = np.argmin(np.abs(dists),axis=0)
+    return fp[locs]    
+
+
 class SinglePointSpectrumFit(ModelFit):
     source: dl.Telescope = eqx.field(static=True)
     nwavels: int = eqx.field(static=True)
@@ -314,7 +353,9 @@ class SinglePointSpectrumFit(ModelFit):
         wmax = np.max(swv)
         woff = (wmax-wmin)*0.1
 
+
         wavels = np.linspace(wmin+woff, wmax-woff, self.nwavels)
+        #inten = inten * nearest_interpolate(swv, wavels, spectrum)
         inten = inten * np.interp(swv, wavels, spectrum)
 
         source = self.source.set("spectrum", dl.Spectrum(wv, inten))

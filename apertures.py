@@ -1,3 +1,4 @@
+from dLux.optical_systems import OpticalSystem
 import jax.numpy as np
 
 import dLux as dl
@@ -158,3 +159,92 @@ class NICMOSOptics(dl.AngularOpticalSystem):
             0.0431,
             oversample
         )
+
+### Fresnel propagators ###
+def transfer_fn(coords, npixels, wavelength, pscale, distance):
+    scaling = npixels * pscale**2
+    rho_sq = ((coords / scaling) ** 2).sum(0)
+    return _fftshift(np.exp(-1.0j * np.pi * wavelength * distance * rho_sq))
+
+def transfer(wf, distance, pad=2):
+    coords = dlu.pixel_coords(pad * wf.npixels, pad * wf.diameter)
+    return transfer_fn(coords, wf.npixels, wf.wavelength, pad * wf.pixel_scale, distance)
+
+
+def _fft(phasor, pad=2):
+    padded = dlu.resize(phasor, phasor.shape[0] * pad)
+    return 1 / padded.shape[0] * np.fft.fft2(padded)
+
+
+def _ifft(phasor, pad=1):
+    padded = dlu.resize(phasor, phasor.shape[0] * pad)
+    return phasor.shape[0] * np.fft.ifft2(padded)
+
+
+def _fftshift(phasor):
+    return np.fft.fftshift(phasor)
+
+
+def plane_to_plane(wf, distance, pad=2):
+    fft_wf = _fft(wf.phasor, pad=pad)
+    tf = transfer(wf, distance, pad=pad)
+    phasor = dlu.resize(_ifft(fft_wf * tf), wf.npixels)
+    return wf.set(["amplitude", "phase"], [np.abs(phasor), np.angle(phasor)])
+
+
+
+
+class NICMOSFresnelOptics(dl.AngularOpticalSystem):
+    defocus: np.ndarray
+    def __init__(self, wf_npixels, psf_npixels, oversample, defocus):
+        self.diameter=2.4
+        self.wf_npixels = wf_npixels
+        self.psf_npixels = psf_npixels
+        self.psf_pixel_scale = 0.0432
+        self.oversample = oversample
+        self.defocus = defocus
+
+        layers = []
+
+        layers += [("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=2))]
+
+        layers += [dl.AberratedAperture(
+                    dl.layers.CircularAperture(1.2, transformation=dl.CoordTransform()),
+                    noll_inds=np.arange(4,30),#,12,13,14,15,16,17,18,19,20,21,22]),
+                    coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9,#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
+                )]
+        layers += [
+            ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=2)),
+        ]
+        
+    
+
+        self.layers = dlu.list2dictionary(layers, ordered=True)
+    
+    def propagate_mono(self, wavelength, offset=np.zeros(2), return_wf=False):
+
+        wf = dl.Wavefront(self.wf_npixels, self.diameter, wavelength)
+        wf = wf.tilt(offset)
+
+        true_pixel_scale = self.psf_pixel_scale / self.oversample
+        pixel_scale = dlu.arcsec2rad(true_pixel_scale)
+        psf_npixels = self.psf_npixels * self.oversample
+
+        # Apply layers
+        for layer in list(self.layers.values()):#[0:2]:
+            #print(layer)
+            wf *= layer
+        
+        # cold mask offset
+        #print(wf)
+        #wf *= list(self.layers.values())[2]
+        print(wf)
+        wf = wf.propagate(psf_npixels, pixel_scale)
+        print(wf)
+        wf = plane_to_plane(wf, 1e-6 * self.defocus, pad=2)
+
+
+        if return_wf:
+            return wf
+        return wf.psf
+        
