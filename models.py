@@ -1,5 +1,6 @@
 import jax.numpy as np
 import jax.random as jr
+import jax.scipy as jsp
 from jax import Array
 import jax
 
@@ -21,6 +22,7 @@ from abc import abstractmethod
 
 from apertures import *
 from detectors import *
+from spectra import *
 
 def get_filter(file):
     flt = np.asarray(pd.read_csv(file, sep=' '))#[::20,:]
@@ -44,12 +46,40 @@ filter_files = {
     'F187N': get_filter("../data/HST_NICMOS1.F187N.dat"),
     'F090M': get_filter("../data/HST_NICMOS1.F090M.dat")[::5,:],
     #'F110W': np.asarray(pd.read_csv("../data/HST_NICMOS1.F110W.dat", sep=' '))[::20,:],
-    'F110W': get_filter("../data/HST_NICMOS1.F110W.dat")[::20,:],
+    'F110W': get_filter("../data/HST_NICMOS1.F110W.dat")[50:-70],#[::20,:],
     'F160W': get_filter("../data/HST_NICMOS1.F160W.dat")[::20,:],
     'POL0S': get_filter("../data/HST_NICMOS1.POL0S.dat")[::20,:],
     'POL240S': get_filter("../data/HST_NICMOS1.POL240S.dat")[::20,:],
     'POL120S': get_filter("../data/HST_NICMOS1.POL120S.dat")[::20,:],
 }
+
+def calc_throughput(filt, nwavels=9):
+
+    filtr = filter_files[filt]
+
+
+    wl_array = filtr[:,0]
+    throughput_array = filtr[:,1]
+
+    # filter_path = os.path.join()
+    #file_path = pkg.resource_filename(__name__, f"/data/filters/{filt}.dat")
+    #wl_array, throughput_array = np.array(onp.loadtxt(file_path, unpack=True))
+
+    edges = np.linspace(wl_array.min(), wl_array.max(), nwavels + 1)
+    wavels = np.linspace(wl_array.min(), wl_array.max(), 2 * nwavels + 1)[1::2]
+
+    areas = []
+    for i in range(nwavels):
+        cond1 = edges[i] < wl_array
+        cond2 = wl_array < edges[i + 1]
+        throughput = np.where(cond1 & cond2, throughput_array, 0)
+        areas.append(jsp.integrate.trapezoid(y=throughput, x=wl_array))
+
+    areas = np.array(areas)
+    weights = areas / areas.sum()
+
+    wavels *= 1e-10
+    return np.array([wavels, weights])
 
 class Exposure(zdx.Base):
     filename: str = eqx.field(static=True)
@@ -87,27 +117,18 @@ class Exposure(zdx.Base):
     def key(self):
         return self.filename
 
-"""
-class InjectedExposure(Exposure):
+class BlankExposure(Exposure):
     def __init__(self, name, filter, fit):
         self.filter = filter
         self.filename = f"{name}_{filter}"
         self.target = name
         self.fit = fit
-        self.bad = None
-        self.data = None
-        self.err = None
         self.mjd = 0.0
-    
-    def inject(self, model, n_exp):
-        generated_data = self.fit(model,self)
-        err = (np.sqrt(generated_data) + 10)/np.sqrt(n_exp)
-        data = jr.normal(jr.key(0),generated_data.shape)*err + generated_data
-        object.__setattr__(self, 'data', data)#np.flip(data))
-        object.__setattr__(self, 'bad', np.zeros(self.data.shape))#np.flip(np.zeros(self.data.shape)))
-        object.__setattr__(self, 'err',err)#np.flip(err)) 
 
-"""
+        self.data = 0.
+        self.err = 0.
+        self.bad = 0.
+
 
 class InjectedExposure(Exposure):
     def __init__(self, name, filter, fit, model, t_exp, n_exp):
@@ -117,12 +138,12 @@ class InjectedExposure(Exposure):
         self.fit = fit
         self.mjd = 0.0
 
-        generated_data = self.fit(model, self) * t_exp
-        err = np.sqrt(generated_data + 10**2)/np.sqrt(n_exp)
+        generated_data = self.fit(model, self) * t_exp * 5
+        err = np.sqrt(generated_data + 3**2)/np.sqrt(n_exp)
         data = jr.normal(jr.key(0),generated_data.shape)*err + generated_data
 
-        self.data = data/t_exp
-        self.err = err/t_exp
+        self.data = data/t_exp/5
+        self.err = err/t_exp/5
         self.bad = np.zeros(self.data.shape)
 
 
@@ -333,6 +354,21 @@ def nearest_interpolate(x, xp, fp):
     locs = np.argmin(np.abs(dists),axis=0)
     return fp[locs]    
 
+"""
+class NonNormalisedSpectrum(dl.SimpleSpectrum):
+    wavelengths: Array
+    weights: Array
+    def __init__(self, wavels, weights):
+        super().__init__(wavels)
+        self.weights = np.asarray(weights, float)
+
+        #self.wavelengths = np.asarray(wavels, float)
+    @property
+    def weights(self):
+        return self.weights#10**self.weights
+    def normalise(self):
+        return self
+"""
 
 class SinglePointSpectrumFit(ModelFit):
     source: dl.Telescope = eqx.field(static=True)
@@ -341,9 +377,15 @@ class SinglePointSpectrumFit(ModelFit):
         self.source = dl.PointSource(wavelengths=[1])
         self.nwavels = nwavels
     def __call__(self, model, exposure):
-        filter = model.filters[exposure.filter]
+
+    
         spectrum = np.abs(model.get(exposure.fit.map_param(exposure, "spectrum")))
 
+        #wv_small, _ = calc_throughput(exposure.filter, nwavels=len(spectrum))
+        
+        wv, inten = calc_throughput(exposure.filter, nwavels=len(spectrum))
+
+        """
 
         wv = filter[:,0]
         inten = filter[:,1]
@@ -356,10 +398,18 @@ class SinglePointSpectrumFit(ModelFit):
 
         wavels = np.linspace(wmin+woff, wmax-woff, self.nwavels)
         #inten = inten * nearest_interpolate(swv, wavels, spectrum)
-        inten = inten * np.interp(swv, wavels, spectrum)
+        inten = inten * np.interp(swv, wavels, spectrum, left=0., right=0.)
 
-        source = self.source.set("spectrum", dl.Spectrum(wv, inten))
-        source = source.set("flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
+        #source = self.source.set("spectrum", NonNormalisedSpectrum(wv, inten))
+        """
+
+        #spec_full = np.interp(wv, wv_small, spectrum)
+
+        source = self.source.set("spectrum", dl.Spectrum(wv, jax.nn.softplus(inten*spectrum)))
+
+        source = source.set("flux", np.sum(spectrum))
+
+        #source = source.set("flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
         source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
         #print(source.flux, source.spectrum)
 
@@ -376,6 +426,107 @@ class SinglePointSpectrumFit(ModelFit):
     
     #def get_spectrum(self, model, exposure):
 
+
+class SinglePointFourierSpectrumFit(ModelFit):
+    source: dl.Telescope = eqx.field(static=True)
+    nwavels: int = eqx.field(static=True)
+    def __init__(self, nwavels):
+        self.source = dl.PointSource(wavelengths=[1])
+        self.nwavels = nwavels
+    def __call__(self, model, exposure):
+
+        nw = self.nwavels
+
+
+        coeffs = model.get(exposure.fit.map_param(exposure, "spectrum"))
+
+        wv, filt = calc_throughput(exposure.filter, nwavels=nw)
+
+        inten = np.zeros(nw)
+        xs = np.linspace(0, 2, nw)*np.pi
+
+        #inten += np.ones(nw)*coeffs[0]
+        #inten += 
+
+        for i,c in enumerate(coeffs):
+            #inten = inten +  jax.lax.select(i == 0, np.ones(nw), np.zeros(nw))*c
+            inten = inten +  jax.lax.select((i % 2) == 0, np.cos(xs*i/2), np.zeros(nw))*c
+            inten = inten +  jax.lax.select((i % 2) == 1, np.sin(xs*(i+1)/2), np.zeros(nw))*c
+            """if c == 0:
+                inten += np.ones(nw)
+            elif c % 2:
+                inten += np.cos(xs*c//2)
+            else:
+                inten += np.sin(xs*(c+1)//2)"""
+            
+        #inten = np.maximum(inten, 0.0)#np.zeros(nw))
+        #inten = np.abs(inten)
+
+        #inten = 10**inten
+        inten *= filt
+        inten = jax.nn.softplus(inten)
+
+        source = self.source.set("flux", np.sum(inten))
+
+
+        
+
+        source = source.set("spectrum", dl.Spectrum(wv, inten))
+        #source = source.set("flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
+
+
+        source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
+        optics = self.update_optics(model, exposure)
+
+        psfs = optics.model(source, return_psf=True)
+        psf = psfs.data.sum(tuple(range(psfs.ndim)))
+        pixel_scale = psfs.pixel_scale.mean()
+
+        psf_obj = dl.PSF(psf, pixel_scale)
+        
+        return model.detector.model(psf_obj, return_psf=False)
+    
+
+class SinglePointPolySpectrumFit(ModelFit):
+    source: dl.Telescope = eqx.field(static=True)
+    nwavels: int = eqx.field(static=True)
+    def __init__(self, nwavels):
+        self.source = dl.PointSource(wavelengths=[1])
+        self.nwavels = nwavels
+    def __call__(self, model, exposure):
+
+        source = self.source
+
+        nw = self.nwavels
+
+
+        coeffs = model.get(exposure.fit.map_param(exposure, "spectrum"))
+
+        wv, filt = calc_throughput(exposure.filter, nwavels=nw)
+
+        inten = NonNormalisedClippedPolySpectrum(np.linspace(-1, 1, nw), coeffs).weights
+
+        inten = jax.nn.softplus(inten/10)*10
+
+        source = source.set("flux", np.sum(inten))
+
+
+        inten *= filt
+
+        source = source.set("spectrum", dl.Spectrum(wv, inten))
+        #source = source.set("flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
+
+
+        source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
+        optics = self.update_optics(model, exposure)
+
+        psfs = optics.model(source, return_psf=True)
+        psf = psfs.data.sum(tuple(range(psfs.ndim)))
+        pixel_scale = psfs.pixel_scale.mean()
+
+        psf_obj = dl.PSF(psf, pixel_scale)
+        
+        return model.detector.model(psf_obj, return_psf=False)
 
 
 class BreathingSinglePointFit(ModelFit):
