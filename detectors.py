@@ -45,7 +45,7 @@ class NICMOSDetector(dl.LayeredDetector):
                 #("detector_response", ApplyNonlinearity(coefficients=np.zeros(1), order = 3)),
                 #("pixel_response",dl.layers.ApplyPixelResponse(np.ones((wid*oversample,wid*oversample)))),
                 ("jitter", dl.layers.ApplyJitter(sigma=7/43*oversample)),
-
                 ("downsample", dl.layers.Downsample(oversample)),
+                ("bias", dl.layers.AddConstant(value=0.0)),
             ]
         )

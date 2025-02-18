@@ -20,6 +20,8 @@ import pandas as pd
 
 from abc import abstractmethod
 
+from tqdm.auto import tqdm
+
 from apertures import *
 from detectors import *
 from spectra import *
@@ -226,19 +228,23 @@ class ModelFit(zdx.Base):
                 return exposure.filter
             case "slope":
                 return f"{exposure.target}_{exposure.filter}"
-            case "spectrum":
+            case "spectrum" | "primary_spectrum" | "secondary_spectrum":
                 return f"{exposure.target}_{exposure.filter}"
             #case "displacement":
             #    return exposure.filter
             #case _:
             #    return exposure.key
+            case "bias":
+                return exposure.key
+            case "jitter":
+                return exposure.key
             case _: raise ValueError(f"Parameter {param} has no key")
     
     def map_param(self, exposure, param):
         """
         currently everything's global so this is just a fallthrough
         """
-        if param in ["fluxes", "positions", "aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "breathing", "slope", "spectrum"]:
+        if param in ["fluxes", "positions", "aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "jitter"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
@@ -306,6 +312,17 @@ class ModelFit(zdx.Base):
             disp = model.get(self.map_param(exposure, "displacement"))
             optics = optics.set("defocus", disp)
         return optics
+
+    def update_detector(self, model, exposure):
+        detector = model.detector
+
+        if "bias" in model.params.keys():
+            bias = model.get(self.map_param(exposure, "bias"))
+            detector = detector.set("bias.value", bias)
+        if "jitter" in model.params.keys():
+            jitter = model.get(self.map_param(exposure, "jitter"))
+            detector = detector.set("jitter.sigma", jitter)
+        return detector
 
 class SinglePointFit(ModelFit):
     source: dl.Telescope = eqx.field(static=True)
@@ -506,7 +523,8 @@ class SinglePointPolySpectrumFit(ModelFit):
 
         inten = NonNormalisedClippedPolySpectrum(np.linspace(-1, 1, nw), coeffs).weights
 
-        inten = jax.nn.softplus(inten/10)*10
+        #inten = jax.nn.softplus(inten/10)*10
+        inten = 10**inten
 
         source = source.set("flux", np.sum(inten))
 
@@ -519,6 +537,7 @@ class SinglePointPolySpectrumFit(ModelFit):
 
         source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
         optics = self.update_optics(model, exposure)
+        detector = self.update_detector(model, exposure)
 
         psfs = optics.model(source, return_psf=True)
         psf = psfs.data.sum(tuple(range(psfs.ndim)))
@@ -526,7 +545,7 @@ class SinglePointPolySpectrumFit(ModelFit):
 
         psf_obj = dl.PSF(psf, pixel_scale)
         
-        return model.detector.model(psf_obj, return_psf=False)
+        return detector.model(psf_obj, return_psf=False)
 
 
 class BreathingSinglePointFit(ModelFit):
@@ -606,6 +625,71 @@ class BinaryFit(ModelFit):
         source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
         source = source.set("separation", model.get(exposure.fit.map_param(exposure, "separation"))*dlu.arcsec2rad(0.0432))
         source = source.set("position_angle", dlu.deg2rad(model.get(exposure.fit.map_param(exposure, "position_angle"))))
+        
+        optics = self.update_optics(model, exposure)
+
+        psfs = optics.model(source, return_psf=True)
+        psf = psfs.data.sum(tuple(range(psfs.ndim)))
+        pixel_scale = psfs.pixel_scale.mean()
+
+        psf_obj = dl.PSF(psf, pixel_scale)
+        return model.detector.model(psf_obj, return_psf=False)
+
+class BinaryPolySpectrumFit(ModelFit):
+    source: dl.Scene = eqx.field(static=True)
+    nwavels: int = eqx.field(static=True)
+    def __init__(self, nwavels):
+        self.source = dl.Scene([("primary",dl.PointSource(wavelengths=[1])), ("secondary",dl.PointSource(wavelengths=[1]))])
+        self.nwavels = nwavels
+    
+    def get_key(self, exposure, param):
+        if param == "contrast":
+            return exposure.filter
+        else:
+            return super().get_key(exposure, param)
+    
+    def map_param(self, exposure, param):
+        if param == "contrast":
+            return f"{param}.{exposure.get_key(param)}"
+        else:
+            return super().map_param(exposure, param)
+    
+    def __call__(self, model, exposure):
+
+        source = self.source
+        nw = self.nwavels
+        wv, filt = calc_throughput(exposure.filter, nwavels=nw)
+
+        flux = 10**model.get(exposure.fit.map_param(exposure, "fluxes"))
+        contrast = model.get(exposure.fit.map_param(exposure, "contrast"))
+
+        flux_scales = dlu.fluxes_from_contrast(flux, contrast)
+
+
+        primary_coeffs = model.get(exposure.fit.map_param(exposure, "primary_spectrum"))
+        inten = NonNormalisedClippedPolySpectrum(np.linspace(-1, 1, nw), primary_coeffs).weights
+        inten = 10**inten
+        #inten = jax.nn.softplus(inten/10)*10
+        source = source.set("primary.flux", np.sum(inten)*flux_scales[0])
+        inten *= filt
+        source = source.set("primary.spectrum", dl.Spectrum(wv, inten))
+
+        secondary_coeffs = model.get(exposure.fit.map_param(exposure, "secondary_spectrum"))
+        inten = NonNormalisedClippedPolySpectrum(np.linspace(-1, 1, nw), secondary_coeffs).weights
+        #inten = jax.nn.softplus(inten/10)*10
+        inten = 10**inten
+        source = source.set("secondary.flux", np.sum(inten)*flux_scales[1])
+        inten *= filt
+        source = source.set("secondary.spectrum", dl.Spectrum(wv, inten))
+
+        position = model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432)
+        separation = model.get(exposure.fit.map_param(exposure, "separation"))*dlu.arcsec2rad(0.0432)
+        position_angle = dlu.deg2rad(model.get(exposure.fit.map_param(exposure, "position_angle")))
+
+        positions = dlu.positions_from_sep(position, separation, position_angle)
+
+        source = source.set("primary.position", positions[0])
+        source = source.set("secondary.position", positions[1])
         
         optics = self.update_optics(model, exposure)
 
