@@ -321,14 +321,14 @@ groups = list(things.keys())
 
 
 # %%
-losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 300)
+losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 3000)
 
 # %%
 #plt.plot(losses)
 
 # %%
-plot_params(models, groups, xw = 3)
-plot_comparison(model_binary, models[-1], exposures_binary)
+#plot_params(models, groups, xw = 3)
+#plot_comparison(model_binary, models[-1], exposures_binary)
 
 # %%
 models[-1].params

@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name turbo_grid_search
 #SBATCH --cpus-per-task=4
-#SBATCH --mem-per-cpu=8G
-#SBATCH --time=1-0:00
+#SBATCH --mem-per-cpu=4G
+#SBATCH --time=2-0:00
 #SBATCH -o turbo.%j.out  # STDOUT
 #SBATCH -e turbo.%j.err  # STDERR
 
