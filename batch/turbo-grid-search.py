@@ -397,7 +397,7 @@ def make_psf_model(modelparams, fishers):
 
             params["separation"] = npy.sample("Separation", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['separation'])))[0][0] + modelparams.get("separation")
 
-            params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[0][0] + modelparams.get(exp.map_param("cold_mask_shift"))[0], npy.sample("Cold Y", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[1][1] + modelparams.get(exp.map_param("cold_mask_shift"))[1]])
+            #params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[0][0] + modelparams.get(exp.map_param("cold_mask_shift"))[0], npy.sample("Cold Y", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[1][1] + modelparams.get(exp.map_param("cold_mask_shift"))[1]])
             
             params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Normal(0,1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['positions'])))[0][0] + modelparams.get(exp.map_param("positions"))[0], npy.sample("Y", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['positions'])))[1][1] + modelparams.get(exp.map_param("positions"))[1]])
 
@@ -412,10 +412,10 @@ def make_psf_model(modelparams, fishers):
             ])
 
 
-            params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.asarray([
-                npy.sample(aberration_names[x], dist.Normal(0,1))/np.sqrt(fishers['n8yj59glq']['aberrations'][i][i]) + modelparams.get(exp.map_param("aberrations"))[i] for i, x in enumerate(range(4,30))
+            #params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.asarray([
+            #    npy.sample(aberration_names[x], dist.Normal(0,1))/np.sqrt(fishers['n8yj59glq']['aberrations'][i][i]) + #modelparams.get(exp.map_param("aberrations"))[i] for i, x in enumerate(range(4,30))
                 
-            ])
+            #])
 
         params = ModelParams(params)
 
@@ -456,7 +456,7 @@ consumer = cc.ChainConsumer().add_chain(chain)
 #consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
 fig = consumer.plotter.plot()
-fig.savefig("turbo_grid_search_chains.png")
+fig.savefig("turbo_grid_search_chains_just_binary.png")
 #plt.close()
 
 plt.show()
