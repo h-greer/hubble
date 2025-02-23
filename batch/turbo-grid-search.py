@@ -391,7 +391,26 @@ def make_psf_model(modelparams, fishers):
         }
 
         for exp in exposures_binary:
-            #params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Normal(0,1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj53vfq']['fluxes'])))[0][0] + modelparams.get(exp.map_param("fluxes"))
+
+            params["position_angle"] = npy.sample("Position Angle", dist.Normal(modelparams.get("position_angle"), 1))
+
+            params["separation"] = npy.sample("Separation", dist.Normal(modelparams.get("separation"), 1))
+
+            #params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[0][0] + modelparams.get(exp.map_param("cold_mask_shift"))[0], npy.sample("Cold Y", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[1][1] + modelparams.get(exp.map_param("cold_mask_shift"))[1]])
+            
+            params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Normal(modelparams.get(exp.map_param("positions"))[0], 1)), npy.sample("Y", dist.Normal(modelparams.get(exp.map_param("positions"))[1], 1))])
+
+            params["primary_spectrum"][exp.fit.get_key(exp, "primary_spectrum")] = np.asarray([
+                npy.sample("primary "+poly_names[x], dist.Normal(modelparams.get(exp.map_param("primary_spectrum"))[i],1)) for i, x in enumerate(range(0,5))
+                
+            ])
+
+            params["secondary_spectrum"][exp.fit.get_key(exp, "secondary_spectrum")] = np.asarray([
+                npy.sample("secondary " + poly_names[x], dist.Normal(modelparams.get(exp.map_param("secondary_spectrum"))[i] ,1)) for i, x in enumerate(range(0,5))
+                
+            ])
+
+            """#params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Normal(0,1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj53vfq']['fluxes'])))[0][0] + modelparams.get(exp.map_param("fluxes"))
 
             params["position_angle"] = npy.sample("Position Angle", dist.Normal(modelparams.get("position_angle"), np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['position_angle'])))[0][0]))
 
@@ -409,7 +428,7 @@ def make_psf_model(modelparams, fishers):
             params["secondary_spectrum"][exp.fit.get_key(exp, "secondary_spectrum")] = np.asarray([
                 npy.sample("secondary " + poly_names[x], dist.Normal(modelparams.get(exp.map_param("secondary_spectrum"))[i] ,np.sqrt(fishers['n8yj59glq']['secondary_spectrum'][i][i]))) for i, x in enumerate(range(0,5))
                 
-            ])
+            ])"""
 
 
             #params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.asarray([
