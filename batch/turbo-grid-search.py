@@ -10,7 +10,7 @@ import jax.scipy as jsp
 import jax
 import numpy
 
-#jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_enable_x64", True)
 
 # Optimisation imports
 import zodiax as zdx
@@ -281,7 +281,7 @@ for x in x_vals:
             for r in r_vals:
                 binary_params = extract_binary_params(models[-1], exposures_binary, x, y, theta, r, 0., 1.)
                 #binary_params = extract_binary_params(models[-1], exposures_binary, 0, 0, 0, 0, 0., 1.)#np.log10(0.5), 1.)
-                losses, bms = binary_optimise(binary_params, model_binary, exposures_binary, things, 10)
+                losses, bms = binary_optimise(binary_params, model_binary, exposures_binary, things, 20)
                 print(losses[-1])
                 if losses[-1] < min_loss and min_loss != 0.0:
                     min_loss = losses[-1]
@@ -321,7 +321,7 @@ groups = list(things.keys())
 
 
 # %%
-losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 300)
+losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 3000)
 
 # %%
 #plt.plot(losses)
