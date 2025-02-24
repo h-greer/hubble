@@ -10,7 +10,7 @@ import jax.scipy as jsp
 import jax
 import numpy
 
-jax.config.update("jax_enable_x64", True)
+#jax.config.update("jax_enable_x64", True)
 
 # Optimisation imports
 import zodiax as zdx
@@ -281,7 +281,7 @@ for x in x_vals:
             for r in r_vals:
                 binary_params = extract_binary_params(models[-1], exposures_binary, x, y, theta, r, 0., 1.)
                 #binary_params = extract_binary_params(models[-1], exposures_binary, 0, 0, 0, 0, 0., 1.)#np.log10(0.5), 1.)
-                losses, bms = binary_optimise(binary_params, model_binary, exposures_binary, things, 20)
+                losses, bms = binary_optimise(binary_params, model_binary, exposures_binary, things, 10)
                 print(losses[-1])
                 if losses[-1] < min_loss and min_loss != 0.0:
                     min_loss = losses[-1]
@@ -321,7 +321,7 @@ groups = list(things.keys())
 
 
 # %%
-losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 3000)
+losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 300)
 
 # %%
 #plt.plot(losses)
@@ -376,8 +376,10 @@ np.diag(np.sqrt(np.linalg.inv(fishers['n8yj59glq']['secondary_spectrum'])))
 
 # %%
 
+
 def make_psf_model(modelparams, fishers):
 
+    #@zdx.filter_jit
     def psf_model(data, model):
 
         params = {
@@ -386,11 +388,12 @@ def make_psf_model(modelparams, fishers):
             "positions": {},
             #"position_angle": 0., 
             #"separation": 0. , 
-            "cold_mask_shift": {},
-            "aberrations": {},
+            #"cold_mask_shift": {},
+            #"aberrations": {},
         }
 
         for exp in exposures_binary:
+            #params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Normal(0,1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj53vfq']['fluxes'])))[0][0] + modelparams.get(exp.map_param("fluxes"))
 
             params["position_angle"] = npy.sample("Position Angle", dist.Normal(modelparams.get("position_angle"), 1))
 
@@ -410,29 +413,30 @@ def make_psf_model(modelparams, fishers):
                 
             ])
 
-            """#params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Normal(0,1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj53vfq']['fluxes'])))[0][0] + modelparams.get(exp.map_param("fluxes"))
+            """            #params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Normal(0,1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj53vfq']['fluxes'])))[0][0] + modelparams.get(exp.map_param("fluxes"))
 
-            params["position_angle"] = npy.sample("Position Angle", dist.Normal(modelparams.get("position_angle"), np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['position_angle'])))[0][0]))
+            params["position_angle"] = npy.sample("Position Angle", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['position_angle'])))[0][0] + modelparams.get("position_angle")
 
-            params["separation"] = npy.sample("Separation", dist.Normal(modelparams.get("separation"), np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['separation'])))[0][0]))
+            params["separation"] = npy.sample("Separation", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['separation'])))[0][0] + modelparams.get("separation")
 
             #params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[0][0] + modelparams.get(exp.map_param("cold_mask_shift"))[0], npy.sample("Cold Y", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[1][1] + modelparams.get(exp.map_param("cold_mask_shift"))[1]])
             
-            params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Normal(modelparams.get(exp.map_param("positions"))[0], np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['positions'])))[0][0])), npy.sample("Y", dist.Normal(modelparams.get(exp.map_param("positions"))[1], np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['positions'])))[1][1]))])
+            params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Normal(0,1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['positions'])))[0][0] + modelparams.get(exp.map_param("positions"))[0], npy.sample("Y", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['positions'])))[1][1] + modelparams.get(exp.map_param("positions"))[1]])
 
             params["primary_spectrum"][exp.fit.get_key(exp, "primary_spectrum")] = np.asarray([
-                npy.sample("primary "+poly_names[x], dist.Normal(modelparams.get(exp.map_param("primary_spectrum"))[i],np.sqrt(fishers['n8yj59glq']['primary_spectrum'][i][i]))) for i, x in enumerate(range(0,5))
+                npy.sample("primary "+poly_names[x], dist.Normal(0,1))/np.sqrt(fishers['n8yj59glq']['primary_spectrum'][i][i]) + modelparams.get(exp.map_param("primary_spectrum"))[i] for i, x in enumerate(range(0,5))
                 
             ])
 
             params["secondary_spectrum"][exp.fit.get_key(exp, "secondary_spectrum")] = np.asarray([
-                npy.sample("secondary " + poly_names[x], dist.Normal(modelparams.get(exp.map_param("secondary_spectrum"))[i] ,np.sqrt(fishers['n8yj59glq']['secondary_spectrum'][i][i]))) for i, x in enumerate(range(0,5))
+                npy.sample("secondary " + poly_names[x], dist.Normal(0,1))/np.sqrt(fishers['n8yj59glq']['secondary_spectrum'][i][i]) + modelparams.get(exp.map_param("secondary_spectrum"))[i] for i, x in enumerate(range(0,5))
                 
             ])"""
 
 
+
             #params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.asarray([
-            #    npy.sample(aberration_names[x], dist.Normal(0,1))/np.sqrt(fishers['n8yj59glq']['aberrations'][i][i]) + #modelparams.get(exp.map_param("aberrations"))[i] for i, x in enumerate(range(4,30))
+            #    npy.sample(aberration_names[x], dist.Normal(0,1))/np.sqrt(fishers['n8yj59glq']['aberrations'][i][i]) + modelparams.get(exp.map_param("aberrations"))[i] for i, x in enumerate(range(4,30))
                 
             #])
 
@@ -459,11 +463,13 @@ sampler = npy.infer.MCMC(
     npy.infer.NUTS(make_psf_model(models[-1], jtu.tree_map(lambda x: np.abs(x), fishers)), 
                    init_strategy=npy.infer.init_to_sample,
                     dense_mass=False),
-    num_warmup=1000,
-    num_samples=1000,
+    num_warmup=2000,
+    num_samples=2000,
     #num_chains=6,
-    #chain_method='vectorized'
+    #chain_method='vectorized',
     progress_bar=True,
+    chain_method = zdx.filter_jit,
+    #jit_model_args=True,
 )
 
 sampler.run(jr.PRNGKey(0),exposures_binary[0], model_binary)
@@ -472,12 +478,9 @@ sampler.print_summary()
 
 chain = cc.Chain.from_numpyro(sampler, name="numpyro chain", color="teal")
 consumer = cc.ChainConsumer().add_chain(chain)
-#consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
 fig = consumer.plotter.plot()
 fig.savefig("turbo_grid_search_chains_just_binary.png")
 #plt.close()
 
-plt.show()
-
-
+#plt.show()
