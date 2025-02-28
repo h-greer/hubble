@@ -10,6 +10,6 @@ module load anaconda3/5.2.0
 source /opt/modules/Anaconda3/5.2.0/etc/profile.d/conda.sh
 conda activate /data/uqhgreer/repos/jax-cpu
 
-srun python turbo-grid-search-with-zernikes.py
+srun python new-turbo-with-zernikes.py
 
 conda deactivate

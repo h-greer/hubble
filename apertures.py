@@ -208,14 +208,16 @@ class NICMOSFresnelOptics(dl.AngularOpticalSystem):
 
         layers += [("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=2))]
 
+        layers += [
+            ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=2)),
+        ]
+
         layers += [dl.AberratedAperture(
                     dl.layers.CircularAperture(1.2, transformation=dl.CoordTransform()),
                     noll_inds=np.arange(4,30),#,12,13,14,15,16,17,18,19,20,21,22]),
                     coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9,#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
                 )]
-        layers += [
-            ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=2)),
-        ]
+        
         
     
 

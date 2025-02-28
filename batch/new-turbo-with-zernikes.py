@@ -10,7 +10,7 @@ import jax.scipy as jsp
 import jax
 import numpy
 
-#jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_enable_x64", True)
 
 # Optimisation imports
 import zodiax as zdx
@@ -104,6 +104,7 @@ params = {
     "scale": 0.0432,
     "rot": 0.,
     "softening": 2.,
+    "bias": {}
 }
 
 for exp in exposures_single:
@@ -117,6 +118,8 @@ for exp in exposures_single:
     params["primary_rot"][exp.fit.get_key(exp, "primary_rot")] = -45. #+ 180.
     params["primary_scale"][exp.fit.get_key(exp, "primary_scale")] = np.asarray([1.,1.])
     params["primary_shear"][exp.fit.get_key(exp, "primary_shear")] = np.asarray([0.,0.])
+
+    params["bias"][exp.fit.get_key(exp, "bias")] = 0.
 
 model_single = set_array(NICMOSModel(exposures_single, params, optics, detector))
 model_binary = set_array(NICMOSModel(exposures_binary, params, optics, detector))
@@ -153,7 +156,7 @@ things = {
     #"fluxes" : opt(g*20,10),
     "positions": opt(g*30, 0),
     "spectrum": opt(g*20, 10),#, (20, 1.5)),
-    "cold_mask_shift": opt(g*500, 120),
+    "cold_mask_shift": opt(g*50, 120),
     "cold_mask_rot": opt(g*500, 120),
     #"cold_mask_scale": opt(g*3000, 150),
     #"cold_mask_shear": opt(g*1000, 150),
@@ -166,6 +169,7 @@ things = {
     #"softening": opt(g*1e3, 200),
     #"breathing": opt(g*1000,150),
     #"rot": opt(g*100, 50),
+    "bias": opt(g*30, 20)
 }
 
 groups = list(things.keys())
@@ -174,7 +178,7 @@ optimisers = [things[i] for i in groups]
 groups = [list(x) if isinstance(x, tuple) else x for x in groups]
 
 # %%
-losses, models = optimise(params, model_single, exposures_single, things, 20)
+losses, models = optimise(params, model_single, exposures_single, things, 30)
 
 # %%
 #plt.plot(losses[-20:])
@@ -182,6 +186,9 @@ losses, models = optimise(params, model_single, exposures_single, things, 20)
 # %%
 #plot_params(models, groups, xw = 3)
 #plot_comparison(model_single, models[-1], exposures_single)
+
+# %%
+
 
 # %%
 #potato
@@ -300,50 +307,36 @@ things = {
     #"fluxes" : opt(g*20,10),
     "positions": opt(g*100, 0),
     "separation": opt(g*30, 0),
-    "position_angle": opt(g*1e-4, 10),
+    "position_angle": opt(g*1e-2, 10),
     "primary_spectrum": opt(g*50, 20),
     "secondary_spectrum": opt(g*50, 20),#, (20, 1.5)),
-    "cold_mask_shift": opt(g*5000, 120),
-    "cold_mask_rot": opt(g*500, 120),
-    #"cold_mask_scale": opt(g*3000, 150),
-    #"cold_mask_shear": opt(g*1000, 150),
-    #"primary_scale": opt(g*100, 150),
-    #"primary_rot": opt(g*100, 150),
-    #"primary_shear": opt(g*100, 150),
-    "aberrations": opt(g*100,30),#, (150, g*0.2)),
-    #"spectrum": opt(g*50, 20)#, (150, g*200), (200, g*300), (250, g*400)),
-    #"spectrum": opt(g*0.01, 20),
-    #"softening": opt(g*1e3, 200),
-    #"breathing": opt(g*1000,150),
-    #"rot": opt(g*100, 50),
+    "cold_mask_shift": opt(g*50, 60),
+    "cold_mask_rot": opt(g*10, 60),
+    "aberrations": opt(g*10,30),#, (150, g*0.2)),
+    "bias": opt(g*20, 40)
 }
 groups = list(things.keys())
 
 
 # %%
-losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 300)
+losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 150)
 
 # %%
 #plt.plot(losses)
 
 # %%
-#plot_params(models, groups, xw = 3)
+losses[-1]
+
+# %%
+#plot_params(models, groups, xw = 2)
 #plot_comparison(model_binary, models[-1], exposures_binary)
+
+# %%
+
 
 # %%
 models[-1].params
 
-# %%
-"""plt.figure(figsize=(10,10))
-
-wv, filt = calc_throughput("F110W", nwavels=nwavels)
-
-#plt.plot(wavels, params.get("spectrum.U10764_F110W"))
-plt.plot(wv, 10**(NonNormalisedClippedPolySpectrum(np.linspace(-1, 1, nwavels), models[-1].get("primary_spectrum.U20081_F110W")).weights))#), yerr = spectrum_err)
-plt.plot(wv, 10**(NonNormalisedClippedPolySpectrum(np.linspace(-1, 1, nwavels), models[-1].get("secondary_spectrum.U20081_F110W")).weights))#), yerr = spectrum_err)
-
-plt.xlabel("Wavelength (nm)")
-plt.ylabel("Relative Spectral Intensity")"""
 
 # %%
 
@@ -378,23 +371,41 @@ np.diag(np.sqrt(np.linalg.inv(fishers['n8yj59glq']['secondary_spectrum'])))
 
 def make_psf_model(modelparams, fishers):
 
-    print(fishers)
-
+    #@zdx.filter_jit
     def psf_model(data, model):
 
         params = {
             "primary_spectrum": {},
             "secondary_spectrum": {},
             "positions": {},
-            "position_angle": 0., 
-            "separation": 0. , 
-            "cold_mask_shift": {},
-            "aberrations": {},
+            #"position_angle": 0., 
+            #"separation": 0. , 
+            #"cold_mask_shift": {},
+            #"aberrations": {},
         }
 
         for exp in exposures_binary:
-
             #params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Normal(0,1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj53vfq']['fluxes'])))[0][0] + modelparams.get(exp.map_param("fluxes"))
+            """
+            params["position_angle"] = npy.sample("Position Angle", dist.Normal(modelparams.get("position_angle"), 1))
+
+            params["separation"] = npy.sample("Separation", dist.Normal(modelparams.get("separation"), 1))
+
+            #params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[0][0] + modelparams.get(exp.map_param("cold_mask_shift"))[0], npy.sample("Cold Y", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[1][1] + modelparams.get(exp.map_param("cold_mask_shift"))[1]])
+            
+            params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Normal(modelparams.get(exp.map_param("positions"))[0], 1)), npy.sample("Y", dist.Normal(modelparams.get(exp.map_param("positions"))[1], 1))])
+
+            params["primary_spectrum"][exp.fit.get_key(exp, "primary_spectrum")] = np.asarray([
+                npy.sample("primary "+poly_names[x], dist.Normal(modelparams.get(exp.map_param("primary_spectrum"))[i],1)) for i, x in enumerate(range(0,5))
+                
+            ])
+
+            params["secondary_spectrum"][exp.fit.get_key(exp, "secondary_spectrum")] = np.asarray([
+                npy.sample("secondary " + poly_names[x], dist.Normal(modelparams.get(exp.map_param("secondary_spectrum"))[i] ,1)) for i, x in enumerate(range(0,5))
+                
+            ])"""
+
+                        #params["fluxes"][exp.fit.get_key(exp, "fluxes")] = npy.sample("Flux", dist.Normal(0,1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj53vfq']['fluxes'])))[0][0] + modelparams.get(exp.map_param("fluxes"))
 
             params["position_angle"] = npy.sample("Position Angle", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['position_angle'])))[0][0] + modelparams.get("position_angle")
 
@@ -416,11 +427,10 @@ def make_psf_model(modelparams, fishers):
 
 
 
-            params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.asarray([
-                npy.sample(aberration_names[x], dist.Normal(0,1))/np.sqrt(fishers['n8yj59glq']['aberrations'][i][i]) + modelparams.get(exp.map_param("aberrations"))[i] for i, x in enumerate(range(4,30))
+            #params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.asarray([
+            #    npy.sample(aberration_names[x], dist.Normal(0,1))/np.sqrt(fishers['n8yj59glq']['aberrations'][i][i]) + modelparams.get(exp.map_param("aberrations"))[i] for i, x in enumerate(range(4,30))
                 
-            ])
-
+            #])
 
         params = ModelParams(params)
 
@@ -445,11 +455,13 @@ sampler = npy.infer.MCMC(
     npy.infer.NUTS(make_psf_model(models[-1], jtu.tree_map(lambda x: np.abs(x), fishers)), 
                    init_strategy=npy.infer.init_to_sample,
                     dense_mass=False),
-    num_warmup=1000,
-    num_samples=1000,
+    num_warmup=500,
+    num_samples=500,
     #num_chains=6,
-    #chain_method='vectorized'
+    #chain_method='vectorized',
     progress_bar=True,
+    chain_method = zdx.filter_jit,
+    #jit_model_args=True,
 )
 
 sampler.run(jr.PRNGKey(0),exposures_binary[0], model_binary)
@@ -461,11 +473,9 @@ consumer = cc.ChainConsumer().add_chain(chain)
 #consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
 fig = consumer.plotter.plot()
-fig.savefig("turbo_grid_search_chains_just_binary.png")
+fig.savefig("new_turbo.png")
 #plt.close()
 
 plt.show()
 
 
-
-# %%

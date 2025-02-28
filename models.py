@@ -88,13 +88,15 @@ class Exposure(zdx.Base):
     target: str = eqx.field(static=True)
     filter: str = eqx.field(static=True)
     mjd: str = eqx.field(static=True)
+    exptime: str = eqx.field(static=True)
     data: Array
     err: Array
     bad: Array
 
+
     fit: object = eqx.field(static=True)
 
-    def __init__(self, filename, name, filter, data, err, bad, fit, mjd):
+    def __init__(self, filename, name, filter, data, err, bad, fit, mjd, exptime):
         """
         Initialise exposure
         """
@@ -108,6 +110,7 @@ class Exposure(zdx.Base):
         self.mjd = mjd
 
         self.fit = fit
+        self.exptime = exptime
     
     def get_key(self, param):
         return self.fit.get_key(self, param)
@@ -177,7 +180,12 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     name = hdr['TARGNAME']
     filter = hdr['FILTER']
 
+    exptime = float(hdr['EXPTIME'])
+    gain = float(hdr['ADCGAIN'])
+
     mjd = hdr['EXPSTART']
+
+    print(hdr['CAL_VER'])
 
     if crop:
         w = WCS(image_hdr)
@@ -194,7 +202,11 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
 
-    return Exposure(filename, name, filter, tf(data), tf(err), tf(bad), fit, mjd)
+    err_with_poisson = np.sqrt(data/(gain*exptime) + err**2)
+
+    bad_with_poisson = np.isnan(err_with_poisson)
+
+    return Exposure(filename, name, filter, tf(data), tf(err_with_poisson), tf(bad_with_poisson), fit, mjd, exptime)
 
 class ModelFit(zdx.Base):
 
@@ -692,13 +704,14 @@ class BinaryPolySpectrumFit(ModelFit):
         source = source.set("secondary.position", positions[1])
         
         optics = self.update_optics(model, exposure)
+        detector = self.update_detector(model, exposure)
 
         psfs = optics.model(source, return_psf=True)
         psf = psfs.data.sum(tuple(range(psfs.ndim)))
         pixel_scale = psfs.pixel_scale.mean()
 
         psf_obj = dl.PSF(psf, pixel_scale)
-        return model.detector.model(psf_obj, return_psf=False)
+        return detector.model(psf_obj, return_psf=False)
 
 
 class BaseModeller(zdx.Base):
