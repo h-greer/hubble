@@ -10,7 +10,7 @@ import jax.scipy as jsp
 import jax
 import numpy
 
-#jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_enable_x64", True)
 
 # Optimisation imports
 import zodiax as zdx
@@ -370,6 +370,7 @@ np.diag(np.sqrt(np.linalg.inv(fishers['n8yj59glq']['secondary_spectrum'])))
 # %%
 
 
+
 def make_psf_model(modelparams, fishers):
 
     #@zdx.filter_jit
@@ -377,29 +378,49 @@ def make_psf_model(modelparams, fishers):
 
         params = {
             "primary_spectrum": {},
-            #"secondary_spectrum": {},
+            "secondary_spectrum": {},
             "positions": {},
             #"position_angle": 0., 
             #"separation": 0. , 
-            "cold_mask_shift": {},
+            #"cold_mask_shift": {},
             #"aberrations": {},
         }
 
         for exp in exposures_binary:
-            params["position_angle"] = npy.sample("Position Angle", dist.Normal(modelparams.get("position_angle"), np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['position_angle'])))[0][0]))
 
-            params["separation"] = npy.sample("Separation", dist.Normal(modelparams.get("separation"), np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['separation'])))[0][0]))
+            pos_mean = modelparams.get(exp.map_param("positions"))
+            pos_std = np.diag(np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['positions']))))
 
-            params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[0][0] + modelparams.get(exp.map_param("cold_mask_shift"))[0], npy.sample("Cold Y", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[1][1] + modelparams.get(exp.map_param("cold_mask_shift"))[1]])
+            primary_mean = modelparams.get(exp.map_param("primary_spectrum"))
+            primary_std = np.diag(np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['primary_spectrum']))))
+
+            secondary_mean = modelparams.get(exp.map_param("secondary_spectrum"))
+            secondary_std = np.diag(np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['secondary_spectrum']))))
+
+            position_angle = npy.sample("position_raw", dist.Normal(0,1))
+            separation = npy.sample("separation_raw", dist.Normal(0,1))
+            X = npy.sample("x_raw", dist.Normal(0,1))
+            Y = npy.sample("y_raw", dist.Normal(0,1))
+
+            primary_spectrum = npy.sample("primary_raw", dist.Normal(np.zeros(5), np.ones(5)))
+            secondary_spectrum = npy.sample("secondary_raw", dist.Normal(np.zeros(5), np.ones(5)))
+
+            params["position_angle"] = npy.deterministic("Position Angle", modelparams.get("position_angle") + position_angle*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['position_angle'])))[0][0])
+
+            params["separation"] = npy.deterministic("Separation", modelparams.get("separation") + separation* np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['separation'])))[0][0])
+
+            #params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[0][0] + modelparams.get(exp.map_param("cold_mask_shift"))[0], npy.sample("Cold Y", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[1][1] + modelparams.get(exp.map_param("cold_mask_shift"))[1]])
+
             
-            params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Normal(modelparams.get(exp.map_param("positions"))[0],np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['positions'])))[0][0])), npy.sample("Y", dist.Normal(modelparams.get(exp.map_param("positions"))[1], np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['positions'])))[1][1]))])
+            
+            params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.deterministic("X", pos_mean[0]+ X*pos_std[0]), npy.deterministic("Y", pos_mean[1]+ Y*pos_std[1])])
 
             params["primary_spectrum"][exp.fit.get_key(exp, "primary_spectrum")] = np.asarray([
-                npy.sample("primary "+poly_names[x], dist.Normal(modelparams.get(exp.map_param("primary_spectrum"))[i], np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['primary_spectrum'])))[i][i])) for i, x in enumerate(range(0,5))    
+                npy.deterministic("primary " +poly_names[x], primary_mean[i] + primary_spectrum[i]*primary_std[i]) for i, x in enumerate(range(0,5))    
             ])
 
             params["secondary_spectrum"][exp.fit.get_key(exp, "secondary_spectrum")] = np.asarray([
-                npy.sample("secondary_spectrum "+poly_names[x], dist.Normal(modelparams.get(exp.map_param("secondary_spectrum"))[i], np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['secondary_spectrum'])))[i][i])) for i, x in enumerate(range(0,5))    
+                npy.deterministic("secondary " +poly_names[x], secondary_mean[i] + secondary_spectrum[i]*secondary_std[i]) for i, x in enumerate(range(0,5))    
             ])
 
 
@@ -431,10 +452,10 @@ def make_psf_model(modelparams, fishers):
 
 sampler = npy.infer.MCMC(
     npy.infer.NUTS(make_psf_model(models[-1], jtu.tree_map(lambda x: np.abs(x), fishers)), 
-                   init_strategy=npy.infer.init_to_sample,
+                   init_strategy=npy.infer.init_to_mean,
                     dense_mass=False),
-    num_warmup=1500,
-    num_samples=1500,
+    num_warmup=500,
+    num_samples=500,
     #num_chains=6,
     #chain_method='vectorized',
     progress_bar=True,
@@ -451,7 +472,7 @@ consumer = cc.ChainConsumer().add_chain(chain)
 #consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
 fig = consumer.plotter.plot()
-fig.savefig("new_turbo_32_adjusted.png")
+fig.savefig("new_turbo_32_adj.png")
 #plt.close()
 
 plt.show()

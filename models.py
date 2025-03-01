@@ -196,8 +196,9 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
         info = Cutout2D(info, centre, crop, wcs=w).data
 
     bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32))
-    #if extra_bad is not None:
-    #    bad = bad | extra_bad
+    if extra_bad is not None:
+        print("extra bad")
+        bad = bad | tf(extra_bad)
 
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
