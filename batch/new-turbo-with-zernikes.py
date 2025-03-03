@@ -443,8 +443,8 @@ def make_psf_model(modelparams, fishers):
             image = np.where(bad, 0, img)
             error = np.where(bad, 1e5, err)
             
-            image_d = dist.Normal(image, error)
-            return npy.sample("psf", image_d, obs=np.where(bad,0,model_data))
+            image_d = dist.Normal(model_data, error)
+            return npy.sample("psf", image_d, obs=np.where(bad,0,image))
     
     return psf_model
 
@@ -454,8 +454,8 @@ sampler = npy.infer.MCMC(
     npy.infer.NUTS(make_psf_model(models[-1], jtu.tree_map(lambda x: np.abs(x), fishers)), 
                    init_strategy=npy.infer.init_to_mean,
                     dense_mass=False),
-    num_warmup=500,
-    num_samples=500,
+    num_warmup=1000,
+    num_samples=1000,
     #num_chains=6,
     #chain_method='vectorized',
     progress_bar=True,
@@ -467,7 +467,7 @@ sampler.run(jr.PRNGKey(0),exposures_binary[0], model_binary)
 
 sampler.print_summary()
 
-chain = cc.Chain.from_numpyro(sampler, name="numpyro chain", color="teal")
+chain = cc.Chain.from_numpyro(sampler, name="numpyro chain", color="blue", var_names=["~primary_raw", "~secondary_raw", "~position_raw", "~separation_raw", "~x_raw", "~y_raw"])
 consumer = cc.ChainConsumer().add_chain(chain)
 #consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
