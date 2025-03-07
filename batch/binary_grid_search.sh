@@ -3,7 +3,7 @@
 #SBATCH --array=0-67                    
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=4G
-#SBATCH --time=6:00
+#SBATCH --time=6:00:00
 #SBATCH -o binary/%a.out  # STDOUT
 #SBATCH -e binary/%a.err  # STDERR
 
