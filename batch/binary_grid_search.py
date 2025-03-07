@@ -52,7 +52,7 @@ def set_array(pytree):
     floats = jtu.tree_map(lambda x: np.array(x, dtype=dtype), floats)
     return eqx.combine(floats, other)
 
-number = int(sys.argv[1])
+number = 1#int(sys.argv[1])
 
 
 # %%
@@ -201,13 +201,16 @@ def tree_sum(spec, val):
     return jtu.tree_map(lambda x: x+val, spec)
 
 
+def list_to_dict(x):
+    return dlu.list2dictionary(list(set(x)), ordered=True)
+
 def extract_binary_params(params, exposures, x, y, theta, r, flux, contrast):
     #fluxes = dlu.fluxes_from_contrast(flux, contrast)
     param_dict = params.params.copy()
     param_dict["primary_spectrum"] = param_dict["spectrum"]
     param_dict["secondary_spectrum"] = param_dict["spectrum"]
-    param_dict["fluxes"] = dlu.list2dictionary([(exp.fit.get_key(exp, "fluxes"), flux) for exp in exposures], ordered=True)#tree_mul(param_dict["spectrum"], fluxes[0])
-    param_dict["contrast"] = dlu.list2dictionary([(exp.fit.get_key(exp, "contrast"), contrast) for exp in exposures], ordered=True) #tree_mul(param_dict["spectrum"], fluxes[1])
+    param_dict["fluxes"] = list_to_dict([(exp.fit.get_key(exp, "fluxes"), flux) for exp in exposures])#tree_mul(param_dict["spectrum"], fluxes[0])
+    param_dict["contrast"] = list_to_dict([(exp.fit.get_key(exp, "contrast"), contrast) for exp in exposures]) #tree_mul(param_dict["spectrum"], fluxes[1])
     param_dict["positions"] = tree_sum(param_dict["positions"], np.array([x,y]))
     param_dict["separation"] = r#dlu.list2dictionary([(exp.fit.get_key(exp, "separation"), r) for exp in exposures])
     param_dict["position_angle"] = theta #dlu.list2dictionary([(exp.fit.get_key(exp, "position_angle"), theta) for exp in exposures])
