@@ -21,7 +21,7 @@ from matplotlib import pyplot as plt
 import matplotlib
 
 
-def plot_params(models, groups, xw = 4):
+def plot_params(models, groups, xw = 4, save=False):
     yw = int(np.ceil(len(groups)/xw))
 
     print(len(groups))
@@ -46,11 +46,12 @@ def plot_params(models, groups, xw = 4):
             sp.plot([x.get(param) for x in models])
         
     fig.tight_layout()
+    if save:
+        fig.savefig(f"{save}.png")
 
 
 def plot_comparison(model, params, exposures):
-    
-    for exp in exposures:
+    for f, exp in enumerate(exposures):
 
         fig, axs = plt.subplots(1,5, figsize=(50,8))
 
@@ -115,6 +116,9 @@ def plot_comparison(model, params, exposures):
         for i in range(4):
             axs[i].set_xticks([])
             axs[i].set_yticks([])
+
+        if save:
+            fig.savefig(f"{save}_{i}.png")
 
 def plot_spectra(model, params, exposures):
 
