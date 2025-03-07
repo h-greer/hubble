@@ -68,7 +68,10 @@ def plot_comparison(model, params, exposures, save=False):
 
         coords = dlu.pixel_coords(512, 2.4)
         cropped_frame = exp.data**0.125
-        telescope_frame = exp.fit(model,exp)**0.125
+
+        fit = exp.fit(model, exp)
+
+        telescope_frame = fit**0.125
 
         vm = max(np.nanmax(cropped_frame),np.nanmax(telescope_frame))
         cd=axs[0].imshow(cropped_frame, vmin=0,vmax=vm,cmap=cmap)
@@ -94,7 +97,7 @@ def plot_comparison(model, params, exposures, save=False):
         apt =axs[2].imshow(support_mask*opd,cmap=cmap,vmin=-olim, vmax=olim)
         plt.colorbar(apt, ax=axs[2]).set_label("OPD (nm)")
         #axs[4].imshow(telescope.detector.pixel_response.pixel_response)
-        resid = (exp.data - exp.fit(model,exp))/exp.err
+        resid = (exp.data - fit)/exp.err
         rlim = np.nanmax(np.abs(resid))
         resid=axs[3].imshow(resid, cmap='seismic',vmin=-rlim, vmax=rlim)
         plt.colorbar(resid,ax=axs[3])
@@ -118,7 +121,7 @@ def plot_comparison(model, params, exposures, save=False):
             axs[i].set_yticks([])
 
         if save:
-            fig.savefig(f"{save}_{i}.png")
+            fig.savefig(f"{save}_{f}.png")
 
 def plot_spectra(model, params, exposures):
 
