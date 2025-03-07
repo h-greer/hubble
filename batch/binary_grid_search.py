@@ -75,9 +75,11 @@ dfiles = glob.glob(ddir+"*_asc.fits")
 files = [x[0]+"_cal.fits" for x in fits.getdata(dfiles[number], ext=1)[0:2]]
 print(files)
 
-exposures_single = [exposure_from_file(ddir + file, SinglePointPolySpectrumFit(nwavels), crop=wid) for file in files]
+exposures_single = [e for e in [exposure_from_file(ddir + file, SinglePointPolySpectrumFit(nwavels), crop=wid) for file in files] if e.data.shape == (wid,wid)]
 
-exposures_binary = [exposure_from_file(ddir + file, BinaryPolySpectrumFit(nwavels), crop=wid) for file in files]
+exposures_binary = [e for e in [exposure_from_file(ddir + file, BinaryPolySpectrumFit(nwavels), crop=wid) for file in files] if e.data.shape == (wid, wid)]
+
+print(len(exposures_single))
 
 # %%
 params = {
@@ -299,7 +301,7 @@ for x in x_vals:
 best_params
 
 # %%
-plot_comparison(model_binary, best_params, exposures_binary)
+plot_comparison(model_binary, best_params, exposures_binary, save=f"binary/grid_{number}_fit")
 
 # %%
 g = 5e-3
@@ -325,8 +327,8 @@ losses, models = optimise(best_params, set_array(model_binary), exposures_binary
 plt.plot(losses)
 
 # %%
-plot_params(models, groups, xw = 3, save = f"binary/{number}_model")
-plot_comparison(model_binary, models[-1], exposures_binary, save = f"binary/{number}_fit")
+plot_params(models, groups, xw = 3, save = f"binary/binary_{number}_model")
+plot_comparison(model_binary, models[-1], exposures_binary, save = f"binary/binary_{number}_fit")
 
 # %%
 print(models[-1].params)
