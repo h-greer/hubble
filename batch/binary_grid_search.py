@@ -52,7 +52,7 @@ def set_array(pytree):
     floats = jtu.tree_map(lambda x: np.array(x, dtype=dtype), floats)
     return eqx.combine(floats, other)
 
-number = 1#int(sys.argv[1])
+number = int(sys.argv[1])
 
 
 # %%
