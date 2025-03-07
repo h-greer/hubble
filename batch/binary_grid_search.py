@@ -54,13 +54,12 @@ def set_array(pytree):
 
 number = int(sys.argv[1])
 
+out_dir = "new_binary"
+
 
 # %%
 wid = 64
 oversample = 4
-
-nwavels = 20
-npoly=5
 
 optics = NICMOSOptics(512, wid, oversample)
 
@@ -74,6 +73,19 @@ dfiles = glob.glob(ddir+"*_asc.fits")
 
 files = [x[0]+"_cal.fits" for x in fits.getdata(dfiles[number], ext=1)[0:2]]
 print(files)
+
+filt = fits.getheader(ddir+files[0])["FILTER"]
+print(filt)
+
+if filt[-1] == 'W':
+    nwavels = 20
+    npoly=5
+elif filt[-1] == 'M':
+    nwavels = 8
+    npoly = 2
+else:
+    nwavels = 5
+    npoly = 1
 
 exposures_single = [e for e in [exposure_from_file(ddir + file, SinglePointPolySpectrumFit(nwavels), crop=wid) for file in files] if e.data.shape == (wid,wid)]
 
@@ -301,14 +313,14 @@ for x in x_vals:
 best_params
 
 # %%
-plot_comparison(model_binary, best_params, exposures_binary, save=f"binary/grid_{number}_fit")
+plot_comparison(model_binary, best_params, exposures_binary, save=f"{out_dir}/grid_{number}_fit")
 
 # %%
 g = 5e-3
 things = {
     #"fluxes" : opt(g*20,10),
-    "positions": opt(g*100, 0),
-    "separation": opt(g*30, 0),
+    "positions": opt(g*10, 0),
+    "separation": opt(g*3, 0),
     "position_angle": opt(g*1e-2, 10),
     "primary_spectrum": opt(g*50, 20),
     "secondary_spectrum": opt(g*50, 20),#, (20, 1.5)),
@@ -327,8 +339,8 @@ losses, models = optimise(best_params, set_array(model_binary), exposures_binary
 plt.plot(losses)
 
 # %%
-plot_params(models, groups, xw = 3, save = f"binary/binary_{number}_model")
-plot_comparison(model_binary, models[-1], exposures_binary, save = f"binary/binary_{number}_fit")
+plot_params(models, groups, xw = 3, save = f"{out_dir}/binary_{number}_model")
+plot_comparison(model_binary, models[-1], exposures_binary, save = f"{out_dir}/binary_{number}_fit")
 
 # %%
 print(models[-1].params)
