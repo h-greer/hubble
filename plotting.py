@@ -50,7 +50,7 @@ def plot_params(models, groups, xw = 4, save=False):
         fig.savefig(f"{save}.png")
 
 
-def plot_comparison(model, params, exposures):
+def plot_comparison(model, params, exposures, save=False):
     for f, exp in enumerate(exposures):
 
         fig, axs = plt.subplots(1,5, figsize=(50,8))
