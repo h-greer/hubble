@@ -49,6 +49,7 @@ filter_files = {
     'F090M': get_filter("../data/HST_NICMOS1.F090M.dat"),
     #'F110W': np.asarray(pd.read_csv("../data/HST_NICMOS1.F110W.dat", sep=' '))[::20,:],
     'F110W': get_filter("../data/HST_NICMOS1.F110W.dat")[50:-70],#[::20,:],
+    'F110M': get_filter("../data/HST_NICMOS1.F110M.dat"),
     'F160W': get_filter("../data/HST_NICMOS1.F160W.dat"),
     'POL0S': get_filter("../data/HST_NICMOS1.POL0S.dat"),
     'POL240S': get_filter("../data/HST_NICMOS1.POL240S.dat"),
@@ -226,9 +227,9 @@ class ModelFit(zdx.Base):
             case "breathing":
                 return exposure.key
             case "cold_mask_shift":
-                return exposure.key
+                return exposure.key#"global"
             case "cold_mask_rot":
-                return exposure.filter
+                return exposure.key#"global"
             case "cold_mask_scale":
                 return exposure.filter
             case "cold_mask_shear":
@@ -243,6 +244,9 @@ class ModelFit(zdx.Base):
                 return f"{exposure.target}_{exposure.filter}"
             case "spectrum" | "primary_spectrum" | "secondary_spectrum":
                 return f"{exposure.target}_{exposure.filter}"
+
+            case "primary_distortion" | "cold_mask_distortion":
+                return "global"
             #case "displacement":
             #    return exposure.filter
             #case _:
@@ -257,7 +261,7 @@ class ModelFit(zdx.Base):
         """
         currently everything's global so this is just a fallthrough
         """
-        if param in ["fluxes", "positions", "aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "jitter"]:
+        if param in ["fluxes", "positions", "aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "jitter", "primary_distortion", "cold_mask_distortion"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
@@ -324,6 +328,15 @@ class ModelFit(zdx.Base):
         if "displacement" in model.params.keys():
             disp = model.get(self.map_param(exposure, "displacement"))
             optics = optics.set("defocus", disp)
+
+        if "primary_distortion" in model.params.keys():
+            dist = model.get(self.map_param(exposure, "primary_distortion"))
+            optics = optics.set("main_aperture.transformation.distortion", dist)
+
+        if "cold_mask_distortion" in model.params.keys():
+            dist = model.get(self.map_param(exposure, "cold_mask_distortion"))
+            optics = optics.set("cold_mask.transformation.distortion", dist)        
+
         return optics
 
     def update_detector(self, model, exposure):

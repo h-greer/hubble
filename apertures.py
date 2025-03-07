@@ -4,6 +4,8 @@ import jax.numpy as np
 import dLux as dl
 import dLux.utils as dlu
 
+import zodiax as zdx
+
 """
 
 Custom apertures for the features of the HST/NICMOS optical system
@@ -45,7 +47,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 radius = 0.065*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4615*1.2, 0.7555*1.2),
+                    translation = (-0.4615*1.2, -0.7555*1.2),
                 ),
                 softening = self.softening
             ),
@@ -53,7 +55,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 radius = 0.065*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4564*1.2, -0.7606*1.2),
+                    translation = (-0.4564*1.2, 0.7606*1.2),
                 ),
                 softening=self.softening
             )
@@ -232,21 +234,102 @@ class NICMOSFresnelOptics(dl.AngularOpticalSystem):
         pixel_scale = dlu.arcsec2rad(true_pixel_scale)
         psf_npixels = self.psf_npixels * self.oversample
 
+        wf *= list(self.layers.values())[0]
+
         # Apply layers
-        for layer in list(self.layers.values()):#[0:2]:
+        #for layer in list(self.layers.values())[0:2]:
             #print(layer)
-            wf *= layer
+        #    wf *= layer
         
         # cold mask offset
         #print(wf)
         #wf *= list(self.layers.values())[2]
-        print(wf)
+        #print(wf)
+        #wf = plane_to_plane(wf, 1e-6 * self.defocus, pad=2)
+        print(wf.amplitude)
+
+        wf = plane_to_plane(wf, self.defocus/1e3, pad=2)
+        print(wf.amplitude)
+
+
+        wf *= list(self.layers.values())[1]
+        wf *= list(self.layers.values())[2]
+
         wf = wf.propagate(psf_npixels, pixel_scale)
-        print(wf)
-        wf = plane_to_plane(wf, 1e-6 * self.defocus, pad=2)
 
 
         if return_wf:
             return wf
         return wf.psf
         
+
+def gen_powers(degree):
+    """
+    Generates the powers required for a 2d polynomial
+    """
+    n = dlu.triangular_number(degree)
+    vals = np.arange(n)
+
+    # Ypows
+    tris = dlu.triangular_number(np.arange(degree))
+    ydiffs = np.repeat(tris, np.arange(1, degree + 1))
+    ypows = vals - ydiffs
+
+    # Xpows
+    tris = dlu.triangular_number(np.arange(1, degree + 1))
+    xdiffs = np.repeat(n - np.flip(tris), np.arange(degree, 0, -1))
+    xpows = np.flip(vals - xdiffs)
+
+    return xpows, ypows
+
+
+def distort_coords(coords, coeffs, pows):
+    pow_base = np.multiply(*(coords[:, None, ...] ** pows[..., None, None]))
+    distortion = np.sum(coeffs[..., None, None] * pow_base[None, ...], axis=1)
+    return coords + distortion
+
+class DistortedCoords(zdx.Base):
+    powers: np.ndarray
+    distortion: np.ndarray
+
+    def __init__(self, order=1, distortion=None):
+        self.powers = np.array(gen_powers(order + 1))#[:, 1:]
+
+        if distortion is None:
+            distortion = np.zeros_like(self.powers)
+        if distortion is not None and distortion.shape != self.powers.shape:
+            raise ValueError("Distortion shape must match powers shape")
+        self.distortion = distortion
+
+    def calculate(self, npix, diameter):
+        coords = dlu.pixel_coords(npix, diameter)
+        return distort_coords(coords, self.distortion, self.powers)
+
+    def apply(self, coords):
+        return distort_coords(coords, self.distortion, self.powers)
+
+class NICMOSDistortedOptics(dl.AngularOpticalSystem):
+    def __init__(self, wf_npixels, psf_npixels, oversample, distortion_orders=5):
+
+        super().__init__(
+            wf_npixels,
+            2.4,
+            [
+                dl.CompoundAperture([
+                    ("main_aperture",HSTMainAperture(transformation=DistortedCoords(order=distortion_orders),softening=2)),
+                    ("cold_mask",NICMOSColdMask(transformation=DistortedCoords(order=distortion_orders), softening=2)),
+                    #("bar",dl.Spider(width=2.4,angles=[90],))
+                ],normalise=True, transformation=dl.CoordTransform(rotation=np.pi/4)),
+                dl.AberratedAperture(
+                    dl.layers.CircularAperture(1.2, transformation=dl.CoordTransform()),
+                    noll_inds=np.arange(4,30),#,12,13,14,15,16,17,18,19,20,21,22]),
+                    coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9,#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
+                ),
+            ],
+            psf_npixels,
+            0.0431,
+            oversample
+        )
+    #def apply(self, wavefront):
+
+
