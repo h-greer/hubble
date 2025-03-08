@@ -231,17 +231,6 @@ def extract_binary_params(params, exposures, x, y, theta, r, flux, contrast):
     return ModelParams(param_dict)
 
 
-"""def inject_binary_values(x, y, theta, r, flux, contrast, initial_params):
-    fluxes = dlu.fluxes_from_contrast(flux, contrast)
-    injected_params = ModelParams({
-        "primary_spectrum": spectra_mul(initial_params.get("primary_spectrum"),fluxes[0]),
-        "secondary_spectrum": spectra_mul(initial_params.get("secondary_spectrum"),fluxes[1]),
-        "positions": np.asarray([x,y]),
-        "position_angle": theta,
-        "separation": r
-    })
-    return injected_params.inject(initial_params)
-"""
 
 # %%
 binary_params = extract_binary_params(models[-1], exposures_binary, 0., 0., 0., 0., 0., 1.)
@@ -255,62 +244,76 @@ def loss_fn(params, exposures, model):
 
 
 # %%
-#things = {"primary_spectrum": opt(4e-6, 0), "secondary_spectrum": opt(4e-6, 0)}#, "contrast": opt(1e-8, 10)}
-things = {"fluxes": opt(5e-11, 0)}#, "contrast": opt(5e-11, 10)}
+
 
 @zdx.filter_jit
-@zdx.filter_value_and_grad(list(things.keys()))
-def binary_loss_fn(params, exposures, model):
-    mdl = params.inject(model)
-    return np.nansum(np.asarray([posterior(mdl,exposure) for exposure in exposures]))
+def fit_binary_flux(params, exposures, x, y, theta, r, contrast):
+    base_params = extract_binary_params(params, exposures, x, y, theta, r, 0., contrast)
 
-def binary_optimise(params, model, exposures, things, niter):
-    paths = list(things.keys())
-    optimisers = [things[i] for i in paths]
+    mdl = params.inject(model_binary)
+
     
-    optim, opt_state = zdx.get_optimiser(
-        params, paths, optimisers
-    )
+    mean_flux = 0.
 
-    losses, models = [], []
-    for i in (range(niter)):
-        loss, grads = binary_loss_fn(params,exposures, model)
-        #grads = jtu.tree_map(lambda x, y: x * np.abs(y), grads, ModelParams(lrs.params))
-        updates, opt_state = optim.update(grads, opt_state)
-        params = zdx.apply_updates(params, updates)
+    for exp in exposures:
 
-        models.append(params)
-        losses.append(loss)
+        #print(params.params["spectrum"])
+
+        spec = params.get(exp.fit.map_param(exp, "spectrum"))[0]
+        #print(spec)
+
+        psf = exp.fit(mdl,exp).flatten()
+        psf= np.where(exp.bad.flatten(), 0., psf)
+
+        psf = psf/np.sum(psf)
+        #psf.at[exp.bad.flatten()].set(0.)
+
+        data = exp.data.flatten()
+        #data= data.at[exp.bad.flatten()].set(0.)
+        data= np.where(exp.bad.flatten(), 0., data)
+
+
+        design = np.transpose(np.vstack((np.ones(len(psf)), psf)))
+
+        flux_raw, _, _, _ = np.linalg.lstsq(design, data)
+        
+        true_flux= np.log10(flux_raw[1]/nwavels/(1+contrast)) - spec
+        #print(true_flux)
+
+        mean_flux += true_flux/len(exposures)
     
-    return losses, models
+    flux_params = extract_binary_params(params, exposures, x, y, theta, r, mean_flux, contrast)
+
+    return loss_fn(flux_params, exposures, model_binary), flux_params  
 
 # %%
-binary_params
 
-# %%
-x_vals = np.linspace(-5, 5, 4)
-y_vals = np.linspace(-5, 5, 4)
-theta_vals = np.arange(4)*np.pi/2#np.linspace(0, 2*np.pi, 4)
-r_vals = np.asarray([1.5, 3])#np.linspace(0, 5, 2)
+#x_vals = np.linspace(-5, 5, 4)
+#y_vals = np.linspace(-5, 5, 4)
+theta_vals = np.linspace(0, 2*np.pi, 10)#np.arange(4)*np.pi/2#np.linspace(0, 2*np.pi, 4)
+r_vals = np.linspace(0,10,8)#np.asarray([1.5, 3])#np.linspace(0, 5, 2)
+contrast_vals = np.linspace(0.2, 3, 6)
 
 min_loss = np.inf
 best_params = None
 
-for x in x_vals:
-    for y in y_vals:
-        for theta in theta_vals:
-            for r in r_vals:
-                binary_params = extract_binary_params(models[-1], exposures_binary, x, y, theta, r, 0., 1.)
-                #binary_params = extract_binary_params(models[-1], exposures_binary, 0, 0, 0, 0, 0., 1.)#np.log10(0.5), 1.)
-                losses, bms = binary_optimise(binary_params, model_binary, exposures_binary, things, 20)
-                print(losses[-1])
-                if losses[-1] < min_loss and min_loss != 0.0:
-                    min_loss = losses[-1]
-                    best_params = bms[-1]
+#for x in x_vals:
+    #for y in y_vals:
+for theta in theta_vals:
+    for r in r_vals:
+        for cnt in contrast_vals:
+            x = r*np.cos(theta)/2
+            y = r*np.sin(theta)/2
+            loss, params = fit_binary_flux(models[-1], exposures_binary, x, y, theta, r, cnt)
+
+            print(loss)
+            if loss < min_loss and min_loss != 0.0:
+                min_loss = loss
+                best_params = params
                 
 
 # %%
-best_params
+print(best_params.params)
 
 # %%
 plot_comparison(model_binary, best_params, exposures_binary, save=f"{out_dir}/grid_{number}_fit")
@@ -333,7 +336,7 @@ groups = list(things.keys())
 
 
 # %%
-losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 1000)
+losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 300)
 
 # %%
 plt.plot(losses)
