@@ -291,8 +291,8 @@ def fit_binary_flux(params, exposures, x, y, theta, r, contrast):
 #x_vals = np.linspace(-5, 5, 4)
 #y_vals = np.linspace(-5, 5, 4)
 theta_vals = np.linspace(0, 2*np.pi, 10)#np.arange(4)*np.pi/2#np.linspace(0, 2*np.pi, 4)
-r_vals = np.linspace(0,10,8)#np.asarray([1.5, 3])#np.linspace(0, 5, 2)
-contrast_vals = np.linspace(0.2, 3, 6)
+r_vals = np.linspace(1,10,12)#np.asarray([1.5, 3])#np.linspace(0, 5, 2)
+contrast_vals = np.linspace(0.2, 2, 5)
 
 min_loss = np.inf
 best_params = None
