@@ -54,7 +54,7 @@ def set_array(pytree):
 
 number = int(sys.argv[1])
 
-out_dir = "new_binary"
+out_dir = "binary"
 
 
 # %%
@@ -288,9 +288,9 @@ def fit_binary_flux(params, exposures, x, y, theta, r, contrast):
 
 # %%
 
-theta_vals = 360* np.arange(20)/10#np.arange(4)*np.pi/2#np.linspace(0, 2*np.pi, 4)
-r_vals = np.linspace(0,15,12)#np.asarray([1.5, 3])#np.linspace(0, 5, 2)
-contrast_vals = 10**np.linspace(-1, 1, 5)
+theta_vals = 360* np.arange(8)/8#np.arange(4)*np.pi/2#np.linspace(0, 2*np.pi, 4)
+r_vals = np.arange(20)#np.linspace(0,15,20)#np.asarray([1.5, 3])#np.linspace(0, 5, 2)
+contrast_vals = 10**np.linspace(-1, 1, 10)
 min_loss = np.inf
 best_params = None
 
