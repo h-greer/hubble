@@ -245,7 +245,6 @@ def loss_fn(params, exposures, model):
 
 # %%
 
-
 @zdx.filter_jit
 def fit_binary_flux(params, exposures, x, y, theta, r, contrast):
     base_params = extract_binary_params(params, exposures, x, y, theta, r, 0., contrast)
@@ -277,7 +276,7 @@ def fit_binary_flux(params, exposures, x, y, theta, r, contrast):
 
         flux_raw, _, _, _ = np.linalg.lstsq(design, data)
         
-        true_flux= np.log10(flux_raw[1]/nwavels/(1+contrast)) - spec
+        true_flux= np.log10(flux_raw[1]/nwavels * 2/(1+contrast)) - spec
         #print(true_flux)
 
         mean_flux += true_flux/len(exposures)
@@ -288,9 +287,9 @@ def fit_binary_flux(params, exposures, x, y, theta, r, contrast):
 
 # %%
 
-theta_vals = 360* np.arange(8)/8#np.arange(4)*np.pi/2#np.linspace(0, 2*np.pi, 4)
-r_vals = np.arange(20)#np.linspace(0,15,20)#np.asarray([1.5, 3])#np.linspace(0, 5, 2)
-contrast_vals = 10**np.linspace(-1, 1, 10)
+theta_vals = 360* np.arange(16)/16#np.arange(4)*np.pi/2#np.linspace(0, 2*np.pi, 4)
+r_vals = np.arange(50)/2#np.linspace(0,15,20)#np.asarray([1.5, 3])#np.linspace(0, 5, 2)
+contrast_vals = 10**np.linspace(-1, 1, 20)
 min_loss = np.inf
 best_params = None
 
