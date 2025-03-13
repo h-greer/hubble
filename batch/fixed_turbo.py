@@ -388,8 +388,8 @@ def make_psf_model(modelparams, fishers):
     def psf_model(data, model):
 
         params = {
-            #"primary_spectrum": {},
-            #"secondary_spectrum": {},
+            "primary_spectrum": {},
+            "secondary_spectrum": {},
             "positions": {},
         }
 
