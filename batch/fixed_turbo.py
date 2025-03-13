@@ -67,7 +67,7 @@ oversample = 4
 nwavels = 20
 npoly=5
 
-optics = NICMOSOptics(512, wid, oversample)
+optics = NICMOSOptics(256, wid, oversample)
 
 detector = NICMOSDetector(oversample, wid)
 
@@ -349,7 +349,7 @@ groups = list(things.keys())
 
 
 # %%
-losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 150)
+losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 1000)
 
 # %%
 
@@ -410,8 +410,8 @@ def make_psf_model(modelparams, fishers):
         X = npy.sample("x_raw", dist.Normal(0,1))
         Y = npy.sample("y_raw", dist.Normal(0,1))
 
-        #primary_spectrum = npy.sample("primary_raw", dist.Normal(np.zeros(5), np.ones(5)))
-        #secondary_spectrum = npy.sample("secondary_raw", dist.Normal(np.zeros(5), np.ones(5)))
+        primary_spectrum = npy.sample("primary_raw", dist.Normal(np.zeros(5), np.ones(5)))
+        secondary_spectrum = npy.sample("secondary_raw", dist.Normal(np.zeros(5), np.ones(5)))
 
         params["position_angle"] = npy.deterministic("Position Angle", modelparams.get("position_angle") + position_angle*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['position_angle'])))[0][0])
 
@@ -423,13 +423,13 @@ def make_psf_model(modelparams, fishers):
         
         params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.deterministic("X", pos_mean[0]+ X*pos_std[0]), npy.deterministic("Y", pos_mean[1]+ Y*pos_std[1])])
 
-            #params["primary_spectrum"][exp.fit.get_key(exp, "primary_spectrum")] = np.asarray([
-            #    npy.deterministic("primary " +poly_names[x], primary_mean[i] + primary_spectrum[i]*primary_std[i]) for i, x in enumerate#(range(0,5))    
-            #])
+        params["primary_spectrum"][exp.fit.get_key(exp, "primary_spectrum")] = np.asarray([
+            npy.deterministic("primary " +poly_names[x], primary_mean[i] + primary_spectrum[i]*primary_std[i]) for i, x in enumerate(range(0,5))    
+        ])
 
-            #params["secondary_spectrum"][exp.fit.get_key(exp, "secondary_spectrum")] = np.asarray([
-            #    npy.deterministic("secondary " +poly_names[x], secondary_mean[i] + secondary_spectrum[i]*secondary_std[i]) for i, x in enumerate(range(0,5))    
-            #])
+        params["secondary_spectrum"][exp.fit.get_key(exp, "secondary_spectrum")] = np.asarray([
+            npy.deterministic("secondary " +poly_names[x], secondary_mean[i] + secondary_spectrum[i]*secondary_std[i]) for i, x in enumerate(range(0,5))    
+        ])
 
 
 
@@ -477,7 +477,7 @@ sampler.run(jr.PRNGKey(0),exposures_binary[0], model_binary)
 
 sampler.print_summary()
 
-chain = cc.Chain.from_numpyro(sampler, name="numpyro chain", color="blue")
+chain = cc.Chain.from_numpyro(sampler, name="numpyro chain", color="blue", var_names=["~primary_raw", "~secondary_raw", "~position_raw", "~separation_raw", "~x_raw", "~y_raw"])
 consumer = cc.ChainConsumer().add_chain(chain)
 #consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
