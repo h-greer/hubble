@@ -376,39 +376,9 @@ models[-1].params
 rc = True
 fishers = calc_fishers(models[-1].inject(model_binary), exposures_binary, groups, recalculate=rc)
 
-# %%
-fishers
-
-# %%
-aberration_names = [dlu.zernike_name(x) for x in range(40)]
-poly_names = ["poly "+ x for x in ["0", "1", "2", "3", "4"]]
-
-# %%
-models[-1].params
-
-# %%
-new_params = ModelParams({"separation": 12.})
-
-# %%
-new_params + models[-1].params
-
-# %%
-ModelParams(models[-1].params | new_params).params
-
-# %%
-np.sqrt((np.linalg.inv(fishers['n8yj59glq']['position_angle'])))[0][0]
-
-# %%
-np.sqrt((np.linalg.inv(fishers['n8yj59glq']['separation'])))[0][0]
-
-# %%
-np.diag(np.sqrt(np.linalg.inv(fishers['n8yj59glq']['secondary_spectrum'])))
-
-# %%
 
 
-# %%
-stop
+
 
 # %%
 
