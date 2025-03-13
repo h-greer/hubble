@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name fixed_turbo
 #SBATCH --cpus-per-task=8
-#SBATCH --natsks=1
+#SBATCH --ntasks=1
 #SBATCH --mem-per-cpu=2G
 #SBATCH --time=1-0:00
 #SBATCH -o turbo.%j.out  # STDOUT
