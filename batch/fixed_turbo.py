@@ -368,6 +368,8 @@ models[-1].params
 
 # %%
 
+aberration_names = [dlu.zernike_name(x) for x in range(40)]
+poly_names = ["poly "+ x for x in ["0", "1", "2", "3", "4"]]
 
 # %%
 
