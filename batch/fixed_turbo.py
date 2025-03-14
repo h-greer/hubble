@@ -349,7 +349,7 @@ groups = list(things.keys())
 
 
 # %%
-losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 1000)
+losses, models = optimise(best_params, set_array(model_binary), exposures_binary, things, 2000)
 
 # %%
 
@@ -393,6 +393,7 @@ def make_psf_model(modelparams, fishers):
             "primary_spectrum": {},
             "secondary_spectrum": {},
             "positions": {},
+            "cold_mask_shift": {},
         }
 
         exp = exposures_binary[0]
@@ -415,11 +416,18 @@ def make_psf_model(modelparams, fishers):
         primary_spectrum = npy.sample("primary_raw", dist.Normal(np.zeros(5), np.ones(5)))
         secondary_spectrum = npy.sample("secondary_raw", dist.Normal(np.zeros(5), np.ones(5)))
 
+        cold_mean = modelparams.get(exp.map_param("cold_mask_shift"))
+        cold_std = np.diag(np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift']))))
+        cold_shift = npy.sample("cold_raw", dist.Normal(np.zeros(2), np.ones(2)))
+
+
         params["position_angle"] = npy.deterministic("Position Angle", modelparams.get("position_angle") + position_angle*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['position_angle'])))[0][0])
 
         params["separation"] = npy.deterministic("Separation", modelparams.get("separation") + separation* np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['separation'])))[0][0])
 
         #params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[0][0] + modelparams.get(exp.map_param("cold_mask_shift"))[0], npy.sample("Cold Y", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[1][1] + modelparams.get(exp.map_param("cold_mask_shift"))[1]])
+
+        params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.deterministic("Cold X", cold_mean[0]+cold_shift[0]*cold_std[0]), npy.deterministic("Cold Y", cold_mean[1]+ cold_shift[1]*cold_std[1])])
 
         
         
@@ -465,10 +473,10 @@ def make_psf_model(modelparams, fishers):
 sampler = npy.infer.MCMC(
     npy.infer.NUTS(make_psf_model(models[-1], jtu.tree_map(lambda x: np.abs(x), fishers)), 
                    init_strategy=npy.infer.init_to_mean,
-                    dense_mass=False,
+                    dense_mass=True,
                     max_tree_depth = 5),
-    num_warmup=500,
-    num_samples=500,
+    num_warmup=1000,
+    num_samples=1000,
     #num_chains=6,
     #chain_method='vectorized',
     progress_bar=True,
