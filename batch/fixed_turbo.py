@@ -473,7 +473,7 @@ def make_psf_model(modelparams, fishers):
 sampler = npy.infer.MCMC(
     npy.infer.NUTS(make_psf_model(models[-1], jtu.tree_map(lambda x: np.abs(x), fishers)), 
                    init_strategy=npy.infer.init_to_mean,
-                    dense_mass=[("primary_raw"), ("secondary_raw")],
+                    dense_mass=[("primary_raw",), ("secondary_raw",)],
                     max_tree_depth = 5),
     num_warmup=1000,
     num_samples=1000,
