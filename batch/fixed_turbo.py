@@ -423,7 +423,7 @@ def make_psf_model(modelparams, fishers):
 
         params["position_angle"] = npy.deterministic("Position Angle", modelparams.get("position_angle") + position_angle*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['position_angle'])))[0][0])
 
-        params["separation"] = npy.deterministic("Separation", modelparams.get("separation") + separation* np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['separation'])))[0][0])
+        params["separation"] = npy.deterministic("Separation", modelparams.get("separation") + separation*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['separation'])))[0][0])
 
         #params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[0][0] + modelparams.get(exp.map_param("cold_mask_shift"))[0], npy.sample("Cold Y", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[1][1] + modelparams.get(exp.map_param("cold_mask_shift"))[1]])
 
@@ -473,7 +473,7 @@ def make_psf_model(modelparams, fishers):
 sampler = npy.infer.MCMC(
     npy.infer.NUTS(make_psf_model(models[-1], jtu.tree_map(lambda x: np.abs(x), fishers)), 
                    init_strategy=npy.infer.init_to_mean,
-                    dense_mass=True,
+                    dense_mass=[("primary_raw"), ("secondary_raw")],
                     max_tree_depth = 5),
     num_warmup=1000,
     num_samples=1000,
@@ -487,7 +487,7 @@ sampler.run(jr.PRNGKey(0),exposures_binary[0], model_binary)
 
 sampler.print_summary()
 
-chain = cc.Chain.from_numpyro(sampler, name="numpyro chain", color="blue", var_names=["~primary_raw", "~secondary_raw", "~position_raw", "~separation_raw", "~x_raw", "~y_raw"])
+chain = cc.Chain.from_numpyro(sampler, name="numpyro chain", color="blue", var_names=["~primary_raw", "~secondary_raw", "~position_raw", "~separation_raw", "~x_raw", "~y_raw", "~cold_raw"])
 consumer = cc.ChainConsumer().add_chain(chain)
 #consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
