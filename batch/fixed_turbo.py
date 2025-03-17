@@ -385,19 +385,43 @@ def init_array_from_params(params):
     init_array = {}
     exp = exposures_binary[0]
     pos_mean = params.get(exp.map_param("positions"))
-    print(pos_mean)
     init_array["X"] = pos_mean[0]
     init_array["Y"] = pos_mean[1]
+
+    position_angle = params.get("position_angle")
+    init_array["Position Angle"] = position_angle
+    separation = params.get("separation")
+    init_array["Separation"] = separation
+
+    primary_spectrum = params.get(exp.map_param("primary_spectrum"))
+    secondary_spectrum = params.get(exp.map_param("secondary_spectrum"))
+    init_array["Primary Poly 0"] = primary_spectrum[0]
+    init_array["Primary Poly 1"] = primary_spectrum[1]
+    init_array["Primary Poly 2"] = primary_spectrum[2]
+    init_array["Primary Poly 3"] = primary_spectrum[3]
+    init_array["Primary Poly 4"] = primary_spectrum[4]
+
+    init_array["Secondary Poly 0"] = secondary_spectrum[0]
+    init_array["Secondary Poly 1"] = secondary_spectrum[1]
+    init_array["Secondary Poly 2"] = secondary_spectrum[2]
+    init_array["Secondary Poly 3"] = secondary_spectrum[3]
+    init_array["Secondary Poly 4"] = secondary_spectrum[4]
+
+    
     return init_array
+    
     
 
 # %%
+
 
 
 def psf_model(data, model, model_params):
 
     params = {
         "positions": {},
+        "primary_spectrum": {},
+        "secondary_spectrum": {},
     }
 
     exp = exposures_binary[0]
@@ -405,6 +429,27 @@ def psf_model(data, model, model_params):
     
     
     params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Uniform(-16, 16)), npy.sample("Y", dist.Uniform(-16, 16))])
+
+    params["position_angle"] = npy.sample("Position Angle", dist.Uniform(0,360))
+
+    params["separation"] = npy.sample("Separation", dist.Uniform(0,32))
+
+    params["primary_spectrum"][exp.fit.get_key(exp, "primary_spectrum")]  = np.asarray([
+        npy.sample("Primary Poly 0", dist.Uniform(-10,10)),
+        npy.sample("Primary Poly 1", dist.Uniform(-10,10)),
+        npy.sample("Primary Poly 2", dist.Uniform(-10,10)),
+        npy.sample("Primary Poly 3", dist.Uniform(-10,10)),
+        npy.sample("Primary Poly 4", dist.Uniform(-10,10)),
+    ])
+
+    params["secondary_spectrum"][exp.fit.get_key(exp, "secondary_spectrum")]  = np.asarray([
+        npy.sample("Secondary Poly 0", dist.Uniform(-10,10)),
+        npy.sample("Secondary Poly 1", dist.Uniform(-10,10)),
+        npy.sample("Secondary Poly 2", dist.Uniform(-10,10)),
+        npy.sample("Secondary Poly 3", dist.Uniform(-10,10)),
+        npy.sample("Secondary Poly 4", dist.Uniform(-10,10)),
+    ])
+
 
     params = ModelParams(model_params.params | params)
 
@@ -426,10 +471,13 @@ def psf_model(data, model, model_params):
 sampler = npy.infer.MCMC(
     npy.infer.NUTS(psf_model, 
                    init_strategy=npy.infer.init_to_value(values=init_array_from_params(models[-1])),
-                    dense_mass=False,
+                    dense_mass=[
+                        ("Primary Poly 0","Primary Poly 1","Primary Poly 2", "Primary Poly 3", "Primary Poly 4"),
+                        ("Secondary Poly 0","Secondary Poly 1","Secondary Poly 2", "Secondary Poly 3", "Secondary Poly 4"),
+                    ],
                     max_tree_depth = 5),
-    num_warmup=500,
-    num_samples=500,
+    num_warmup=1000,
+    num_samples=1000,
     #num_chains=6,
     #chain_method='vectorized',
     progress_bar=True,
