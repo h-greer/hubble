@@ -375,122 +375,75 @@ poly_names = ["poly "+ x for x in ["0", "1", "2", "3", "4"]]
 
 
 # %%
-rc = True
-fishers = calc_fishers(models[-1].inject(model_binary), exposures_binary, groups, recalculate=rc)
-
-
+#rc = True
+#fishers = calc_fishers(models[-1].inject(model_binary), exposures_binary, groups, recalculate=rc)
 
 
 
 # %%
-
-def make_psf_model(modelparams, fishers):
-
-    #@zdx.filter_jit
-    def psf_model(data, model):
-
-        params = {
-            "primary_spectrum": {},
-            "secondary_spectrum": {},
-            "positions": {},
-            "cold_mask_shift": {},
-        }
-
-        exp = exposures_binary[0]
-
-
-        pos_mean = modelparams.get(exp.map_param("positions"))
-        pos_std = np.diag(np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['positions']))))
-
-        primary_mean = modelparams.get(exp.map_param("primary_spectrum"))
-        primary_std = np.diag(np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['primary_spectrum']))))
-
-        secondary_mean = modelparams.get(exp.map_param("secondary_spectrum"))
-        secondary_std = np.diag(np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['secondary_spectrum']))))
-
-        position_angle = npy.sample("position_raw", dist.Normal(0,1))
-        separation = npy.sample("separation_raw", dist.Normal(0,1))
-        X = npy.sample("x_raw", dist.Normal(0,1))
-        Y = npy.sample("y_raw", dist.Normal(0,1))
-
-        primary_spectrum = npy.sample("primary_raw", dist.Normal(np.zeros(5), np.ones(5)))
-        secondary_spectrum = npy.sample("secondary_raw", dist.Normal(np.zeros(5), np.ones(5)))
-
-        cold_mean = modelparams.get(exp.map_param("cold_mask_shift"))
-        cold_std = np.diag(np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift']))))
-        cold_shift = npy.sample("cold_raw", dist.Normal(np.zeros(2), np.ones(2)))
-
-
-        params["position_angle"] = npy.deterministic("Position Angle", modelparams.get("position_angle") + position_angle*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['position_angle'])))[0][0])
-
-        params["separation"] = npy.deterministic("Separation", modelparams.get("separation") + separation*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['separation'])))[0][0])
-
-        #params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.sample("Cold X", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[0][0] + modelparams.get(exp.map_param("cold_mask_shift"))[0], npy.sample("Cold Y", dist.Normal(0, 1))*np.sqrt(np.abs(np.linalg.inv(fishers['n8yj59glq']['cold_mask_shift'])))[1][1] + modelparams.get(exp.map_param("cold_mask_shift"))[1]])
-
-        params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([npy.deterministic("Cold X", cold_mean[0]+cold_shift[0]*cold_std[0]), npy.deterministic("Cold Y", cold_mean[1]+ cold_shift[1]*cold_std[1])])
-
-        
-        
-        params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.deterministic("X", pos_mean[0]+ X*pos_std[0]), npy.deterministic("Y", pos_mean[1]+ Y*pos_std[1])])
-
-        params["primary_spectrum"][exp.fit.get_key(exp, "primary_spectrum")] = np.asarray([
-            npy.deterministic("primary " +poly_names[x], primary_mean[i] + primary_spectrum[i]*primary_std[i]) for i, x in enumerate(range(0,5))    
-        ])
-
-        params["secondary_spectrum"][exp.fit.get_key(exp, "secondary_spectrum")] = np.asarray([
-            npy.deterministic("secondary " +poly_names[x], secondary_mean[i] + secondary_spectrum[i]*secondary_std[i]) for i, x in enumerate(range(0,5))    
-        ])
-
-
-
-
-            #params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.asarray([
-            #    npy.sample(aberration_names[x], dist.Normal(0,1))/np.sqrt(fishers['n8yj59glq']['aberrations'][i][i]) + modelparams.get(exp.map_param("aberrations"))[i] for i, x in enumerate(range(4,30))
-                
-            #])
-
-        params = ModelParams(modelparams.params | params)
-
-        #params.replace(modelparams)
-
-        
-        
-        with npy.plate("data", size=len(data.data.flatten())):
-
-            mdl = params.inject(model)
-            model_data = data.fit(mdl, data).flatten()
-            img, err, bad = data.data.flatten(), data.err.flatten(), data.bad.flatten()
-            image = np.where(bad, 0, img)
-            error = np.where(bad, 1e5, err)
-            
-            image_d = dist.Normal(image, error)
-            return npy.sample("psf", image_d, obs=np.where(bad,0,model_data))
+def init_array_from_params(params):
+    init_array = {}
+    exp = exposures_binary[0]
+    pos_mean = params.get(exp.map_param("positions"))
+    print(pos_mean)
+    init_array["X"] = pos_mean[0]
+    init_array["Y"] = pos_mean[1]
+    return init_array
     
-    return psf_model
+
+# %%
+
+
+def psf_model(data, model, model_params):
+
+    params = {
+        "positions": {},
+    }
+
+    exp = exposures_binary[0]
+
+    
+    
+    params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Uniform(-16, 16)), npy.sample("Y", dist.Uniform(-16, 16))])
+
+    params = ModelParams(model_params.params | params)
+
+    
+    
+    with npy.plate("data", size=len(data.data.flatten())):
+
+        mdl = params.inject(model)
+        model_data = data.fit(mdl, data).flatten()
+        img, err, bad = data.data.flatten(), data.err.flatten(), data.bad.flatten()
+        image = np.where(bad, 0, img)
+        error = np.where(bad, 1e5, err)
+        
+        image_d = dist.Normal(image, error)
+        return npy.sample("psf", image_d, obs=np.where(bad,0,model_data))
 
 
 
 sampler = npy.infer.MCMC(
-    npy.infer.NUTS(make_psf_model(models[-1], jtu.tree_map(lambda x: np.abs(x), fishers)), 
-                   init_strategy=npy.infer.init_to_mean,
-                    dense_mass=[("primary_raw",), ("secondary_raw",)],
+    npy.infer.NUTS(psf_model, 
+                   init_strategy=npy.infer.init_to_value(values=init_array_from_params(models[-1])),
+                    dense_mass=False,
                     max_tree_depth = 5),
-    num_warmup=1000,
-    num_samples=1000,
+    num_warmup=500,
+    num_samples=500,
     #num_chains=6,
     #chain_method='vectorized',
     progress_bar=True,
     #jit_model_args=True,
 )
 
-sampler.run(jr.PRNGKey(0),exposures_binary[0], model_binary)
+sampler.run(jr.PRNGKey(0),exposures_binary[0], model_binary, models[-1])
 
 sampler.print_summary()
 
-chain = cc.Chain.from_numpyro(sampler, name="numpyro chain", color="blue", var_names=["~primary_raw", "~secondary_raw", "~position_raw", "~separation_raw", "~x_raw", "~y_raw", "~cold_raw"])
+chain = cc.Chain.from_numpyro(sampler, name="numpyro chain", color="blue")
 consumer = cc.ChainConsumer().add_chain(chain)
 #consumer = consumer.add_truth(cc.Truth(location={"X":-3e-7/pixel_scale, "Y":1e-7/pixel_scale, "Flux":5,"Cold X":0.08, "Cold Y":0.08, "Defocus":5, "Cold Rot":np.pi/4}))
 
 fig = consumer.plotter.plot()
-fig.savefig("fixed_turbo.png")
+fig.savefig("fixed_turbo_uninformative.png")
 plt.close()
