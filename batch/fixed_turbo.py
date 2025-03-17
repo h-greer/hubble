@@ -459,8 +459,8 @@ def psf_model(data, model, model_params):
     ])
 
     params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([
-        npy.sample("Cold X", dist.Uniform(-1, 1)), 
-        npy.sample("Cold Y", dist.Uniform(-1, 1))
+        npy.sample("Cold X", dist.Uniform(-100, 100)), 
+        npy.sample("Cold Y", dist.Uniform(-100, 100))
     ])
 
 
