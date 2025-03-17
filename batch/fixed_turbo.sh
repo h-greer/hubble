@@ -2,7 +2,7 @@
 #SBATCH --job-name fixed_turbo
 #SBATCH --cpus-per-task=8
 #SBATCH --ntasks=1
-#SBATCH --mem-per-cpu=2G
+#SBATCH --mem-per-cpu=1G
 #SBATCH --time=1-0:00
 #SBATCH -o turbo.%j.out  # STDOUT
 #SBATCH -e turbo.%j.err  # STDERR

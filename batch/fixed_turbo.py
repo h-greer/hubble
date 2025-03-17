@@ -407,6 +407,10 @@ def init_array_from_params(params):
     init_array["Secondary Poly 3"] = secondary_spectrum[3]
     init_array["Secondary Poly 4"] = secondary_spectrum[4]
 
+    cold_shift = params.get(exp.map_param("cold_mask_shift"))
+    init_array["Cold X"] = cold_shift[0]
+    init_array["Cold Y"] = cold_shift[1]
+
     
     return init_array
     
@@ -422,13 +426,17 @@ def psf_model(data, model, model_params):
         "positions": {},
         "primary_spectrum": {},
         "secondary_spectrum": {},
+        "cold_mask_shift": {},
     }
 
     exp = exposures_binary[0]
 
     
     
-    params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([npy.sample("X", dist.Uniform(-16, 16)), npy.sample("Y", dist.Uniform(-16, 16))])
+    params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([
+        npy.sample("X", dist.Uniform(-16, 16)), 
+        npy.sample("Y", dist.Uniform(-16, 16))
+    ])
 
     params["position_angle"] = npy.sample("Position Angle", dist.Uniform(0,360))
 
@@ -448,6 +456,11 @@ def psf_model(data, model, model_params):
         npy.sample("Secondary Poly 2", dist.Uniform(-10,10)),
         npy.sample("Secondary Poly 3", dist.Uniform(-10,10)),
         npy.sample("Secondary Poly 4", dist.Uniform(-10,10)),
+    ])
+
+    params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([
+        npy.sample("Cold X", dist.Uniform(-1, 1)), 
+        npy.sample("Cold Y", dist.Uniform(-1, 1))
     ])
 
 
