@@ -411,6 +411,38 @@ def init_array_from_params(params):
     init_array["Cold X"] = cold_shift[0]
     init_array["Cold Y"] = cold_shift[1]
 
+    aberrations = params.get(exp.map_param("aberrations"))
+
+    init_array["Defocus"] = aberrations[0]
+    init_array["Astig X"] = aberrations[1]
+    init_array["Astig Y"] = aberrations[2]
+    init_array["Coma X"] = aberrations[3]
+    init_array["Coma Y"] = aberrations[4]
+    init_array["Trefoil X"] = aberrations[5]
+    init_array["Trefoil Y"] = aberrations[6]
+    init_array["Spherical"] = aberrations[7]
+    init_array["2nd Astig X"] = aberrations[8]
+    init_array["2nd Astig Y"] = aberrations[9]
+    init_array["Quadrafoil X"] = aberrations[10]
+    init_array["Quadrafoil Y"] = aberrations[11]
+    init_array["2nd Coma X"] = aberrations[12]
+    init_array["2nd Coma Y"] = aberrations[13]
+    init_array["2nd Trefoil X"] = aberrations[14]
+    init_array["2nd Trefoil Y"] = aberrations[15]
+    init_array["Pentafoil X"] = aberrations[16]
+    init_array["Pentafoil Y"] = aberrations[17]
+    init_array["2nd Spherical"] = aberrations[18]
+    init_array["3rd Coma X"] = aberrations[19]
+    init_array["3rd Coma Y"] = aberrations[20]
+    init_array["3rd Astig X"] = aberrations[21]
+    init_array["3rd Astig Y"] = aberrations[22]
+    init_array["Hexafoil X"] = aberrations[23]
+    init_array["Hexafoil Y"] = aberrations[24]
+    init_array["4th Coma X"] = aberrations[25]
+
+
+    
+  
     
     return init_array
     
@@ -427,6 +459,7 @@ def psf_model(data, model, model_params):
         "primary_spectrum": {},
         "secondary_spectrum": {},
         "cold_mask_shift": {},
+        "aberrations": {}
     }
 
     exp = exposures_binary[0]
@@ -461,6 +494,36 @@ def psf_model(data, model, model_params):
     params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([
         npy.sample("Cold X", dist.Uniform(-100, 100)), 
         npy.sample("Cold Y", dist.Uniform(-100, 100))
+    ])
+
+    params["aberrations"][exp.fit.get_key(exp, "aberrations")]  = np.asarray([
+        npy.sample("Defocus", dist.Uniform(-50,50)),
+        npy.sample("Astig X", dist.Uniform(-50,50)),
+        npy.sample("Astig Y", dist.Uniform(-50,50)),
+        npy.sample("Coma X", dist.Uniform(-50,50)),
+        npy.sample("Coma Y", dist.Uniform(-50,50)),
+        npy.sample("Trefoil X", dist.Uniform(-50,50)),
+        npy.sample("Trefoil Y", dist.Uniform(-50,50)),
+        npy.sample("Spherical", dist.Uniform(-50,50)),
+        npy.sample("2nd Astig X", dist.Uniform(-50,50)),
+        npy.sample("2nd Astig Y", dist.Uniform(-50,50)),
+        npy.sample("Quadrafoil X", dist.Uniform(-50,50)),
+        npy.sample("Quadrafoil Y", dist.Uniform(-50,50)),
+        npy.sample("2nd Coma X", dist.Uniform(-50,50)),
+        npy.sample("2nd Coma Y", dist.Uniform(-50,50)),
+        npy.sample("2nd Trefoil X", dist.Uniform(-50,50)),
+        npy.sample("2nd Trefoil Y", dist.Uniform(-50,50)),
+        npy.sample("Pentafoil X", dist.Uniform(-50,50)),
+        npy.sample("Pentafoil Y", dist.Uniform(-50,50)),
+        npy.sample("2nd Spherical", dist.Uniform(-50,50)),
+        npy.sample("3rd Coma X", dist.Uniform(-50,50)),
+        npy.sample("3rd Coma Y", dist.Uniform(-50,50)),
+        npy.sample("3rd Astig X", dist.Uniform(-50,50)),
+        npy.sample("3rd Astig Y", dist.Uniform(-50,50)),
+        npy.sample("Hexafoil X", dist.Uniform(-50,50)),
+        npy.sample("Hexafoil Y", dist.Uniform(-50,50)),
+        npy.sample("4th Coma X", dist.Uniform(-50,50)),
+        
     ])
 
 

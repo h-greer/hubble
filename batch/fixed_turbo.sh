@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name fixed_turbo
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=10
 #SBATCH --ntasks=1
 #SBATCH --mem-per-cpu=1G
 #SBATCH --time=1-0:00
