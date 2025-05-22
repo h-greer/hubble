@@ -141,7 +141,7 @@ optics = dl.AngularOpticalSystem(
 
 
 class NICMOSOptics(dl.AngularOpticalSystem):
-    def __init__(self, wf_npixels, psf_npixels, oversample):
+    def __init__(self, wf_npixels, psf_npixels, oversample, psf_oversample=1):
         super().__init__(
             wf_npixels,
             2.4,
@@ -158,7 +158,7 @@ class NICMOSOptics(dl.AngularOpticalSystem):
                 ),
             ],
             psf_npixels,
-            0.0431,
+            0.0431/psf_oversample,
             oversample
         )
 
