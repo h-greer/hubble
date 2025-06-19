@@ -50,7 +50,7 @@ def plot_params(models, groups, xw = 4, save=False):
         fig.savefig(f"{save}.png")
 
 
-def plot_comparison(model, params, exposures, save=False):
+def plot_comparison(model, params, exposures, save=False, graticule=False):
     for f, exp in enumerate(exposures):
 
         fig, axs = plt.subplots(1,5, figsize=(50,8))
@@ -71,13 +71,25 @@ def plot_comparison(model, params, exposures, save=False):
 
         fit = exp.fit(model, exp)
 
+        wid = fit.shape[0]
+
         telescope_frame = fit**0.125
 
         vm = max(np.nanmax(cropped_frame),np.nanmax(telescope_frame))
         cd=axs[0].imshow(cropped_frame, vmin=0,vmax=vm,cmap=cmap)
         plt.colorbar(cd,ax=axs[0])
+
+        if graticule:
+            axs[0].axvline((wid-1)/2 + params.get(exp.map_param("positions"))[0], color='k',linestyle='--')
+            axs[0].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
+
         tl=axs[1].imshow(telescope_frame, vmin=0, vmax=vm,cmap=cmap)
         plt.colorbar(tl,ax=axs[1])
+
+        if graticule:
+            axs[1].axvline((wid-1)/2 + params.get(exp.map_param("positions"))[0], color='k',linestyle='--')
+            axs[1].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
+
         #axs[2].imshow(cropped_err)
         cmap = matplotlib.colormaps['seismic']
         cmap.set_bad('k',1)
@@ -102,8 +114,9 @@ def plot_comparison(model, params, exposures, save=False):
         resid=axs[3].imshow(resid, cmap='seismic',vmin=-rlim, vmax=rlim)
         plt.colorbar(resid,ax=axs[3])
 
-        #axs[3].axvline((wid-1)/2 + params.get(exp.map_param("positions"))[0], color='k',linestyle='--')
-        #axs[3].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
+        if graticule:
+            axs[3].axvline((wid-1)/2 + params.get(exp.map_param("positions"))[0], color='k',linestyle='--')
+            axs[3].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
 
 
         lpdf = posterior(model,exp,return_im=True)#*nanmap

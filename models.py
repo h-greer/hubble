@@ -227,9 +227,9 @@ class ModelFit(zdx.Base):
             case "breathing":
                 return exposure.key
             case "cold_mask_shift":
-                return exposure.key#"global"
+                return "global"#exposure.key#"global"
             case "cold_mask_rot":
-                return exposure.key#"global"
+                return "global"#exposure.key#"global"
             case "cold_mask_scale":
                 return exposure.filter
             case "cold_mask_shear":
