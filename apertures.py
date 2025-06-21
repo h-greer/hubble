@@ -174,9 +174,56 @@ def plane_to_plane(wf, distance, pad=2):
     return wf.set(["amplitude", "phase"], [np.abs(phasor), np.angle(phasor)])
 
 
-
-
 class NICMOSFresnelOptics(dl.AngularOpticalSystem):
+    defocus: np.ndarray
+    def __init__(self, wf_npixels, psf_npixels, oversample, defocus, n_zernikes = 26):
+        self.diameter=2.4
+        self.wf_npixels = wf_npixels
+        self.psf_npixels = psf_npixels
+        self.psf_pixel_scale = 0.0432
+        self.oversample = oversample
+        self.defocus = defocus
+
+        layers = []
+
+        layers += [("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=2))]
+
+        layers += [
+            ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=2)),
+        ]
+
+        layers += [dl.AberratedAperture(
+                    dl.layers.CircularAperture(1.2, transformation=dl.CoordTransform()),
+                    noll_inds=np.arange(5,5+n_zernikes),
+                    coefficients = np.zeros(n_zernikes),
+                )]
+
+        self.layers = dlu.list2dictionary(layers, ordered=True)
+    
+    def propagate_mono(self, wavelength, offset=np.zeros(2), return_wf=False):
+
+        wf = dl.Wavefront(self.wf_npixels, self.diameter, wavelength)
+        wf = wf.tilt(offset)
+
+        true_pixel_scale = self.psf_pixel_scale / self.oversample
+        pixel_scale = dlu.arcsec2rad(true_pixel_scale)
+        psf_npixels = self.psf_npixels * self.oversample
+
+        wf *= list(self.layers.values())[0]
+
+        # Apply layers
+        for layer in list(self.layers.values()):
+            wf *= layer
+
+        wf = wf.propagate(psf_npixels, pixel_scale)
+        wf = plane_to_plane(wf, self.defocus*1e-9, pad=2)
+
+        if return_wf:
+            return wf
+        return wf.psf
+
+
+class NICMOSColdMaskFresnelOptics(dl.AngularOpticalSystem):
     defocus: np.ndarray
     def __init__(self, wf_npixels, psf_npixels, oversample, defocus):
         self.diameter=2.4

@@ -194,6 +194,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     mjd = hdr['EXPSTART']
 
     print(hdr['CAL_VER'])
+    print(hdr['NPFOCUSP'])
 
     if crop:
         w = WCS(image_hdr)
@@ -254,7 +255,8 @@ class ModelFit(zdx.Base):
 
             case "primary_distortion" | "cold_mask_distortion":
                 return "global"
-            #case "displacement":
+            case "defocus":
+                return exposure.key
             #    return exposure.filter
             #case _:
             #    return exposure.key
@@ -268,7 +270,7 @@ class ModelFit(zdx.Base):
         """
         currently everything's global so this is just a fallthrough
         """
-        if param in ["fluxes", "positions", "aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "jitter", "primary_distortion", "cold_mask_distortion"]:
+        if param in ["fluxes", "positions", "aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "jitter", "primary_distortion", "cold_mask_distortion", "defocus"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
@@ -334,6 +336,10 @@ class ModelFit(zdx.Base):
             optics = optics.set("AberratedAperture.aperture.softness", softening)
         if "displacement" in model.params.keys():
             disp = model.get(self.map_param(exposure, "displacement"))
+            optics = optics.set("defocus", disp)
+
+        if "defocus" in model.params.keys():
+            disp = model.get(self.map_param(exposure, "defocus"))
             optics = optics.set("defocus", disp)
 
         if "primary_distortion" in model.params.keys():

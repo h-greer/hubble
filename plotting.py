@@ -32,7 +32,7 @@ def plot_params(models, groups, xw = 4, save=False):
         sp = axs[i%xw, i//xw]
         if param in ["fluxes", "contrast", "positions", "aberrations", 
                     "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear",
-                    "primary_rot","primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "primary_distortion", "cold_mask_distortion"]:
+                    "primary_rot","primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "primary_distortion", "cold_mask_distortion", "defocus"]:
 
             for p in np.asarray([np.asarray(list(x.get(param).values())).flatten() for x in models]).T:
                 if len(p.shape)>1:
