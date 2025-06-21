@@ -44,6 +44,7 @@ filter_files = {
     'F095N': get_filter("../data/HST_NICMOS1.F095N.dat"),
     'F145M': get_filter("../data/HST_NICMOS1.F145M.dat"),
     'F190N': get_filter("../data/HST_NICMOS1.F190N.dat"),
+    'F166N': get_filter("../data/HST_NICMOS1.F166N.dat"),
     'F108N': get_filter("../data/HST_NICMOS1.F108N.dat"),
     'F187N': get_filter("../data/HST_NICMOS1.F187N.dat"),
     'F090M': get_filter("../data/HST_NICMOS1.F090M.dat"),
@@ -90,6 +91,7 @@ class Exposure(zdx.Base):
     filter: str = eqx.field(static=True)
     mjd: str = eqx.field(static=True)
     exptime: str = eqx.field(static=True)
+    wcs: object = eqx.field(static=True)
     data: Array
     err: Array
     bad: Array
@@ -97,7 +99,7 @@ class Exposure(zdx.Base):
 
     fit: object = eqx.field(static=True)
 
-    def __init__(self, filename, name, filter, data, err, bad, fit, mjd, exptime):
+    def __init__(self, filename, name, filter, data, err, bad, fit, mjd, exptime, wcs):
         """
         Initialise exposure
         """
@@ -112,6 +114,7 @@ class Exposure(zdx.Base):
 
         self.fit = fit
         self.exptime = exptime
+        self.wcs = wcs
     
     def get_key(self, param):
         return self.fit.get_key(self, param)
@@ -130,6 +133,7 @@ class BlankExposure(Exposure):
         self.target = name
         self.fit = fit
         self.mjd = 0.0
+        self.wcs = None
 
         self.data = 0.
         self.err = 0.
@@ -143,6 +147,7 @@ class InjectedExposure(Exposure):
         self.target = name
         self.fit = fit
         self.mjd = 0.0
+        self.wcs = None
 
         generated_data = self.fit(model, self) * t_exp * 5
         err = np.sqrt(generated_data + 3**2)/np.sqrt(n_exp)
@@ -173,6 +178,8 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32))
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
+
+    wcs = WCS(image_hdr)
 
 
     
@@ -208,7 +215,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
     bad_with_poisson = np.isnan(err_with_poisson)
 
-    return Exposure(filename, name, filter, tf(data), tf(err_with_poisson), tf(bad_with_poisson), fit, mjd, exptime)
+    return Exposure(filename, name, filter, tf(data), tf(err_with_poisson), tf(bad_with_poisson), fit, mjd, exptime, wcs)
 
 class ModelFit(zdx.Base):
 
