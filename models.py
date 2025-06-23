@@ -336,7 +336,7 @@ class ModelFit(zdx.Base):
             optics = optics.set("AberratedAperture.aperture.softness", softening)
         if "displacement" in model.params.keys():
             disp = model.get(self.map_param(exposure, "displacement"))
-            optics = optics.set("defocus", disp)
+            optics = optics.set("displacement", disp)
 
         if "defocus" in model.params.keys():
             disp = model.get(self.map_param(exposure, "defocus"))

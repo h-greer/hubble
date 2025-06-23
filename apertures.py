@@ -225,30 +225,30 @@ class NICMOSFresnelOptics(dl.AngularOpticalSystem):
 
 class NICMOSColdMaskFresnelOptics(dl.AngularOpticalSystem):
     defocus: np.ndarray
-    def __init__(self, wf_npixels, psf_npixels, oversample, defocus):
+    displacement: np.ndarray
+    def __init__(self, wf_npixels, psf_npixels, oversample, defocus, displacement, n_zernikes=26):
         self.diameter=2.4
         self.wf_npixels = wf_npixels
         self.psf_npixels = psf_npixels
         self.psf_pixel_scale = 0.0432
         self.oversample = oversample
         self.defocus = defocus
+        self.displacement = displacement
 
         layers = []
 
         layers += [("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=2))]
 
+        layers += [dl.AberratedAperture(
+                    dl.layers.CircularAperture(1.2, transformation=dl.CoordTransform()),
+                    #noll_inds=np.arange(5,5+n_zernikes),#,12,13,14,15,16,17,18,19,20,21,22]),
+                    noll_inds=np.arange(4,4+n_zernikes),
+                    coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9,#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
+                )]
+
         layers += [
             ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=2)),
         ]
-
-        layers += [dl.AberratedAperture(
-                    dl.layers.CircularAperture(1.2, transformation=dl.CoordTransform()),
-                    noll_inds=np.arange(4,30),#,12,13,14,15,16,17,18,19,20,21,22]),
-                    coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9,#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
-                )]
-        
-        
-    
 
         self.layers = dlu.list2dictionary(layers, ordered=True)
     
@@ -262,27 +262,19 @@ class NICMOSColdMaskFresnelOptics(dl.AngularOpticalSystem):
         psf_npixels = self.psf_npixels * self.oversample
 
         wf *= list(self.layers.values())[0]
-
-        # Apply layers
-        #for layer in list(self.layers.values())[0:2]:
-            #print(layer)
-        #    wf *= layer
         
-        # cold mask offset
-        #print(wf)
-        #wf *= list(self.layers.values())[2]
-        #print(wf)
-        #wf = plane_to_plane(wf, 1e-6 * self.defocus, pad=2)
-        print(wf.amplitude)
-
-        wf = plane_to_plane(wf, self.defocus/1e3, pad=2)
-        print(wf.amplitude)
-
-
         wf *= list(self.layers.values())[1]
+
+
+        wf = plane_to_plane(wf, self.displacement, pad=2)
+        
+
         wf *= list(self.layers.values())[2]
 
         wf = wf.propagate(psf_npixels, pixel_scale)
+
+        #wf = plane_to_plane(wf, self.defocus*1e-9, pad=2)
+
 
 
         if return_wf:
