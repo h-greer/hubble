@@ -55,7 +55,7 @@ detector = NICMOSDetector(oversample, wid)
 
 number = int(sys.argv[1])-1
 
-ddir = "./MAST_2025-06-24T0210/HST/"
+ddir = "../data/MAST_2025-06-24T0210/HST/"
 
 dfiles = glob.glob(ddir+"*_asc.fits")
 
