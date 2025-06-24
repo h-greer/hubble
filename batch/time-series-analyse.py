@@ -29,6 +29,7 @@ from models import *
 from fisher import *
 from stats import posterior
 from fitting import *
+import glob
 
 def set_array(pytree):
     dtype = np.float64 if jax.config.x64_enabled else np.float32
