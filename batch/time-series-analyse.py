@@ -59,7 +59,7 @@ ddir = "./MAST_2025-06-24T0210/HST/"
 
 dfiles = glob.glob(ddir+"*_asc.fits")
 
-files = [x[0]+"_cal.fits" for x in fits.getdata(dfiles[number], ext=1)]
+files = [x[0]+"_cal.fits" for x in fits.getdata(dfiles[number], ext=1)[:-1]]
 print(files)
 
 """
@@ -201,5 +201,7 @@ abb = np.zeros((len(exposures_single), n_zernikes+1))
 abb = abb.at[:,1:].set(np.asarray([x for x in models[-1].params["aberrations"].values()]))#.transpose()
 abb = abb.at[:,0].set(np.asarray([float(x)/20 for x in models[-1].params["defocus"].values()]))
 
+cold_shift = np.asarray([x for x in models[-1].params["cold_mask_shift"].values()])
 
-numpy.savez(f"timeseries/{number}.npz", defocuses=numpy.asarray(defocuses), errs=numpy.asarray(errs), mjds=numpy.asarray(mjds), aberrations=numpy.asarray(abb))
+
+numpy.savez(f"timeseries/{number}.npz", defocuses=numpy.asarray(defocuses), errs=numpy.asarray(errs), mjds=numpy.asarray(mjds), aberrations=numpy.asarray(abb), cold_shift = numpy.asarray(cold_shift))
