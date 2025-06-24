@@ -192,7 +192,7 @@ fsh2= calc_fishers(models[-1].inject(model_single), exposures_single, ["cold_mas
 defocuses = [x/20 for x in models[-1].params["defocus"].values()]
 errs = [1/x['defocus']/20 for x in fsh.values()]
 mjds = [exp.mjd for exp in exposures_single]
-mjds= [(x - mjds[0])*24*60 for x in mjds]
+#mjds= [(x - mjds[0])*24*60 for x in mjds]
 
 
 
