@@ -7,8 +7,8 @@
 #SBATCH --job-name=time-series
 #SBATCH --time=6:00:00
 #SBATCH --partition=general
-#SBATCH -o timeseries/run-%j.out
-#SBATCH -e timeseries/run-%j.err
+#SBATCH -o timeseries/frame-%a.out
+#SBATCH -e timeseries/frame-%a.err
 
 module load anaconda3/2024.02-1
 conda activate /data/uqhgreer/repos/jax-cpu

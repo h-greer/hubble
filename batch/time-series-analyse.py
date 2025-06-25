@@ -31,6 +31,15 @@ from stats import posterior
 from fitting import *
 import glob
 
+import matplotlib.pyplot as plt
+import matplotlib
+
+plt.rcParams['image.cmap'] = 'inferno'
+plt.rcParams["font.family"] = "serif"
+plt.rcParams["image.origin"] = 'lower'
+plt.rcParams['figure.dpi'] = 72
+plt.rcParams["font.size"] = 24
+
 def set_array(pytree):
     dtype = np.float64 if jax.config.x64_enabled else np.float32
     floats, other = eqx.partition(pytree, eqx.is_inexact_array_like)
@@ -39,7 +48,7 @@ def set_array(pytree):
 
 extra_bad = None
 
-wid = 100
+wid = 64
 oversample = 4
 
 nwavels = 3
@@ -181,7 +190,9 @@ print(np.asarray(losses[-20:])/(len(exposures_single)*wid**2))
 
 
 # %%
-models[-1].params
+print(models[-1].params)
+
+plot_params(models, groups, xw = 3, save="timeseries/{number}-fit.png")
 
 # %%
 fsh = calc_fishers(models[-1].inject(model_single), exposures_single, ["defocus"], recalculate=True, save=False)

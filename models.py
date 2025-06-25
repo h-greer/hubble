@@ -168,8 +168,8 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     image_hdr = fits.getheader(fname, ext=1)
     #print(image_hdr)
 
-    with fits.open(fname) as hdul:
-        print(hdul.info())
+    #with fits.open(fname) as hdul:
+    #    print(hdul.info())
 
     data = fits.getdata(fname, ext=1)
     err = fits.getdata(fname, ext=2)
@@ -193,8 +193,8 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
     mjd = hdr['EXPSTART']
 
-    print(hdr['CAL_VER'])
-    print(hdr['NPFOCUSP'])
+    #print(hdr['CAL_VER'])
+    #print(hdr['NPFOCUSP'])
 
     if crop:
         w = WCS(image_hdr)
@@ -206,7 +206,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
     bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32))
     if extra_bad is not None:
-        print("extra bad")
+        #print("extra bad")
         bad = bad | tf(extra_bad)
 
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
@@ -227,7 +227,7 @@ class ModelFit(zdx.Base):
     def get_key(self, exposure, param):
         match param:
             case "fluxes":
-                return f"{exposure.target}_{exposure.filter}"
+                return exposure.key#f"{exposure.target}_{exposure.filter}"
             case "positions":
                 return exposure.key
             case "aberrations":
