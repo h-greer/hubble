@@ -1,11 +1,11 @@
 #!/bin/bash --login
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --array=1-56%10
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
+#SBATCH --array=1-56
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
 #SBATCH --job-name=time-series
-#SBATCH --time=2:00:00
+#SBATCH --time=6:00:00
 #SBATCH --partition=general
 #SBATCH -o timeseries/run-%j.out
 #SBATCH -e timeseries/run-%j.err

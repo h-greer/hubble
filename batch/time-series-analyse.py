@@ -58,6 +58,7 @@ number = int(sys.argv[1])-1
 ddir = "../data/MAST_2025-06-24T0210/HST/"
 
 dfiles = glob.glob(ddir+"*_asc.fits")
+dfiles.sort()
 
 files = [x[0]+"_cal.fits" for x in fits.getdata(dfiles[number], ext=1)[:-1]]
 print(files)
