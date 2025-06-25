@@ -29,6 +29,7 @@ from models import *
 from fisher import *
 from stats import posterior
 from fitting import *
+from plotting import *
 import glob
 
 import matplotlib.pyplot as plt
@@ -79,7 +80,12 @@ FILE THINGS
 
 """
 
-exposures_single = [exposure_from_file(ddir + file, SinglePointPolySpectrumFit(nwavels), crop=wid, extra_bad=extra_bad) for file in files]
+exposures_raw = [exposure_from_file(ddir + file, SinglePointPolySpectrumFit(nwavels), crop=wid, extra_bad=extra_bad) for file in files]
+
+exposures_single = []
+for exp in exposures_raw:
+    if exp.data.shape == (wid, wid):
+        exposures_single.append(exp)
 
 params = {
     #"fluxes": {},
