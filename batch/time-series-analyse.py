@@ -172,12 +172,12 @@ things = {
     "positions": opt(g*5, 0),
     "spectrum": opt(g*8, 10),#, (20, 1.5)),
     #"cold_mask_shift": opt(g*100, 30),
-    "cold_mask_shift": opt(g*10, 30),
+    "cold_mask_shift": opt(g*20, 30),
     #"cold_mask_rot": opt(g*10, 100),
     "bias": opt(g*3, 20),
     #"aberrations": opt(g*0.15,300),#, (80, 2)),#, (150, g*0.2)),
     #"aberrations": opta(2, 50),
-    "defocus": opt(g*5, 50),
+    "defocus": opt(g*2, 50),
     "aberrations": opta(2, 70),
     #"displacement": opt(g*30, 150),
 }
@@ -189,7 +189,7 @@ optimisers = [things[i] for i in groups]
 groups = [list(x) if isinstance(x, tuple) else x for x in groups]
 
 
-losses, models = optimise(params, model_single, exposures_single, things, 130)
+losses, models = optimise(params, model_single, exposures_single, things, 200)
 
 
 print(np.asarray(losses[-20:])/(len(exposures_single)*wid**2))
@@ -198,13 +198,10 @@ print(np.asarray(losses[-20:])/(len(exposures_single)*wid**2))
 # %%
 print(models[-1].params)
 
-plot_params(models, groups, xw = 3, save="timeseries/{number}-fit.png")
+plot_params(models, groups, xw = 3, save=f"timeseries/{number}-fit.png")
 
 # %%
 fsh = calc_fishers(models[-1].inject(model_single), exposures_single, ["defocus"], recalculate=True, save=False)
-
-# %%
-fsh2= calc_fishers(models[-1].inject(model_single), exposures_single, ["cold_mask_shift"], recalculate=True, save=False)
 
 # %%
 defocuses = [x/20 for x in models[-1].params["defocus"].values()]
