@@ -31,7 +31,7 @@ def optimise(params, model, exposures, things, niter):
     fishers = calc_fishers(model, exposures, paths, recalculate=True)
     lrs = calc_lrs(model, exposures, fishers, paths)
 
-    print(fishers)
+    #print(fishers)
 
     optim, opt_state = zdx.get_optimiser(
         params, paths, optimisers

@@ -251,7 +251,7 @@ class ModelFit(zdx.Base):
             case "slope":
                 return f"{exposure.target}_{exposure.filter}"
             case "spectrum" | "primary_spectrum" | "secondary_spectrum":
-                return exposure.target#f"{exposure.target}_{exposure.filter}"
+                return exposure.key#f"{exposure.target}_{exposure.filter}"
 
             case "primary_distortion" | "cold_mask_distortion":
                 return "global"

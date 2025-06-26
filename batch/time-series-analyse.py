@@ -117,7 +117,7 @@ for exp in exposures_single:
     params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([0.,0.])
     params["spectrum"][exp.fit.get_key(exp, "spectrum")] = np.zeros(npoly).at[0].set(1)*np.log10(np.nansum(exp.data)/nwavels)
     params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(n_zernikes)
-    params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([6., 6.])#*1e2
+    params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([8., 8.])#*1e2
     params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = -45.
     params["cold_mask_scale"][exp.fit.get_key(exp, "cold_mask_scale")] = np.asarray([1.,1.])
     params["cold_mask_shear"][exp.fit.get_key(exp, "cold_mask_shear")] = np.asarray([0.,0.])
@@ -166,7 +166,7 @@ def flatten(l):
 
 
 
-g = 5e-2
+g = 2e-2
 
 things = {
     "positions": opt(g*5, 0),
@@ -207,6 +207,8 @@ fsh = calc_fishers(models[-1].inject(model_single), exposures_single, ["defocus"
 defocuses = [x/20 for x in models[-1].params["defocus"].values()]
 errs = [1/x['defocus']/20 for x in fsh.values()]
 mjds = [exp.mjd for exp in exposures_single]
+spectra = np.asarray([x for x in models[-1].params["spectrum"].values()])
+
 #mjds= [(x - mjds[0])*24*60 for x in mjds]
 
 
@@ -219,4 +221,4 @@ abb = abb.at[:,0].set(np.asarray([float(x)/20 for x in models[-1].params["defocu
 cold_shift = np.asarray([x for x in models[-1].params["cold_mask_shift"].values()])
 
 
-numpy.savez(f"timeseries/{number}.npz", defocuses=numpy.asarray(defocuses), errs=numpy.asarray(errs), mjds=numpy.asarray(mjds), aberrations=numpy.asarray(abb), cold_shift = numpy.asarray(cold_shift))
+numpy.savez(f"timeseries/{number}.npz", defocuses=numpy.asarray(defocuses), errs=numpy.asarray(errs), mjds=numpy.asarray(mjds), aberrations=numpy.asarray(abb), cold_shift = numpy.asarray(cold_shift), spectra = numpy.asarray(spectra))
