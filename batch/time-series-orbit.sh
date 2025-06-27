@@ -1,10 +1,10 @@
 #!/bin/bash --login
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=24G
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
 #SBATCH --job-name=time-series-orbit
-#SBATCH --time=6:00:00
+#SBATCH --time=12:00:00
 #SBATCH --partition=general
 #SBATCH -o timeseries-orbit/orbit-1.out
 #SBATCH -e timeseries-orbit/orbit-1.err

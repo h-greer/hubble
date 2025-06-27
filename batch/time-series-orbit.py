@@ -36,6 +36,7 @@ import glob
 
 import matplotlib.pyplot as plt
 import matplotlib
+from plotting import *
 
 plt.rcParams['image.cmap'] = 'inferno'
 plt.rcParams["font.family"] = "serif"
