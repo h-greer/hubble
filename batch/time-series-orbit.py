@@ -180,10 +180,10 @@ def flatten(l):
 
 
 
-g = 1e-2
+g = 2e-2
 
 things = {
-    "positions": opt(g*2, 0),
+    "positions": opt(g*5, 0),
     "spectrum": opt(g*8, 10),#, (20, 1.5)),
     #"cold_mask_shift": opt(g*100, 30),
     "cold_mask_shift": opt(g*20, 30),
