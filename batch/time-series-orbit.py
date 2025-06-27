@@ -72,12 +72,12 @@ ddir = "../data/MAST_2025-06-24T0210/HST/"
 cfiles = glob.glob(ddir+"*_cal.fits")
 cfiles.sort()
 
-mjds = [float(fits.getheader(fname, ext=0)["EXPSTART"]) for fname in cfiles]
+mjds = numpy.asarray([float(fits.getheader(fname, ext=0)["EXPSTART"]) for fname in cfiles])
 
 kmeans = KMeans(n_clusters=20).fit(np.reshape(mjds, (-1, 1)))
-idx = np.argsort(kmeans.cluster_centers_.sum(axis=1))
-lut = np.zeros_like(idx)
-lut[idx] = np.arange(20)
+idx = numpy.argsort(kmeans.cluster_centers_.sum(axis=1))
+lut = numpy.zeros_like(idx)
+lut[idx] = numpy.arange(20)
 
 clumps = lut[kmeans.labels_]
 
