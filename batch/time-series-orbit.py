@@ -93,7 +93,7 @@ FILE THINGS
 
 """
 
-exposures_raw = [exposure_from_file(ddir + file, SinglePointPolySpectrumFit(nwavels), crop=wid, extra_bad=extra_bad) for file in files]
+exposures_raw = [exposure_from_file(file, SinglePointPolySpectrumFit(nwavels), crop=wid, extra_bad=extra_bad) for file in files]
 
 exposures_single = []
 for exp in exposures_raw:
