@@ -92,6 +92,7 @@ class Exposure(zdx.Base):
     mjd: str = eqx.field(static=True)
     exptime: str = eqx.field(static=True)
     wcs: object = eqx.field(static=True)
+    pam: object = eqx.field(static=True)
     data: Array
     err: Array
     bad: Array
@@ -99,7 +100,7 @@ class Exposure(zdx.Base):
 
     fit: object = eqx.field(static=True)
 
-    def __init__(self, filename, name, filter, data, err, bad, fit, mjd, exptime, wcs):
+    def __init__(self, filename, name, filter, data, err, bad, fit, mjd, exptime, wcs, pam):
         """
         Initialise exposure
         """
@@ -115,6 +116,7 @@ class Exposure(zdx.Base):
         self.fit = fit
         self.exptime = exptime
         self.wcs = wcs
+        self.pam = pam
     
     def get_key(self, param):
         return self.fit.get_key(self, param)
@@ -182,7 +184,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     wcs = WCS(image_hdr)
 
 
-    
+    pam = hdr['NPFOCUSP']
 
     filename = hdr['ROOTNAME']
     name = hdr['TARGNAME']
@@ -216,7 +218,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
     bad_with_poisson = np.isnan(err_with_poisson)
 
-    return Exposure(filename, name, filter, tf(data), tf(err_with_poisson), tf(bad_with_poisson), fit, mjd, exptime, wcs)
+    return Exposure(filename, name, filter, tf(data), tf(err_with_poisson), tf(bad_with_poisson), fit, mjd, exptime, wcs, pam)
 
 class ModelFit(zdx.Base):
 

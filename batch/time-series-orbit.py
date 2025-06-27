@@ -138,7 +138,7 @@ for exp in exposures_single:
     params["primary_rot"][exp.fit.get_key(exp, "primary_rot")] = -45. + 90. #+ 180.
     params["primary_scale"][exp.fit.get_key(exp, "primary_scale")] = np.asarray([1.,1.])
     params["primary_shear"][exp.fit.get_key(exp, "primary_shear")] = np.asarray([0.,0.])
-    params["defocus"][exp.fit.get_key(exp, "defocus")] = 160.*20
+    params["defocus"][exp.fit.get_key(exp, "defocus")] = 150.*20
 
     params["bias"][exp.fit.get_key(exp, "bias")] = 0.
     params["jitter"][exp.fit.get_key(exp, "jitter")] = 7/43*oversample
@@ -223,6 +223,8 @@ errs = [1/x['defocus']/20 for x in fsh.values()]
 mjds = [exp.mjd for exp in exposures_single]
 spectra = np.asarray([x for x in models[-1].params["spectrum"].values()])
 
+pams = [exp.pam for exp in exposures_single]
+
 #mjds= [(x - mjds[0])*24*60 for x in mjds]
 
 
@@ -235,4 +237,4 @@ abb = abb.at[:,0].set(np.asarray([float(x)/20 for x in models[-1].params["defocu
 cold_shift = np.asarray([x for x in models[-1].params["cold_mask_shift"].values()])
 
 
-numpy.savez(f"timeseries-orbit/{number}.npz", defocuses=numpy.asarray(defocuses), errs=numpy.asarray(errs), mjds=numpy.asarray(mjds), aberrations=numpy.asarray(abb), cold_shift = numpy.asarray(cold_shift), spectra = numpy.asarray(spectra))
+numpy.savez(f"timeseries-orbit/{number}.npz", defocuses=numpy.asarray(defocuses), errs=numpy.asarray(errs), mjds=numpy.asarray(mjds), aberrations=numpy.asarray(abb), cold_shift = numpy.asarray(cold_shift), spectra = numpy.asarray(spectra), pams = numpy.asarray(pams))
