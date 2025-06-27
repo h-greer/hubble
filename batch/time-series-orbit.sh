@@ -6,12 +6,12 @@
 #SBATCH --job-name=time-series-orbit
 #SBATCH --time=6:00:00
 #SBATCH --partition=general
-#SBATCH -o timeseries/orbit-%a.out
-#SBATCH -e timeseries/orbit-%a.err
+#SBATCH -o timeseries-orbit/orbit-1.out
+#SBATCH -e timeseries-orbit/orbit-1.err
 
 module load anaconda3/2024.02-1
 conda activate /data/uqhgreer/repos/jax-cpu
 
-srun python time-series-analyse.py 1
+srun python time-series-orbit.py 1
 
 conda deactivate
