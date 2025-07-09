@@ -9,6 +9,7 @@ import jax.random as jr
 import jax.scipy as jsp
 import jax
 import numpy
+import scipy.interpolate
 
 #jax.config.update("jax_enable_x64", True)
 
@@ -75,7 +76,7 @@ cfiles.sort()
 
 mjds = numpy.asarray([float(fits.getheader(fname, ext=0)["EXPSTART"]) for fname in cfiles])
 
-kmeans = KMeans(n_clusters=20).fit(np.reshape(mjds, (-1, 1)))
+kmeans = KMeans(n_clusters=20, random_state=0).fit(np.reshape(mjds, (-1, 1)))
 idx = numpy.argsort(kmeans.cluster_centers_.sum(axis=1))
 lut = numpy.zeros_like(idx)
 lut[idx] = numpy.arange(20)
@@ -83,6 +84,10 @@ lut[idx] = numpy.arange(20)
 clumps = lut[kmeans.labels_]
 
 files = [cfiles[i] for i in range(len(cfiles)) if clumps[i] == number]
+
+if number in [8, 11]:
+    print("Bad Orbit")
+    exit()
 
 
 print(files)
@@ -127,6 +132,9 @@ params = {
     "defocus": {}#1e5#{}
 }
 
+# defocus spline
+interp = np.load("splines.npy", allow_pickle=True)[number]
+
 for exp in exposures_single:
     params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([0.,0.])
     params["spectrum"][exp.fit.get_key(exp, "spectrum")] = np.zeros(npoly).at[0].set(1)*np.log10(np.nansum(exp.data)/nwavels)
@@ -138,7 +146,7 @@ for exp in exposures_single:
     params["primary_rot"][exp.fit.get_key(exp, "primary_rot")] = -45. + 90. #+ 180.
     params["primary_scale"][exp.fit.get_key(exp, "primary_scale")] = np.asarray([1.,1.])
     params["primary_shear"][exp.fit.get_key(exp, "primary_shear")] = np.asarray([0.,0.])
-    params["defocus"][exp.fit.get_key(exp, "defocus")] = 150.*20
+    params["defocus"][exp.fit.get_key(exp, "defocus")] = interp(exp.mjd)*20.#150.*20
 
     params["bias"][exp.fit.get_key(exp, "bias")] = 0.
     params["jitter"][exp.fit.get_key(exp, "jitter")] = 7/43*oversample
