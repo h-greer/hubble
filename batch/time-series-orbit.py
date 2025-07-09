@@ -152,6 +152,11 @@ for exp in exposures_single:
     params["jitter"][exp.fit.get_key(exp, "jitter")] = 7/43*oversample
 
 
+print(params["defocus"])
+
+exit()
+
+
 model_single = set_array(NICMOSModel(exposures_single, params, optics, detector))
 
 params = ModelParams(params)
