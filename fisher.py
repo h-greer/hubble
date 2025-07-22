@@ -268,12 +268,12 @@ def calc_lrs(model, exposures, fishers, params=None, order=1):
     # Make an empty fisher model
     # Flag and deal with large arrays
     grad_model = eqx.filter(model, bool_model)
-    is_large = jtu.tree_map(lambda x: x.size > 1e4, grad_model)
-    bool_model = jtu.tree_map(lambda x, y: x and not y, bool_model, is_large)
+    #is_large = jtu.tree_map(lambda x: x.size > 1e4, grad_model)
+    #bool_model = jtu.tree_map(lambda x, y: x and not y, bool_model, is_large)
     grad_model = eqx.filter(model, bool_model)
     fisher_model = jtu.tree_map(lambda x: np.zeros((x.size, x.size)), grad_model)
-    large_grad_model = eqx.filter(model, is_large)
-    large_lr_model = jtu.tree_map(lambda x: np.ones(x.shape), large_grad_model)
+    #large_grad_model = eqx.filter(model, is_large)
+    #large_lr_model = jtu.tree_map(lambda x: np.ones(x.shape), large_grad_model)
 
     # Loop over exposures
     for exp in exposures:
@@ -290,6 +290,38 @@ def calc_lrs(model, exposures, fishers, params=None, order=1):
 
     # Convert fisher to lr model
     inv_fn = lambda fmat, leaf: dlu.nandiv(-1, np.diag(fmat), 1).reshape(leaf.shape)
-    lr_model = jtu.tree_map(inv_fn, fisher_model, model)
-    lr_model = eqx.combine(lr_model, large_lr_model)
+    #lr_model = jtu.tree_map(inv_fn, fisher_model, model)
+    lr_model = jtu.tree_map(lambda x, y: None if x is None else inv_fn(x, y), fisher_model, model, is_leaf=lambda x: x is None)
+
+    #lr_model = eqx.combine(lr_model, large_lr_model)
     return lr_model
+
+def populate_lr_model(fishers, exposures, model_params):
+
+    # Build the lr model structure
+    params_dict = jtu.tree_map(lambda x: np.zeros((x.size, x.size)), model_params).params
+
+    # Loop over exposures
+    for exp in exposures:
+
+        # Loop over parameters
+        for param in model_params.params.keys():
+
+            # Check if the fishers have values for this exposure
+            key = f"{exp.key}.{param}"
+            if key not in fishers.params.keys():
+                continue
+
+            # Add the Fisher matrices
+            if isinstance(params_dict[param], dict):
+                params_dict[param][exp.get_key(param)] += fishers[key]
+            else:
+                params_dict[param] += fishers[key]
+
+    fisher_params = model_params.set("params", params_dict)
+
+    # Convert fisher to lr model
+    def inv_fn(fmat, leaf):
+        return dlu.nandiv(-1, np.diag(fmat), fill=1).reshape(leaf.shape)
+
+    return jtu.tree_map(inv_fn, fisher_params, model_params)

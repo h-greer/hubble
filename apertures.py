@@ -322,13 +322,14 @@ class DistortedCoords(zdx.Base):
 
     def calculate(self, npix, diameter):
         coords = dlu.pixel_coords(npix, diameter)
+        #coords = dlu.rotate_coords(coords, np.pi/4)
         return distort_coords(coords, self.distortion, self.powers)
 
     def apply(self, coords):
         return distort_coords(coords, self.distortion, self.powers)
 
 class NICMOSDistortedOptics(dl.AngularOpticalSystem):
-    def __init__(self, wf_npixels, psf_npixels, oversample, distortion_orders=5):
+    def __init__(self, wf_npixels, psf_npixels, oversample, distortion_orders=5, n_zernikes = 26):
 
         super().__init__(
             wf_npixels,
@@ -341,8 +342,8 @@ class NICMOSDistortedOptics(dl.AngularOpticalSystem):
                 ],normalise=True, transformation=dl.CoordTransform(rotation=np.pi/4)),
                 dl.AberratedAperture(
                     dl.layers.CircularAperture(1.2, transformation=dl.CoordTransform()),
-                    noll_inds=np.arange(4,30),#,12,13,14,15,16,17,18,19,20,21,22]),
-                    coefficients = np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9,#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
+                    noll_inds=np.arange(4,4+n_zernikes),#,12,13,14,15,16,17,18,19,20,21,22]),
+                    coefficients = np.zeros(n_zernikes),#np.asarray([0,18,19.4,-1.4,-3,3.3,1.7,-12.2])*1e-9,#,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0])*1e-9
                 ),
             ],
             psf_npixels,

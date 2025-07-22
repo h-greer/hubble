@@ -2,21 +2,16 @@ import jax.numpy as np
 import jax.random as jr
 import jax.scipy as jsp
 from jax import Array
+import jax.tree_util as jtu
+from jax.flatten_util import ravel_pytree
 import jax
 
 import dLux as dl
 import dLux.utils as dlu
 
 import zodiax as zdx
+#from zodiax import BaseModeller, ModelParams
 import equinox as eqx
-
-from astropy.io import fits
-from astropy.coordinates import SkyCoord
-from astropy.wcs import WCS
-#from astrocut import fits_cut
-from astropy.nddata import Cutout2D
-import numpy
-import pandas as pd
 
 from abc import abstractmethod
 
@@ -25,65 +20,9 @@ from tqdm.auto import tqdm
 from apertures import *
 from detectors import *
 from spectra import *
+from filters import *
+from vis_models import LogVisModel
 
-def get_filter(file):
-    flt = np.asarray(pd.read_csv(file, sep=' '))#[::20,:]
-
-    wv = flt[:,0]
-    bp = flt[:,1]
-
-    ebp = bp/(wv/1e4)
-
-    nebp = ebp/np.sum(ebp)*(np.max(wv)-np.min(wv))*0.01
-    final = flt.at[:,1].set(nebp)
-    return final
-
-
-filter_files = {
-    'F170M': get_filter("../data/HST_NICMOS1.F170M.dat"),
-    'F095N': get_filter("../data/HST_NICMOS1.F095N.dat"),
-    'F145M': get_filter("../data/HST_NICMOS1.F145M.dat"),
-    'F190N': get_filter("../data/HST_NICMOS1.F190N.dat"),
-    'F166N': get_filter("../data/HST_NICMOS1.F166N.dat"),
-    'F108N': get_filter("../data/HST_NICMOS1.F108N.dat"),
-    'F187N': get_filter("../data/HST_NICMOS1.F187N.dat"),
-    'F090M': get_filter("../data/HST_NICMOS1.F090M.dat"),
-    #'F110W': np.asarray(pd.read_csv("../data/HST_NICMOS1.F110W.dat", sep=' '))[::20,:],
-    'F110W': get_filter("../data/HST_NICMOS1.F110W.dat")[50:-70],#[::20,:],
-    'F110M': get_filter("../data/HST_NICMOS1.F110M.dat"),
-    'F160W': get_filter("../data/HST_NICMOS1.F160W.dat"),
-    'POL0S': get_filter("../data/HST_NICMOS1.POL0S.dat"),
-    'POL240S': get_filter("../data/HST_NICMOS1.POL240S.dat"),
-    'POL120S': get_filter("../data/HST_NICMOS1.POL120S.dat"),
-}
-
-def calc_throughput(filt, nwavels=9):
-
-    filtr = filter_files[filt]
-
-
-    wl_array = filtr[:,0]
-    throughput_array = filtr[:,1]
-
-    # filter_path = os.path.join()
-    #file_path = pkg.resource_filename(__name__, f"/data/filters/{filt}.dat")
-    #wl_array, throughput_array = np.array(onp.loadtxt(file_path, unpack=True))
-
-    edges = np.linspace(wl_array.min(), wl_array.max(), nwavels + 1)
-    wavels = np.linspace(wl_array.min(), wl_array.max(), 2 * nwavels + 1)[1::2]
-
-    areas = []
-    for i in range(nwavels):
-        cond1 = edges[i] < wl_array
-        cond2 = wl_array < edges[i + 1]
-        throughput = np.where(cond1 & cond2, throughput_array, 0)
-        areas.append(jsp.integrate.trapezoid(y=throughput, x=wl_array))
-
-    areas = np.array(areas)
-    weights = areas / areas.sum()
-
-    wavels *= 1e-10
-    return np.array([wavels, weights])
 
 class Exposure(zdx.Base):
     filename: str = eqx.field(static=True)
@@ -140,6 +79,8 @@ class BlankExposure(Exposure):
         self.data = 0.
         self.err = 0.
         self.bad = 0.
+        self.exptime = 0.
+        self.pam = 0.
 
 
 class InjectedExposure(Exposure):
@@ -158,6 +99,9 @@ class InjectedExposure(Exposure):
         self.data = data/t_exp/5
         self.err = err/t_exp/5
         self.bad = np.zeros(self.data.shape)
+
+        self.exptime = t_exp
+        self.pam = 0.
 
 
 
@@ -237,7 +181,8 @@ class ModelFit(zdx.Base):
             case "breathing":
                 return exposure.key
             case "cold_mask_shift":
-                return "global"#exposure.key#"global"
+                #return "global"#exposure.key#"global"
+                return str(round(exposure.mjd))
             case "cold_mask_rot":
                 return "global"#exposure.key#"global"
             case "cold_mask_scale":
@@ -253,7 +198,8 @@ class ModelFit(zdx.Base):
             case "slope":
                 return f"{exposure.target}_{exposure.filter}"
             case "spectrum" | "primary_spectrum" | "secondary_spectrum":
-                return exposure.key#f"{exposure.target}_{exposure.filter}"
+                #return exposure.key
+                return f"{exposure.target}_{exposure.filter}"
 
             case "primary_distortion" | "cold_mask_distortion":
                 return "global"
@@ -437,7 +383,7 @@ class SinglePointSpectrumFit(ModelFit):
     def __call__(self, model, exposure):
 
     
-        spectrum = np.abs(model.get(exposure.fit.map_param(exposure, "spectrum")))
+        spectrum = model.get(exposure.fit.map_param(exposure, "spectrum"))
 
         #wv_small, _ = calc_throughput(exposure.filter, nwavels=len(spectrum))
         
@@ -463,9 +409,9 @@ class SinglePointSpectrumFit(ModelFit):
 
         #spec_full = np.interp(wv, wv_small, spectrum)
 
-        source = self.source.set("spectrum", dl.Spectrum(wv, jax.nn.softplus(inten*spectrum)))
+        source = self.source.set("spectrum", dl.Spectrum(wv, inten*10**spectrum))
 
-        source = source.set("flux", np.sum(spectrum))
+        source = source.set("flux", np.sum(10**spectrum))
 
         #source = source.set("flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
         source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
@@ -473,6 +419,7 @@ class SinglePointSpectrumFit(ModelFit):
 
         #source = self.source
         optics = self.update_optics(model, exposure)
+        detector = self.update_detector(model, exposure)
 
         psfs = optics.model(source, return_psf=True)
         psf = psfs.data.sum(tuple(range(psfs.ndim)))
@@ -480,7 +427,7 @@ class SinglePointSpectrumFit(ModelFit):
 
         psf_obj = dl.PSF(psf, pixel_scale)
         
-        return model.detector.model(psf_obj, return_psf=False)
+        return detector.model(psf_obj, return_psf=False)
     
     #def get_spectrum(self, model, exposure):
 
@@ -501,15 +448,14 @@ class SinglePointFourierSpectrumFit(ModelFit):
         wv, filt = calc_throughput(exposure.filter, nwavels=nw)
 
         inten = np.zeros(nw)
-        xs = np.linspace(0, 2, nw)*np.pi
+        xs = np.linspace(0, 2*np.pi, nw)
 
-        #inten += np.ones(nw)*coeffs[0]
-        #inten += 
 
         for i,c in enumerate(coeffs):
+            inten = inten + np.cos(xs * i/2)*c
             #inten = inten +  jax.lax.select(i == 0, np.ones(nw), np.zeros(nw))*c
-            inten = inten +  jax.lax.select((i % 2) == 0, np.cos(xs*i/2), np.zeros(nw))*c
-            inten = inten +  jax.lax.select((i % 2) == 1, np.sin(xs*(i+1)/2), np.zeros(nw))*c
+            #inten = inten +  jax.lax.select((i % 2) == 0, np.cos(xs*i/2), np.zeros(nw))*c
+            #inten = inten +  jax.lax.select((i % 2) == 1, np.sin(xs*(i+1)/2), np.zeros(nw))*c
             """if c == 0:
                 inten += np.ones(nw)
             elif c % 2:
@@ -520,14 +466,10 @@ class SinglePointFourierSpectrumFit(ModelFit):
         #inten = np.maximum(inten, 0.0)#np.zeros(nw))
         #inten = np.abs(inten)
 
-        #inten = 10**inten
+        inten = 10**inten
         inten *= filt
-        inten = jax.nn.softplus(inten)
 
-        source = self.source.set("flux", np.sum(inten))
-
-
-        
+        source = self.source.set("flux", np.nansum(inten))
 
         source = source.set("spectrum", dl.Spectrum(wv, inten))
         #source = source.set("flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
@@ -535,6 +477,7 @@ class SinglePointFourierSpectrumFit(ModelFit):
 
         source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
         optics = self.update_optics(model, exposure)
+        detector = self.update_detector(model, exposure)
 
         psfs = optics.model(source, return_psf=True)
         psf = psfs.data.sum(tuple(range(psfs.ndim)))
@@ -542,7 +485,7 @@ class SinglePointFourierSpectrumFit(ModelFit):
 
         psf_obj = dl.PSF(psf, pixel_scale)
         
-        return model.detector.model(psf_obj, return_psf=False)
+        return detector.model(psf_obj, return_psf=False)
     
 
 class SinglePointPolySpectrumFit(ModelFit):
@@ -589,46 +532,111 @@ class SinglePointPolySpectrumFit(ModelFit):
         return detector.model(psf_obj, return_psf=False)
 
 
+class SpectrumVisFit(ModelFit):
+    source: dl.Telescope = eqx.field(static=True)
+    nwavels: int = eqx.field(static=True)
+    vis_model: LogVisModel
+    def __init__(self, nwavels, vis_model):
+        self.source = dl.PointSource(wavelengths=[1])
+        self.nwavels = nwavels
+
+        self.vis_model = vis_model
+
+    def get_key(self, exposure, param):
+        if param == "phases":
+            return exposure.key
+        elif param == "amplitudes":
+            return exposure.key
+        else:
+            return super().get_key(exposure, param)
+    
+    def map_param(self, exposure, param):
+        if param == "phases":
+            return f"{param}.{exposure.get_key(param)}"
+        elif param == "amplitudes":
+            return f"{param}.{exposure.get_key(param)}"
+        else:
+            return super().map_param(exposure, param)
+
+
+    def __call__(self, model, exposure):
+
+        source = self.source
+
+        nw = self.nwavels
+
+
+        spectrum = model.get(exposure.fit.map_param(exposure, "spectrum"))
+        wv, inten = calc_throughput(exposure.filter, nwavels=len(spectrum))
+        source = self.source.set("spectrum", dl.Spectrum(wv, inten*10**spectrum))
+        source = source.set("flux", np.sum(10**spectrum))
+
+        source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
+        optics = self.update_optics(model, exposure)
+        detector = self.update_detector(model, exposure)
+
+        wfs = optics.model(source, return_wf=True)
+
+        print(exposure.fit.map_param(exposure, "phases"))
+        phases = model.get(exposure.fit.map_param(exposure, "phases"))
+        amplitudes = model.get(exposure.fit.map_param(exposure, "amplitudes"))
+        #phases = model.get(exposure.fit.map_param(exposure, "phases"))
+
+        psfs = self.vis_model.model_vis(wfs, amplitudes, phases, exposure.filter)
+
+        psf = psfs.data.sum(tuple(range(psfs.ndim)))
+        pixel_scale = psfs.pixel_scale.mean()
+
+        psf_obj = dl.PSF(psf, pixel_scale)
+        
+        return detector.model(psf_obj, return_psf=False)
+
+
 class BreathingSinglePointFit(ModelFit):
     source: dl.Telescope = eqx.field(static=True)
+    nwavels: int = eqx.field(static=True)
     ns: int = eqx.field(static=True)
-    def __init__(self):
+    def __init__(self, nwavels):
         self.source = dl.PointSource(wavelengths=[1])
-        self.ns = 6
+        self.nwavels = nwavels
+        self.ns = 5
     def __call__(self, model, exposure):
-        filter = model.filters[exposure.filter]
-        slope = model.get(exposure.fit.map_param(exposure, "slope"))
+        source = self.source
+        nw = self.nwavels
 
-        wv = filter[:,0]
-        inten = filter[:,1]
-        swv = wv/1e-9
+        coeffs = model.get(exposure.fit.map_param(exposure, "spectrum"))
+        wv, filt = calc_throughput(exposure.filter, nwavels=nw)
+        inten = NonNormalisedClippedPolySpectrum(np.linspace(-1, 1, nw), coeffs).weights
+        inten = 10**inten
+        source = source.set("flux", np.sum(inten))
+        inten *= filt
 
-        sloped = inten * (1 + slope[0]*1e-3*swv + slope[1]*1e-6*swv**2 
-                          + slope[2]*1e-9*swv**3 + slope[3]*1e-12*swv**4 + slope[4]*1e-15*swv**5)# + slope[2]*swv**2 + slope[3]*swv**3)
+        source = source.set("spectrum", dl.Spectrum(wv, inten))
 
-        sloped = sloped/np.sum(sloped)
-
-        source = self.source.set("spectrum", dl.Spectrum(wv, sloped))
-        source = source.set("flux", 10**model.get(exposure.fit.map_param(exposure, "fluxes")))
         source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
+        detector = self.update_detector(model, exposure)
 
-        breathing = model.get(exposure.fit.map_param(exposure, "breathing"))#*1e-9
+        breathing = model.get(exposure.fit.map_param(exposure, "breathing"))
         aberrations = model.get(exposure.fit.map_param(exposure, "aberrations"))
+
+        defocuses = np.linspace(-breathing, breathing, self.ns)
 
         psf = 0.0
 
         for i in range(self.ns):
-            ab = aberrations - breathing/2 + i * (breathing)/(self.ns-1)
+            ab = aberrations.at[0].set(defocuses[i])
             model = model.set(exposure.fit.map_param(exposure, "aberrations"), ab)
-            #print(model.params)
             optics = self.update_optics(model, exposure)
             psfs = optics.model(source, return_psf=True)
             psf = psf + psfs.data.sum(tuple(range(psfs.ndim)))/self.ns
-        
+
+        #psfs = optics.model(source, return_psf=True)
+        #psf = psfs.data.sum(tuple(range(psfs.ndim)))
         pixel_scale = psfs.pixel_scale.mean()
 
         psf_obj = dl.PSF(psf, pixel_scale)
-        return model.detector.model(psf_obj, return_psf=False)
+        
+        return detector.model(psf_obj, return_psf=False)
     
 class BinaryFit(ModelFit):
     source: dl.BinarySource = eqx.field(static=True)
@@ -743,6 +751,31 @@ class BinaryPolySpectrumFit(ModelFit):
         return detector.model(psf_obj, return_psf=False)
 
 
+"""class BaseModeller(zdx.Base):
+    params: dict
+
+    def __init__(self, params):
+        self.params = params
+
+    def __getattr__(self, key):
+        if key in self.params:
+            return self.params[key]
+        for k, val in self.params.items():
+            if hasattr(val, key):
+                return getattr(val, key)
+        raise AttributeError(
+            f"Attribute {key} not found in params of {self.__class__.__name__} object"
+        )
+
+    def __getitem__(self, key):
+
+        values = {}
+        for param, item in self.params.items():
+            if isinstance(item, dict) and key in item.keys():
+                values[param] = item[key]
+
+        return values"""
+
 class BaseModeller(zdx.Base):
     params: dict
 
@@ -768,7 +801,6 @@ class BaseModeller(zdx.Base):
 
         return values
 
-
 class NICMOSModel(BaseModeller):
     filters: dict
     optics: NICMOSOptics
@@ -787,7 +819,7 @@ class NICMOSModel(BaseModeller):
             self.filters[filter] = spec[::5,:]    
 
 
-class ModelParams(BaseModeller):
+"""class ModelParams(BaseModeller):
 
     @property
     def keys(self):
@@ -830,4 +862,83 @@ class ModelParams(BaseModeller):
 
     def inject(self, other):
         # Injects the values of this class into another class
-        return other.set(self.keys, self.values)
+        return other.set(self.keys, self.values)"""
+
+
+
+class ModelParams(BaseModeller):
+
+    def __getitem__(self, key):
+        return self.params[key]
+
+    def __getattr__(self, key):
+
+        # Make the object act like a real dictionary
+        if hasattr(self.params, key):
+            return getattr(self.params, key)
+
+        if key in self.params.keys():
+            return self.params[key]
+
+        for sub_key, val in self.params.items():
+            if hasattr(val, key):
+                return getattr(val, key)
+
+        raise AttributeError(
+            f"Attribute {key} not found in params of {self.__class__.__name__} object"
+        )
+
+    def replace(self, values):
+        # Takes in a super-set class and updates this class with input values
+        return self.set("params", dict([(param, getattr(values, param)) for param in self.keys()]))
+
+    def from_model(self, values):
+        return self.set("params", dict([(param, values.get(param)) for param in self.keys()]))
+
+    def __add__(self, values):
+        matched = self.replace(values)
+        return jax.tree.map(lambda x, y: x + y, self, matched)
+
+    def __iadd__(self, values):
+        return self.__add__(values)
+
+    def __mul__(self, values):
+        matched = self.replace(values)
+        return jax.tree.map(lambda x, y: x * y, self, matched)
+
+    def __imul__(self, values):
+        return self.__mul__(values)
+
+    def map(self, fn):
+        return jax.tree.map(lambda x: fn(x), self)
+
+    # Re-name this donate, and it counterpart accept, receive?
+    def inject(self, other):
+        # Injects the values of this class into another class
+        return other.set(list(self.keys()), list(self.values()))
+
+    def partition(self, params):
+        """params can be a model params object or a list of keys"""
+        if isinstance(params, ModelParams):
+            params = list(params.params.keys())
+        return (
+            ModelParams({param: self[param] for param in params}),
+            ModelParams({param: self[param] for param in self.keys() if param not in params}),
+        )
+
+    def combine(self, params2):
+        return ModelParams({**self.params, **params2.params})
+
+    def jacfwd(self, fn, n_batch=1):
+        X, unravel_fn = ravel_pytree(self)
+        Xs = np.array_split(X, n_batch)
+        rebuild = lambda X_batch, index: X.at[index : index + len(X_batch)].set(X_batch)
+        lens = np.cumsum(np.array([len(x) for x in Xs]))[:-1]
+        starts = np.concatenate([np.array([0]), lens])
+
+        @eqx.filter_jacfwd
+        def batched_jac_fn(x, index):
+            model_params = unravel_fn(rebuild(x, index))
+            return eqx.filter_jit(fn)(model_params)
+
+        return np.concatenate([batched_jac_fn(x, index) for x, index in zip(Xs, starts)], axis=-1)

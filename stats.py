@@ -17,3 +17,10 @@ def posterior(model, exposure, per_pix=False, return_im=False):
     if per_pix:
         return np.nanmean(posterior_im)
     return np.nansum(posterior_im)
+
+def orthogonalise(x, cov):
+    eig_vals, eig_vecs = np.linalg.eig(cov)
+    eig_vals, eig_vecs = eig_vals.real, eig_vecs.real.T
+    ortho_cov = np.dot(eig_vecs, np.dot(cov, np.linalg.inv(eig_vecs)))
+    ortho_x = np.dot(eig_vecs, x)
+    return ortho_x, ortho_cov, eig_vecs, eig_vals
