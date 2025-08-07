@@ -27,11 +27,13 @@ def loss_fn(params, exposures, model):
     mdl = params.inject(model)
     return np.nansum(np.asarray([posterior(mdl,exposure) for exposure in exposures]))
 
-def optimise(params, model, exposures, things, niter):
+def optimise(params, model, exposures, things, niter, reduce_ram=False):
     paths = list(things.keys())
     optimisers = [things[i] for i in paths]
 
     print("Calculating Fishers")
+
+    fish = lambda model, exposure, params: fisher_fn(model, exposure, params, reduce_ram=reduce_ram)
 
     #fishers = calc_fishers(model, exposures, paths)
     fishers = calc_fishers(model, exposures, paths, fisher_fn, recalculate=True)
