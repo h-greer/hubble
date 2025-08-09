@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=4:00:00
-#SBATCH --mem-per-cpu=1000M
+#SBATCH --mem-per-cpu=4000M
 #SBATCH --gres=gpu:1
 
 module load gcccore/13.2.0
