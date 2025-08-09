@@ -376,7 +376,7 @@ things = {
 groups = list(things.keys())
 
 # %%
-losses, models = optimise(params, model_binary, exposures_binary, things, 3000)
+losses, models = optimise(params, model_binary, exposures_binary, things, 10000)
 
 # %%
 #plt.plot(np.asarray(losses[-20:])/(len(exposures_binary)*wid**2))
