@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=gpu_test
+#SBATCH --job-name=bd_binary_hmc
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --ntasks-per-node=1
