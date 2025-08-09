@@ -49,7 +49,6 @@ from stats import posterior
 from fitting import *
 from plotting import *
 
-%matplotlib inline
 plt.rcParams['image.cmap'] = 'inferno'
 plt.rcParams["font.family"] = "serif"
 plt.rcParams["image.origin"] = 'lower'
