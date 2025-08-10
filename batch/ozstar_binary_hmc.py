@@ -539,7 +539,7 @@ sampler = npy.infer.MCMC(
                         ("Primary Poly 0","Primary Poly 1","Primary Poly 2", "Primary Poly 3", "Primary Poly 4"),
                         ("Secondary Poly 0","Secondary Poly 1","Secondary Poly 2", "Secondary Poly 3", "Secondary Poly 4"),
                     ],
-                    max_tree_depth =8),
+                    max_tree_depth =6),
     num_warmup=4000,
     num_samples=4000,
     #num_chains=6,
@@ -559,6 +559,47 @@ consumer = cc.ChainConsumer().add_chain(chain)
 fig = consumer.plotter.plot()
 fig.savefig("hmc_ozstar_test.png")
 plt.close()
+
+predictive = npy.infer.Predictive(psf_model, posterior_samples=sampler.get_samples())
+samples = predictive(jr.PRNGKey(0),exposures_binary[0], model_binary, models[-1])
+
+fig, axs = plt.subplots(1,3, figsize=(30,8))
+
+fig.tight_layout()
+
+cmap = matplotlib.colormaps['inferno']
+cmap.set_bad('k',1)
+
+posterior = samples['psf'][0].reshape((wid,wid))
+
+cropped_frame = exp.data**0.125
+
+posterior_frame = posterior**0.125
+
+vm = max(np.nanmax(cropped_frame),np.nanmax(posterior_frame))
+cd=axs[0].imshow(cropped_frame, vmin=0,vmax=vm,cmap=cmap)
+plt.colorbar(cd,ax=axs[0])
+
+
+tl=axs[1].imshow(posterior_frame, vmin=0, vmax=vm,cmap=cmap)
+plt.colorbar(tl,ax=axs[1])
+
+
+
+resid = (exp.data - posterior)/exp.err
+rlim = np.nanmax(np.abs(resid))
+resid=axs[2].imshow(resid, cmap='seismic',vmin=-rlim, vmax=rlim)
+plt.colorbar(resid,ax=axs[2])
+
+axs[0].set_title("Measured PSF")
+axs[1].set_title("Predictive Posterior")
+axs[2].set_title("Residuals")
+
+for i in range(3):
+    axs[i].set_xticks([])
+    axs[i].set_yticks([])
+
+fig.savefig(f"binary_predictive.png")
 
 
 
