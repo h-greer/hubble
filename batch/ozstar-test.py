@@ -10,6 +10,12 @@ import jax.scipy as jsp
 import jax
 import numpy
 
+
+options = jax.profiler.ProfileOptions()
+options.python_tracer_level = 1
+options.host_tracer_level = 3
+jax.profiler.start_trace("./profile-data/", profiler_options=options)
+
 #jax.config.update("jax_enable_x64", True)
 
 # Optimisation imports
@@ -188,7 +194,7 @@ for exp in exposures_single:
     params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = -45.
     params["cold_mask_scale"][exp.fit.get_key(exp, "cold_mask_scale")] = np.asarray([1.,1.])
     params["cold_mask_shear"][exp.fit.get_key(exp, "cold_mask_shear")] = np.asarray([0.,0.])
-    params["primary_rot"][exp.fit.get_key(exp, "primary_rot")] = -45. + 90. 
+    params["primary_rot"][exp.fit.get_key(exp, "primary_rot")] = -45. + 90.
     params["primary_scale"][exp.fit.get_key(exp, "primary_scale")] = np.asarray([1.,1.])
     params["primary_shear"][exp.fit.get_key(exp, "primary_shear")] = np.asarray([0.,0.])
     #params["displacement"][exp.fit.get_key(exp, "displacement")] = 1e6
@@ -287,3 +293,5 @@ print(models[-1].params)
 
 # %%
 #models[-1].inject(model_single)
+
+jax.profiler.stop_trace()
