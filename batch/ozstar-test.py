@@ -12,9 +12,7 @@ import numpy
 
 
 options = jax.profiler.ProfileOptions()
-options.python_tracer_level = 1
-options.host_tracer_level = 3
-jax.profiler.start_trace("./profile-data/", profiler_options=options)
+jax.profiler.start_trace("./profile-data/")
 
 #jax.config.update("jax_enable_x64", True)
 
