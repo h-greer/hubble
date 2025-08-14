@@ -10,10 +10,6 @@ import jax.scipy as jsp
 import jax
 import numpy
 
-
-options = jax.profiler.ProfileOptions()
-jax.profiler.start_trace("./profile-data/")
-
 #jax.config.update("jax_enable_x64", True)
 
 # Optimisation imports
@@ -276,7 +272,12 @@ things = {
 groups = list(things.keys())
 
 # %%
+
+jax.profiler.start_trace("./profile-data/")
+
 losses, models = optimise(params, model_single, exposures_single, things, 300)
+
+jax.profiler.stop_trace()
 
 print(losses[0], losses[-1])
 
@@ -292,4 +293,3 @@ print(models[-1].params)
 # %%
 #models[-1].inject(model_single)
 
-jax.profiler.stop_trace()
