@@ -39,21 +39,6 @@ def optimise(params, model, exposures, things, niter, reduce_ram=False):
     fishers = calc_fishers(model, exposures, paths, fisher_fn, recalculate=True)
     model_params = ModelParams({p: model.get(p) for p in things.keys()})
     lrs = populate_lr_model(fishers, exposures, model_params)
-
-    """fishers = calc_fishers(model, exposures, paths, recalculate=True)
-    #model_params = ModelParams({p: model.get(p) for p in things.keys()})
-    lrs = calc_lrs(model, exposures, fishers, paths)
-
-    lrs = ModelParams(lrs.params)
-    print(lrs)
-
-    #lrs = populate_lr_model(fishers, exposures, paths)
-    #model_params = ModelParams({p: model.get(p) for p in things.keys()})
-    #print(model_params.params)
-    #print(model_params)
-    #lrs = populate_lr_model(fishers, exposures, model_params)
-
-    """
     
 
     print(params)
@@ -86,20 +71,6 @@ def optimise(params, model, exposures, things, niter, reduce_ram=False):
         models.append(model_params)
         losses.append(loss)
 
-
-
-    """for i in tqdm(range(niter)):
-
-        grads = jax.tree.map(lambda x: x * 0.0, model_params)
-
-        loss, new_grads = jit_loss(model_params,exposures, model)
-        grads += new_grads
-        grads = jax.tree.map(lambda x, y: x * np.abs(y), grads, ModelParams(lrs.params))
-        updates, opt_state = optim.update(grads, opt_state)
-        model_params = zdx.apply_updates(model_params, updates)
-
-        models.append(model_params)
-        losses.append(loss)"""
     
     return losses, models
 

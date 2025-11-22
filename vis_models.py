@@ -175,19 +175,8 @@ class LogVisModel(BaseLogVisModel):
 def vis_jac_fn(model_params, args):
     optics, vis_model, filter = args
 
-    print("starting")
-
     optics = optics.set("AberratedAperture.coefficients", model_params["aberrations"]*1e-9)
     optics = optics.set("cold_mask.transformation.translation", model_params["cold_mask_shift"]*1e-2)
-
-    """# Populate the optics with any bits we want
-    for key, value in model_params.items():
-        print()
-        if hasattr(optics, key):
-            print("yay")
-            optics = optics.set(key, value)"""
-
-    print("spectrum")
 
     spct = model_params.spectrum
 
@@ -201,7 +190,6 @@ def vis_jac_fn(model_params, args):
 
     # Propagate the wavefront and project to the latent space
     if "positions" in model_params.keys():
-        wavels, weights = optics.filters[filter]
         offset = dlu.arcsec2rad(model_params.positions)
         wfs = optics.propagate(wavels, offset, weights, return_wf=True)
     else:

@@ -35,7 +35,7 @@ plt.rcParams['figure.dpi'] = 72
 from detectors import *
 from apertures import *
 from models import *
-from fisher import *
+from newfisher import *
 from stats import posterior
 from fitting import *
 from plotting import *
@@ -58,7 +58,7 @@ out_dir = "binary"
 
 
 # %%
-wid = 64
+wid = 80
 oversample = 4
 
 optics = NICMOSOptics(512, wid, oversample)

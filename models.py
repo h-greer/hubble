@@ -10,12 +10,9 @@ import dLux as dl
 import dLux.utils as dlu
 
 import zodiax as zdx
-#from zodiax import BaseModeller, ModelParams
 import equinox as eqx
 
 from abc import abstractmethod
-
-from tqdm.auto import tqdm
 
 from apertures import *
 from detectors import *
@@ -106,7 +103,7 @@ class InjectedExposure(Exposure):
 
 
 
-tf = lambda x: np.flip(x)#np.rot90(x,k=3)#np.flip(x)#, axis=0)
+tf = lambda x: x#np.flip(x)#np.rot90(x,k=3)#np.flip(x)#, axis=0)
 
 def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
