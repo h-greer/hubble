@@ -18,67 +18,14 @@ def nearest_interpolate(x, xp, fp):
     locs = np.argmin(np.abs(dists),axis=0)
     return fp[locs]    
 
-
-class SimpleSpectrum(dl.BaseSpectrum):
+class CombinedSpectrum(dl.BaseSpectrum):
     wavelengths: Array
-
-    def __init__(self: dl.Spectrum, wavelengths: Array):
-        self.wavelengths = np.asarray(wavelengths, dtype=float)
-        super().__init__()
-
-
-class NonNormalisedBasisSpectrum(SimpleSpectrum):
-    coefficients: Array
-
-    def __init__(self: Spectrum, wavelengths: Array, coefficients: Array):
-        super().__init__(wavelengths)
-        self.coefficients = np.asarray(coefficients, dtype=float)
-
-        if self.coefficients.ndim != 1:
-            raise ValueError("Coefficients must be a 1d array.")
-
-    @abstractmethod
-    def _eval_weight(self: Spectrum, wavelength: Array) -> Array:
-        pass
-
-    @property
-    def weights(self: Spectrum) -> Array:
-        weights = jax.vmap(self._eval_weight)(self.wavelengths)
-        return weights# / weights.sum()
-
-    def normalise(self: Spectrum) -> Spectrum:
-
-        return self
-class NonNormalisedClippedPolySpectrum(NonNormalisedBasisSpectrum):
-    def _eval_weight(self: Spectrum, wavelength: Array) -> Array:
-        return np.array(
-            [
-                self.coefficients[i] * wavelength**i
-                for i in range(len(self.coefficients))
-            ]
-        ).sum()
-
-
-class NonNormalisedSpectrum(SimpleSpectrum):
-    wavelengths: Array
-    weights: Array
-    def __init__(self, wavels, weights):
-        super().__init__(wavels)
-        self.weights = np.asarray(weights, float)
-
-    @property
-    def weights(self):
-        return self.weights
-    def normalise(self):
-        return self
-
-
-class CombinedSpectrum(SimpleSpectrum):
     filt_weights: Array
 
     def __init__(self, wavels, filt_weights):
-        super().__init__(wavels)
         self.filt_weights = np.asarray(filt_weights, float)
+        self.wavelengths = np.asarray(wavels, dtype=float)
+        super().__init__()
 
     @property
     def spec_weights(self):
