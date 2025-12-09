@@ -312,6 +312,14 @@ groups
 # %%
 #fsh = calc_fishers(models[-1].inject(model_single), exposures_single, groups, fisher_fn, recalculate=True, save=False)
 
+fsh = calc_fishers(final_params.inject(model_single), exposures_single, ["spectrum"], fisher_fn, recalculate=True, save=False)
+spectrum_cov = np.linalg.inv(fsh['n8yj02x0q.spectrum'])#+fsh['n8yj02wyq.spectrum'])
+spectrum_err = np.diag(np.sqrt(np.abs(spectrum_cov)))
+
+plt.imshow(spectrum_cov, cmap='seismic', vmin=-np.max(np.abs(spectrum_cov)), vmax=np.max(np.abs(spectrum_cov)))
+plt.colorbar()
+plt.savefig("cov.png")
+
 
 # %%
 def loss_fn(params, exposures, model):
