@@ -338,7 +338,7 @@ def optimise_optimistix(params, model, exposures, things, niter):
 
 
 # %%
-sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures_single, things, 1000)
+sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures_single, things, 50)
 print(sol.value.params)
 print(fun(sol.value, (exposures_single, model_single)), (losses[-1]))
 
