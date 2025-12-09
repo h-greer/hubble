@@ -110,6 +110,7 @@ def plot_comparison(model, params, exposures, save=False, graticule=False):
         plt.colorbar(apt, ax=axs[2]).set_label("OPD (nm)")
         #axs[4].imshow(telescope.detector.pixel_response.pixel_response)
         resid = (exp.data - fit)/exp.err
+        print(np.nanmean(np.abs(resid)))
         rlim = np.nanmax(np.abs(resid))
         resid=axs[3].imshow(resid, cmap='seismic',vmin=-rlim, vmax=rlim)
         plt.colorbar(resid,ax=axs[3])

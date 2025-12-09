@@ -143,16 +143,6 @@ class NICMOSOptics(dl.AngularOpticalSystem):
         )
 
 ### Fresnel propagators ###
-def transfer_fn(coords, npixels, wavelength, pscale, distance):
-    scaling = npixels * pscale**2
-    rho_sq = ((coords / scaling) ** 2).sum(0)
-    return _fftshift(np.exp(-1.0j * np.pi * wavelength * distance * rho_sq))
-
-def transfer(wf, distance, pad=2):
-    coords = dlu.pixel_coords(pad * wf.npixels, pad * wf.diameter)
-    return transfer_fn(coords, wf.npixels, wf.wavelength, pad * wf.pixel_scale, distance)
-
-
 def _fft(phasor, pad=2):
     padded = dlu.resize(phasor, phasor.shape[0] * pad)
     return 1 / padded.shape[0] * np.fft.fft2(padded)
@@ -165,6 +155,19 @@ def _ifft(phasor, pad=1):
 
 def _fftshift(phasor):
     return np.fft.fftshift(phasor)
+
+
+def transfer_fn(coords, npixels, wavelength, pscale, distance):
+    rho_sq = (coords**2).sum(0)
+    return _fftshift(np.exp(-1.0j * np.pi * wavelength * distance * rho_sq))
+
+
+def transfer(wf, distance, pad=2):
+    npix = pad * wf.npixels
+    diam = pad * wf.diameter
+    freqs = np.fft.fftshift(np.fft.fftfreq(npix, diam / npix))
+    coords = np.array(np.meshgrid(freqs, freqs))
+    return transfer_fn(coords, wf.npixels, wf.wavelength, pad * wf.pixel_scale, distance)
 
 
 def plane_to_plane(wf, distance, pad=2):
@@ -214,7 +217,9 @@ class NICMOSFresnelOptics(dl.AngularOpticalSystem):
         for layer in list(self.layers.values()):
             wf *= layer
 
+        
         wf = wf.propagate(psf_npixels, pixel_scale)
+
         wf = plane_to_plane(wf, self.defocus*1e-9, pad=2)
 
         if return_wf:

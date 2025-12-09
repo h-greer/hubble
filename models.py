@@ -103,7 +103,7 @@ class InjectedExposure(Exposure):
 
 
 
-tf = lambda x: x#np.flip(x)#np.rot90(x,k=3)#np.flip(x)#, axis=0)
+tf = lambda x: np.flip(x)#np.rot90(x,k=3)#np.flip(x)#, axis=0)
 
 def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
@@ -151,7 +151,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
     bad_with_poisson = np.isnan(err_with_poisson)
 
-    return Exposure(filename, name, filter, data, err_with_poisson, bad_with_poisson, fit, mjd, exptime, wcs, pam)
+    return Exposure(filename, name, filter, tf(data), tf(err_with_poisson), tf(bad_with_poisson), fit, mjd, exptime, wcs, pam)
 
 class ModelFit(zdx.Base):
     source: dl.Telescope = eqx.field(static=True)
@@ -161,10 +161,7 @@ class ModelFit(zdx.Base):
         pass
 
     def get_key(self, exposure, param):
-        match param:
-            case "fluxes":
-                return exposure.key#f"{exposure.target}_{exposure.filter}"
-            
+        match param:            
             case "aberrations":
                 return exposure.key
             case "breathing":
@@ -195,9 +192,6 @@ class ModelFit(zdx.Base):
             case _: raise ValueError(f"Parameter {param} has no key")
     
     def map_param(self, exposure, param):
-        """
-        currently everything's global so this is just a fallthrough
-        """
         if param in ["aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "bias", "jitter", "primary_distortion", "cold_mask_distortion", "defocus"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
@@ -425,6 +419,12 @@ class BreathingFit(ModelFit):
         
         return detector.model(psf_obj, return_psf=False)
     
+class BreathingSinglePointFit(SinglePointFit, BreathingFit):
+    def __init__(self, spectrum, nwavels, ns):
+        SinglePointFit.__init__(self, spectrum, nwavels)
+        BreathingFit.__init__(self, ns)
+
+
 class BinaryFit(ModelFit):
     nwavels: int = eqx.field(static=True)
     spectrum: CombinedSpectrum
@@ -438,14 +438,16 @@ class BinaryFit(ModelFit):
             return exposure.key
         elif param == "primary_spectrum" or param == "secondary_spectrum":
             return f"{exposure.target}_{exposure.filter}"
-        elif param == "contrast":
-            return f"{exposure.target}_{exposure.filter}"
+        #elif param == "contrast":
+        #    return f"{exposure.target}_{exposure.filter}"
         else:
             return super().get_key(exposure, param)
     
     def map_param(self, exposure, param):
-        if param in ["positions", "primary_spectrum", "secondary_spectrum", "contrast"]:
+        if param in ["positions", "primary_spectrum", "secondary_spectrum"]:
             return f"{param}.{exposure.get_key(param)}"
+        #elif param in ["separation", "position_angle"]:
+        #    return param
         else:
             return super().map_param(exposure, param)
 
@@ -457,9 +459,9 @@ class BinaryFit(ModelFit):
         secondary_spectrum = self.spectrum(wv, inten, secondary_coeffs)
 
         source = self.source.set("primary.spectrum", primary_spectrum)
-        source = self.source.set("primary.flux", primary_spectrum.flux)
-        source = self.source.set("secondary.spectrum", secondary_spectrum)
-        source = self.source.set("secondary.flux", secondary_spectrum.flux)
+        source = source.set("primary.flux", primary_spectrum.flux)
+        source = source.set("secondary.spectrum", secondary_spectrum)
+        source = source.set("secondary.flux", secondary_spectrum.flux)
 
 
         position = model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432)

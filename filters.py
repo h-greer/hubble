@@ -15,7 +15,7 @@ def get_filter(file):
     wv = flt[:,0]
     bp = flt[:,1]
 
-    ebp = bp/(wv/1e4)
+    ebp = bp#/(wv/1e4)
 
     nebp = ebp/np.sum(ebp)*(np.max(wv)-np.min(wv))*0.01
     final = flt.at[:,1].set(nebp)

@@ -38,7 +38,7 @@ class CombinedSpectrum(dl.BaseSpectrum):
 
     @property
     def flux(self):
-        return np.sum(self.filt_weights*self.spec_weights())
+        return np.sum(self.spec_weights())
 
     def normalise(self):
         return self
@@ -50,7 +50,7 @@ class CombinedBinnedSpectrum(CombinedSpectrum):
         self.spectrum_weights = np.asarray(spec_weights, float)
     
     def spec_weights(self):
-        return spectrum_weights
+        return 10**self.spectrum_weights
 
 
 class CombinedFourierSpectrum(CombinedSpectrum):
@@ -63,7 +63,7 @@ class CombinedFourierSpectrum(CombinedSpectrum):
     def spec_weights(self):
         nw = len(self.wavelengths)
         inten = np.zeros(nw)
-        xs = np.linspace(0, 2*np.pi, nw)
+        xs = np.arange(nw)*2*np.pi/nw
 
         for i,c in enumerate(self.fourier_weights):
             inten = inten + np.cos(xs * i/2)*c
