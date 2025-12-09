@@ -341,12 +341,13 @@ sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures
 print(sol.value.params)
 print(fun(sol.value, (exposures_single, model_single)), (losses[-1]))
 
+final_params = sol.value
+
 
 # %%
 plot_comparison(final_params.inject(models[-1].inject(model_single)), sol.value, exposures_single, save="single-comparison-bfgs")
 
 # %%
-final_params = sol.value
 
 # %%
 fsh = calc_fishers(final_params.inject(model_single), exposures_single, ["spectrum"], fisher_fn, recalculate=True, save=False)
