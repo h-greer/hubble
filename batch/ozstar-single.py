@@ -307,7 +307,7 @@ models[-1]
 groups
 
 # %%
-fsh = calc_fishers(models[-1].inject(model_single), exposures_single, groups, fisher_fn, recalculate=True, save=False)
+#fsh = calc_fishers(models[-1].inject(model_single), exposures_single, groups, fisher_fn, recalculate=True, save=False)
 
 
 # %%
@@ -327,7 +327,7 @@ def optimise_optimistix(params, model, exposures, things, niter):
 
     model_params = ModelParams({p: params.get(p) for p in things.keys()})
 
-    solver = optx.BFGS(rtol=1e-8, atol=1e-6,verbose=frozenset({"step_size", "loss"}))
+    solver = optx.BFGS(rtol=1e-6, atol=1e-6,verbose=frozenset({"step_size", "loss"}))
     sol = optx.minimise(fun, solver, model_params, (exposures, model), throw=False, max_steps=niter)
     
     return sol
@@ -388,7 +388,7 @@ for i in range(5):
 vals[order]
 
 # %%
-#plt.figure(figsize=(10,10))
+plt.figure(figsize=(10,10))
 
 wv, filt = calc_throughput("F110W", nwavels=60)
 
@@ -396,7 +396,8 @@ spec = CombinedFourierSpectrum(wv, filt, final_params.get("spectrum.U11296_F110W
 
 #HD201592_F110M
 
-#plt.plot(wavels, params.get("spectrum.U10764_F110W"))
-#plt.plot(wv*1e6, spec.spec_weights()*spec.flux)#, yerr = spectrum_err)
-#plt.xlabel("Wavelength (um)")
+plt.plot(wavels, params.get("spectrum.U10764_F110W"))
+plt.plot(wv*1e6, spec.spec_weights()*spec.flux)#, yerr = spectrum_err)
+plt.xlabel("Wavelength (um)")
+plt.savefig("spectrum.png")
 
