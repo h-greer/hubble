@@ -337,7 +337,7 @@ def optimise_optimistix(params, model, exposures, things, niter):
 
 
 # %%
-sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures_single, things, 20)
+sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures_single, things, 50)
 print(sol.value.params)
 print(fun(sol.value, (exposures_single, model_single)), (losses[-1]))
 
@@ -345,7 +345,7 @@ final_params = sol.value
 
 
 # %%
-plot_comparison(final_params.inject(models[-1].inject(model_single)), sol.value, exposures_single, save="single-comparison-bfgs")
+plot_comparison(final_params.inject(model_single), sol.value, exposures_single, save="single-comparison-bfgs")
 
 # %%
 
@@ -394,7 +394,6 @@ spec = CombinedFourierSpectrum(wv, filt, final_params.get("spectrum.U11296_F110W
 
 #HD201592_F110M
 
-plt.plot(wavels, params.get("spectrum.U10764_F110W"))
 plt.plot(wv*1e6, spec.spec_weights()*spec.flux)#, yerr = spectrum_err)
 plt.xlabel("Wavelength (um)")
 plt.savefig("spectrum.png")
