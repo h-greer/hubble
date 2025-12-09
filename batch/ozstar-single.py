@@ -289,6 +289,8 @@ losses, models = optimise(params, model_single, exposures_single, things, 100, r
 
 # %%
 
+plot_comparison(model_single, models[-1], exposures_single, save="opt-comparison")
+
 # %%
 print(losses[0], losses[-1])
 
@@ -335,18 +337,13 @@ def optimise_optimistix(params, model, exposures, things, niter):
 
 
 # %%
-sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures_single, things, 5000)
+sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures_single, things, 20)
 print(sol.value.params)
 print(fun(sol.value, (exposures_single, model_single)), (losses[-1]))
 
-# %%
-final_params = sol.value
 
 # %%
-sol.stats
-
-# %%
-#plot_comparison(final_params.inject(models[-1].inject(model_single)), sol.value, exposures_single)
+plot_comparison(final_params.inject(models[-1].inject(model_single)), sol.value, exposures_single, save="single-comparison-bfgs")
 
 # %%
 final_params = sol.value
