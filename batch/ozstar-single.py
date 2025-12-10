@@ -355,7 +355,7 @@ final_params = models[-1]#sol.value
 
 
 # %%
-plot_comparison(final_params.inject(model_single), sol.value, exposures_single, save="single-comparison-bfgs")
+plot_comparison(final_params.inject(model_single), final_params, exposures_single, save="single-comparison-bfgs")
 
 # %%
 
