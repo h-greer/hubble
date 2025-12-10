@@ -67,7 +67,7 @@ oversample = 4
 nwavels = 50#6
 npoly=20#2
 
-n_zernikes = 30#12
+n_zernikes = 20#12
 
 optics = NICMOSOptics(1024, wid, oversample, n_zernikes = n_zernikes)
 
@@ -347,11 +347,11 @@ def optimise_optimistix(params, model, exposures, things, niter):
 
 
 # %%
-sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures_single, things, 1000)
+"""sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures_single, things, 1000)
 print(sol.value.params)
-print(fun(sol.value, (exposures_single, model_single)), (losses[-1]))
+print(fun(sol.value, (exposures_single, model_single)), (losses[-1]))"""
 
-final_params = sol.value
+final_params = models[-1]#sol.value
 
 
 # %%
