@@ -62,7 +62,7 @@ extra_bad = None
 
 # %%
 wid = 64
-oversample = 4
+oversample = 8
 
 nwavels = 50#6
 npoly=20#2
@@ -406,6 +406,6 @@ plt.plot(wv*1e6, spec.spec_weights()*spec.flux)#, yerr = spectrum_err)
 plt.xlabel("Wavelength (um)")
 plt.savefig("spectrum.png")
 
-print(wv[:-1]*1e9)
+print([float(x) for x in wv[:-1]*1e9])
 s = spec.spec_weights()[:-1]
-print(s/s.sum() /( wv[:-1]*1e9 /1e4))
+print([float(x) for x in s/s.sum() /( wv[:-1]*1e9 /1e4)])
