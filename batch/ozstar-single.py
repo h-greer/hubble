@@ -316,6 +316,7 @@ fsh = calc_fishers(models[-1].inject(model_single), exposures_single, ["spectrum
 spectrum_cov = np.linalg.inv(fsh['n8yj02x0q.spectrum'])
 spectrum_err = np.diag(np.sqrt(np.abs(spectrum_cov)))
 
+plt.figure(figsize=(10,10))
 plt.imshow(spectrum_cov, cmap='seismic', vmin=-np.max(np.abs(spectrum_cov)), vmax=np.max(np.abs(spectrum_cov)))
 plt.colorbar()
 plt.savefig("cov.png")
