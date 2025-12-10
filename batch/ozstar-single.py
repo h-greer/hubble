@@ -285,7 +285,7 @@ things = {
 groups = list(things.keys())
 
 # %%
-losses, models = optimise(params, model_single, exposures_single, things, 100, recalculate=False)
+losses, models = optimise(params, model_single, exposures_single, things, 200, recalculate=False)
 
 # %%
 
