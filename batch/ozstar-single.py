@@ -347,7 +347,7 @@ def optimise_optimistix(params, model, exposures, things, niter):
 
 
 # %%
-sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures_single, things, 50)
+sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures_single, things, 1000)
 print(sol.value.params)
 print(fun(sol.value, (exposures_single, model_single)), (losses[-1]))
 
@@ -370,8 +370,6 @@ spectrum_err = np.diag(np.sqrt(np.abs(spectrum_cov)))
 # %%
 #plt.imshow(spectrum_cov, cmap='seismic', vmin=-np.max(np.abs(spectrum_cov)), vmax=np.max(np.abs(spectrum_cov)))
 #plt.colorbar()
-
-print(spectrum_cov)
 
 
 # %%
@@ -408,3 +406,6 @@ plt.plot(wv*1e6, spec.spec_weights()*spec.flux)#, yerr = spectrum_err)
 plt.xlabel("Wavelength (um)")
 plt.savefig("spectrum.png")
 
+print(wv[:-1]*1e9)
+s = spec.spec_weights()[:-1]
+print(s/s.sum() /( wv[:-1]*1e9 /1e4))
