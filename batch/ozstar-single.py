@@ -65,7 +65,7 @@ wid = 64
 oversample = 8
 
 nwavels = 50#6
-npoly=30#2
+npoly=50#2
 
 n_zernikes = 20#12
 
