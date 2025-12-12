@@ -67,7 +67,7 @@ oversample = 4
 nw_short = 5
 np_short = 3
 nw_long = 15
-np_short = 10
+np_long = 10
 
 n_zernikes = 20#12
 
