@@ -64,8 +64,10 @@ extra_bad = None
 wid = 80
 oversample = 4
 
-nwavels = 5#13#6
-npoly=3#10#2
+nw_short = 5
+np_short = 3
+nw_long = 15
+np_short = 10
 
 n_zernikes = 20#12
 
@@ -184,8 +186,8 @@ files = [
 ]
 exposures_single = [
     #exposure_from_file(ddir + "n8yj02wxq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 5), crop=wid),
-    exposure_from_file(ddir + "n8yj02wzq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 5), crop=wid),
-    exposure_from_file(ddir + "n8yj02x0q_cal.fits", SinglePointFit(CombinedFourierSpectrum, 15), crop=wid),
+    exposure_from_file(ddir + "n8yj02wzq_cal.fits", SinglePointFit(CombinedFourierSpectrum, np_short), crop=wid),
+    exposure_from_file(ddir + "n8yj02x0q_cal.fits", SinglePointFit(CombinedFourierSpectrum, np_long), crop=wid),
     #exposure_from_file(ddir + "n8yj02wyq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 15), crop=wid),
     ]
 
@@ -229,8 +231,8 @@ params = {
 positions = [[0.,0.,],[0.,0.,],[0.,0.,],[0.,0.,]]#[[0.43251792, 0.33013815],[ 0.49417186, -0.5629123 ]]
 
 positions_dict = {'n8yj02wxq': np.asarray([-0.24098018,  0.5766413 ]), 'n8yj02wyq': np.asarray([-0.2771823 ,  0.45730695]), 'n8yj02wzq': np.asarray([-0.6211268 , -0.68924445]), 'n8yj02x0q': np.asarray([ 0.45046756, -0.8387074 ])}
-nspec = [3, 10, 10]#[3, 10]
-nw = [5, 15, 15]#[5, 15]
+nspec = [np_short, np_long, np_long]#[3, 10]
+nw = [nw_short, nw_long, nw_long]#[5, 15]
 
 for idx, exp in enumerate(exposures_single):
     params["positions"][exp.fit.get_key(exp, "positions")] = positions_dict[exp.fit.get_key(exp, "positions")]#np.asarray(positions[idx])#np.asarray([0.49162114, -0.5632928])#np.asarray([ 0.45184505, -0.8391668 ])#np.asarray([-0.2,0.4])
@@ -316,7 +318,7 @@ things = {
 groups = list(things.keys())
 
 # %%
-losses, models = optimise(params, model_single, exposures_single, things, 200, recalculate=False)
+losses, models = optimise(params, model_single, exposures_single, things, 200, recalculate=True)
 
 # %%
 plt.plot(np.asarray(losses[-30:])/(len(exposures_single)*wid**2))
@@ -430,7 +432,7 @@ vals[order]
 # %%
 plt.figure(figsize=(10,10))
 
-wv, filt = calc_throughput("F110W", nwavels=15)
+wv, filt = calc_throughput("F110W", nwavels=nw_long)
 
 spec = CombinedFourierSpectrum(wv, filt, final_params.get("spectrum.U11296_F110W"))
 
