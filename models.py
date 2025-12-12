@@ -135,6 +135,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     if crop:
         w = WCS(image_hdr)
         y,x = numpy.unravel_index(numpy.nanargmax(data),data.shape)
+        print(x,y)
         centre = SkyCoord(w.pixel_to_world(x,y), unit='deg')
         data = Cutout2D(data, centre, crop, wcs=w).data
         err = Cutout2D(err, centre, crop, wcs=w).data
