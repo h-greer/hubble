@@ -186,8 +186,8 @@ files = [
 ]
 exposures_single = [
     #exposure_from_file(ddir + "n8yj02wxq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 5), crop=wid),
-    exposure_from_file(ddir + "n8yj02wzq_cal.fits", SinglePointFit(CombinedFourierSpectrum, np_short), crop=wid),
-    exposure_from_file(ddir + "n8yj02x0q_cal.fits", SinglePointFit(CombinedFourierSpectrum, np_long), crop=wid),
+    exposure_from_file(ddir + "n8yj02wzq_cal.fits", SinglePointFit(CombinedFourierSpectrum, nw_short), crop=wid),
+    exposure_from_file(ddir + "n8yj02x0q_cal.fits", SinglePointFit(CombinedFourierSpectrum, nw_long), crop=wid),
     #exposure_from_file(ddir + "n8yj02wyq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 15), crop=wid),
     ]
 
@@ -303,7 +303,7 @@ g = 5e-2
 things = {
     "positions": opt(g*5, 0),
     "spectrum": opt(g*2, 10),#opt(g*2, 10),#, (20, 1.5)),
-    "cold_mask_shift": opt(g*10, 30),
+    "cold_mask_shift": opt(g*0.8, 30),
     #"cold_mask_rot": opt(g*10, 100),
     "bias": opt(g*2, 20),
     "aberrations": opt(g*1, 50),
