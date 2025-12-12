@@ -163,7 +163,7 @@ class ModelFit(zdx.Base):
     def get_key(self, exposure, param):
         match param:            
             case "aberrations":
-                return exposure.key
+                return "global"#exposure.key
             case "breathing":
                 return exposure.key
             case "cold_mask_shift":

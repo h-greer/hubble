@@ -14,7 +14,7 @@ import jax.scipy as jsp
 import jax
 import numpy
 
-jax.config.update("jax_enable_x64", True)
+#jax.config.update("jax_enable_x64", True)
 
 
 # Optimisation imports
@@ -61,11 +61,11 @@ extra_bad = None
 
 
 # %%
-wid = 64
-oversample = 8
+wid = 80
+oversample = 4
 
-nwavels = 50#6
-npoly=50#2
+nwavels = 5#13#6
+npoly=3#10#2
 
 n_zernikes = 20#12
 
@@ -84,6 +84,14 @@ files = [
     #'n8yj02wyq_cal.fits'
 
 ]
+
+files = [
+    #'n8yj63wmq_cal.fits',
+    #'n8yj63woq_cal.fits',
+    #"n8yj63wlq_cal.fits",
+    "n8yj63wnq_cal.fits"
+]
+
 """
 
 # lhs 1846
@@ -150,9 +158,37 @@ files = [
 
 #exposures_single = [exposure_from_file(ddir + file, SinglePointPolySpectrumFit(nwavels), crop=wid, extra_bad=extra_bad) for file in files]
 
-exposures_single = [exposure_from_file(ddir + file, SinglePointFit(CombinedFourierSpectrum, nwavels), crop=wid, extra_bad=extra_bad) for file in files]
+#exposures_single = [exposure_from_file(ddir + file, SinglePointFit(CombinedFourierSpectrum, nwavels), crop=wid, extra_bad=extra_bad) for file in files]
 
 #exposures_binary = [exposure_from_file(ddir + file, BinaryPolySpectrumFit(nwavels), crop=wid, extra_bad=extra_bad) for file in files]
+
+files = [
+    #'n8yj63wmq_cal.fits',
+    #'n8yj63woq_cal.fits',
+    #"n8yj63wlq_cal.fits",
+    "n8yj63wnq_cal.fits"
+]
+
+
+#exposures_single = [
+#    exposure_from_file(ddir + "n8yj63wnq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 5), crop=wid),
+#    exposure_from_file(ddir + "n8yj63wmq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 15), crop=wid),
+#    ]
+
+files = [
+    #'n8yj53vfq_cal.fits',
+    #'n8yj53vkq_cal.fits',
+    'n8yj02x0q_cal.fits',
+    #'n8yj02wyq_cal.fits'
+
+]
+exposures_single = [
+    #exposure_from_file(ddir + "n8yj02wxq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 5), crop=wid),
+    exposure_from_file(ddir + "n8yj02wzq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 5), crop=wid),
+    exposure_from_file(ddir + "n8yj02x0q_cal.fits", SinglePointFit(CombinedFourierSpectrum, 15), crop=wid),
+    #exposure_from_file(ddir + "n8yj02wyq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 15), crop=wid),
+    ]
+
 
 # %%
 for e in exposures_single:
@@ -190,9 +226,15 @@ params = {
     #"displacement": 1.#1e5#{}
 }
 
-for exp in exposures_single:
-    params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([ 0.45184505, -0.8391668 ])#np.asarray([-0.2,0.4])
-    params["spectrum"][exp.fit.get_key(exp, "spectrum")] = np.zeros(npoly).at[0].set(1)*np.log10(np.nansum(exp.data)/nwavels)#np.ones(npoly)*np.log10(np.nansum(exp.data)/nwavels)#(np.zeros(npoly)).at[0].set(1)*np.log10(np.nansum(exp.data)/nwavels)
+positions = [[0.,0.,],[0.,0.,],[0.,0.,],[0.,0.,]]#[[0.43251792, 0.33013815],[ 0.49417186, -0.5629123 ]]
+
+positions_dict = {'n8yj02wxq': np.asarray([-0.24098018,  0.5766413 ]), 'n8yj02wyq': np.asarray([-0.2771823 ,  0.45730695]), 'n8yj02wzq': np.asarray([-0.6211268 , -0.68924445]), 'n8yj02x0q': np.asarray([ 0.45046756, -0.8387074 ])}
+nspec = [3, 10, 10]#[3, 10]
+nw = [5, 15, 15]#[5, 15]
+
+for idx, exp in enumerate(exposures_single):
+    params["positions"][exp.fit.get_key(exp, "positions")] = positions_dict[exp.fit.get_key(exp, "positions")]#np.asarray(positions[idx])#np.asarray([0.49162114, -0.5632928])#np.asarray([ 0.45184505, -0.8391668 ])#np.asarray([-0.2,0.4])
+    params["spectrum"][exp.fit.get_key(exp, "spectrum")] = np.zeros(nspec[idx]).at[0].set(1)*np.log10(np.nansum(exp.data)/nw[idx])#np.ones(npoly)*np.log10(np.nansum(exp.data)/nwavels)#(np.zeros(npoly)).at[0].set(1)*np.log10(np.nansum(exp.data)/nwavels)
     params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(n_zernikes)#np.asarray([0., 24.884588  , -25.489779  , -17.15699   , -21.790146  ,
     #      -4.592212  ,  -4.832893  ,  19.196083  ,   0.37983412,
     #       7.0756216 ,   0.30277824,  -6.330534])#np.zeros(n_zernikes)
@@ -216,19 +258,8 @@ model_single = set_array(NICMOSModel(exposures_single, params, optics, detector)
 params = ModelParams(params)
 
 # %%
-#plot_comparison(model_single, params, exposures_single)
+print(params.params)
 
-# %%
-plt.imshow(exposures_single[0].err)
-plt.colorbar()
-
-# %%
-cmap = matplotlib.colormaps['inferno']
-cmap.set_bad('k',1)
-plt.figure(figsize=(10,10))
-plt.imshow(exposures_single[0].data**0.125, cmap=cmap)
-plt.title(exposures_single[0].target)
-plt.colorbar()
 
 
 # %%
@@ -268,9 +299,9 @@ def flatten(l):
 g = 5e-2
 
 things = {
-    "positions": opt(g*2, 0),
-    "spectrum": opt(g*5, 10),#opt(g*2, 10),#, (20, 1.5)),
-    "cold_mask_shift": opt(g*30, 30),
+    "positions": opt(g*5, 0),
+    "spectrum": opt(g*2, 10),#opt(g*2, 10),#, (20, 1.5)),
+    "cold_mask_shift": opt(g*10, 30),
     #"cold_mask_rot": opt(g*10, 100),
     "bias": opt(g*2, 20),
     "aberrations": opt(g*1, 50),
@@ -288,9 +319,7 @@ groups = list(things.keys())
 losses, models = optimise(params, model_single, exposures_single, things, 200, recalculate=False)
 
 # %%
-
-plot_params(models, groups, xw = 3, save = "opt-training")
-plot_comparison(model_single, models[-1], exposures_single, save="opt-comparison")
+plt.plot(np.asarray(losses[-30:])/(len(exposures_single)*wid**2))
 
 # %%
 print(losses[0], losses[-1])
@@ -298,6 +327,14 @@ print(losses[0], losses[-1])
 # %%
 models_pd = [jax.tree.map(lambda x,y: (x-y)/y, models[i], models[-1]) for i in range(len(models))]
 
+# %%
+plot_params(models, groups, xw = 3, save = "opt-training")
+plot_comparison(model_single, models[-1], exposures_single, save="opt-comparison")
+
+# %%
+#stop
+
+# %%
 print(models[-1].params)
 
 # %%
@@ -311,15 +348,6 @@ groups
 
 # %%
 #fsh = calc_fishers(models[-1].inject(model_single), exposures_single, groups, fisher_fn, recalculate=True, save=False)
-
-fsh = calc_fishers(models[-1].inject(model_single), exposures_single, ["spectrum"], fisher_fn, recalculate=True, save=False)
-spectrum_cov = np.linalg.inv(fsh['n8yj02x0q.spectrum'])
-spectrum_err = np.diag(np.sqrt(np.abs(spectrum_cov)))
-
-plt.figure(figsize=(10,10))
-plt.imshow(spectrum_cov, cmap='seismic', vmin=-np.max(np.abs(spectrum_cov)), vmax=np.max(np.abs(spectrum_cov)))
-plt.colorbar()
-plt.savefig("cov.png")
 
 
 # %%
@@ -347,17 +375,18 @@ def optimise_optimistix(params, model, exposures, things, niter):
 
 
 # %%
-"""sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures_single, things, 1000)
-print(sol.value.params)
-print(fun(sol.value, (exposures_single, model_single)), (losses[-1]))"""
+#sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures_single, things, 5000)
+#print(sol.value.params)
+#print(fun(sol.value, (exposures_single, model_single)), (losses[-1]))
 
+# %%
 final_params = models[-1]#sol.value
 
+# %%
+#sol.stats
 
 # %%
-plot_comparison(final_params.inject(model_single), final_params, exposures_single, save="single-comparison-bfgs")
-
-# %%
+#plot_comparison(final_params.inject(models[-1].inject(model_single)), final_params, exposures_single)
 
 # %%
 fsh = calc_fishers(final_params.inject(model_single), exposures_single, ["spectrum"], fisher_fn, recalculate=True, save=False)
@@ -368,27 +397,32 @@ spectrum_cov = np.linalg.inv(fsh['n8yj02x0q.spectrum'])#+fsh['n8yj02wyq.spectrum
 spectrum_err = np.diag(np.sqrt(np.abs(spectrum_cov)))
 
 # %%
-#plt.imshow(spectrum_cov, cmap='seismic', vmin=-np.max(np.abs(spectrum_cov)), vmax=np.max(np.abs(spectrum_cov)))
-#plt.colorbar()
+plt.figure(figsize=(10,10))
+plt.imshow(spectrum_cov, cmap='seismic', vmin=-np.max(np.abs(spectrum_cov)), vmax=np.max(np.abs(spectrum_cov)))
+plt.colorbar()
+plt.savefig("cov.png")
 
 
 # %%
 #plt.imshow(np.sign(spectrum_cov))
 
 # %%
+npoly=10
+
+# %%
 vals, vects = np.linalg.eig(fsh['n8yj02x0q.spectrum'])#+fsh['n8yj02wyq.spectrum'])
 
 order = np.argsort(vals)[::-1]
 
-#plt.figure(figsize=(10,10))
-#plt.xlabel("Coefficient")
+plt.figure(figsize=(10,10))
+plt.xlabel("Coefficient")
 
 for i in range(5):
     plt.plot(np.arange(npoly),np.real(vects[:,order[i]]), label=f"{i}")
 #plt.legend()
 
 # %%
-#plt.semilogy(np.sort(np.real(vals))[::-1])
+plt.semilogy(np.sort(np.real(vals))[::-1])
 
 # %%
 vals[order]
@@ -396,16 +430,106 @@ vals[order]
 # %%
 plt.figure(figsize=(10,10))
 
-wv, filt = calc_throughput("F110W", nwavels=300)
+wv, filt = calc_throughput("F110W", nwavels=15)
 
 spec = CombinedFourierSpectrum(wv, filt, final_params.get("spectrum.U11296_F110W"))
 
 #HD201592_F110M
 
-plt.plot(wv*1e6, spec.spec_weights()*spec.flux)#, yerr = spectrum_err)
+#plt.plot(wavels, params.get("spectrum.U10764_F110W"))
+plt.plot(wv*1e6, spec.spec_weights()*spec.flux/(wv*1e6))#, yerr = spectrum_err)
 plt.xlabel("Wavelength (um)")
+
 plt.savefig("spectrum.png")
 
-print([float(x) for x in wv[:-1]*1e9])
+# %%
+symmetric_cov = spectrum_cov + spectrum_cov.T - np.diag(spectrum_cov.diagonal())
+
+# %%
+from jax.numpy import linalg as la
+def nearestPD(A):
+    """Find the nearest positive-definite matrix to input
+
+    A Python/Numpy port of John D'Errico's `nearestSPD` MATLAB code [1], which
+    credits [2].
+
+    [1] https://www.mathworks.com/matlabcentral/fileexchange/42885-nearestspd
+
+    [2] N.J. Higham, "Computing a nearest symmetric positive semidefinite
+    matrix" (1988): https://doi.org/10.1016/0024-3795(88)90223-6
+    """
+
+    B = (A + A.T) / 2
+    _, s, V = la.svd(B)
+
+    H = np.dot(V.T, np.dot(np.diag(s), V))
+
+    A2 = (B + H) / 2
+
+    A3 = (A2 + A2.T) / 2
+
+    if isPD(A3):
+        return A3
+
+    spacing = np.spacing(la.norm(A))
+    # The above is different from [1]. It appears that MATLAB's `chol` Cholesky
+    # decomposition will accept matrixes with exactly 0-eigenvalue, whereas
+    # Numpy's will not. So where [1] uses `eps(mineig)` (where `eps` is Matlab
+    # for `np.spacing`), we use the above definition. CAVEAT: our `spacing`
+    # will be much larger than [1]'s `eps(mineig)`, since `mineig` is usually on
+    # the order of 1e-16, and `eps(1e-16)` is on the order of 1e-34, whereas
+    # `spacing` will, for Gaussian random matrixes of small dimension, be on
+    # othe order of 1e-16. In practice, both ways converge, as the unit test
+    # below suggests.
+    I = np.eye(A.shape[0])
+    k = 1
+    while not isPD(A3):
+        mineig = np.min(np.real(la.eigvals(A3)))
+        A3 += I * (-mineig * k**2 + spacing)
+        k += 1
+
+    return A3
+
+
+def isPD(B):
+    """Returns true when input is positive-definite, via Cholesky"""
+    try:
+        _ = la.cholesky(B)
+        return True
+    except la.LinAlgError:
+        return False
+
+
+# %%
+spec.wavelengths
+
+# %%
+final_params.get("spectrum.U11296_F110W")
+
+# %%
+wv[:-1]*1e6
+
+# %%
 s = spec.spec_weights()[:-1]
-print([float(x) for x in s/s.sum() /( wv[:-1]*1e9 /1e4)])
+s/s.sum() /( wv[:-1]*1e9 /1e4)
+
+# %%
+plt.plot(spec.spec_weights()*spec.flux/(wv*1e6))
+
+# %%
+plt.figure(figsize=(10,10))
+
+plt.plot(wv[:-1]*1e9, spec.spec_weights()[:-1]*spec.flux, color='orange')
+for i in range(1000):
+    coeffs = numpy.random.multivariate_normal(final_params.get("spectrum.U11296_F110W"), nearestPD(symmetric_cov))
+    spec = CombinedFourierSpectrum(wv, filt, coeffs)
+    plt.plot(wv[:-1]*1e9, spec.spec_weights()[:-1]*spec.flux, color='b', alpha=0.01, zorder=0)
+    #plt.plot(wv*1e9, spec.spec_weights()*spec.flux, color='b', alpha=0.01, zorder=0)
+
+plt.xlabel("Wavelength (nm)")
+plt.ylabel("Flux")
+
+# %%
+plt.plot(spec.wavelengths, spec.filt_weights)
+
+plt.savefig("spectrum-draws.png")

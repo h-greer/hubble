@@ -34,12 +34,13 @@ def plot_params(models, groups, xw = 4, save=False):
                     "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear",
                     "primary_rot","primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "primary_distortion", "cold_mask_distortion", "defocus"]:
 
-            for p in np.asarray([np.asarray(list(x.get(param).values())).flatten() for x in models]).T:
-                if len(p.shape)>1:
-                    for i in range(p.shape[0]):
-                        sp.plot(p[i,:])
+            for j in range(len(list(models[-1].get(param).values()))):
+                vals = np.asarray([list(x.get(param).values())[j].flatten() for x in models]).T
+                if len(vals.shape)>1:
+                    for v in vals:
+                        sp.plot(v)
                 else:
-                    sp.plot(p)
+                    sp.plot(vals)
                 sp.set_title(param)
         else:
             sp.set_title(param)
