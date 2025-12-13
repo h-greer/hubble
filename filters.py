@@ -23,7 +23,7 @@ def get_filter(file):
 
 
 filter_files = {
-    'F170M': get_filter("../data/HST_NICMOS1.F170M.dat"),
+    'F170M': get_filter("../data/HST_NICMOS1.F170M.dat")[120:-180],
     'F095N': get_filter("../data/HST_NICMOS1.F095N.dat"),
     'F145M': get_filter("../data/HST_NICMOS1.F145M.dat"),
     'F190N': get_filter("../data/HST_NICMOS1.F190N.dat"),
@@ -32,7 +32,7 @@ filter_files = {
     'F187N': get_filter("../data/HST_NICMOS1.F187N.dat"),
     'F090M': get_filter("../data/HST_NICMOS1.F090M.dat"),
     #'F110W': np.asarray(pd.read_csv("../data/HST_NICMOS1.F110W.dat", sep=' '))[::20,:],
-    'F110W': get_filter("../data/HST_NICMOS1.F110W.dat")[80:-140],#[::20,:],
+    'F110W': get_filter("../data/HST_NICMOS1.F110W.dat")[80:-150],#[::20,:],
     'F110M': get_filter("../data/HST_NICMOS1.F110M.dat"),
     'F160W': get_filter("../data/HST_NICMOS1.F160W.dat"),
     'POL0S': get_filter("../data/HST_NICMOS1.POL0S.dat"),
