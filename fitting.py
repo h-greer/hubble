@@ -37,6 +37,7 @@ def optimise(params, model, exposures, things, niter, reduce_ram=False, recalcul
 
     #fishers = calc_fishers(model, exposures, paths)
     fishers = calc_fishers(model, exposures, paths, fisher_fn, recalculate=recalculate)
+    print(fishers)
     model_params = ModelParams({p: model.get(p) for p in things.keys()})
     lrs = populate_lr_model(fishers, exposures, model_params)
     

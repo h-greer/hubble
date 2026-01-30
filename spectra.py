@@ -18,14 +18,15 @@ def nearest_interpolate(x, xp, fp):
     locs = np.argmin(np.abs(dists),axis=0)
     return fp[locs]    
 
-class CombinedSpectrum(dl.BaseSpectrum):
+class CombinedSpectrum(dl.Spectrum):
     wavelengths: Array
     filt_weights: Array
+    basis_weights: Array
 
-    def __init__(self, wavels, filt_weights):
+    def __init__(self, wavels, filt_weights, basis_weights):
         self.filt_weights = np.asarray(filt_weights, float)
         self.wavelengths = np.asarray(wavels, dtype=float)
-        super().__init__()
+        self.basis_weights = np.asarray(basis_weights, dtype=float)
 
     @property
     def spec_weights(self):
@@ -43,14 +44,30 @@ class CombinedSpectrum(dl.BaseSpectrum):
     def normalise(self):
         return self
 
+class CombinedBasisSpectrum(CombinedSpectrum):
+    basis_vects: Array
+    def __init__(self, wavels, filt_weights, basis_weights, basis):
+        self.basis_vects = np.asarray(basis)
+        super().__init__(wavels, filt_weights, basis_weights)
+    
+    def spec_weights(self):
+        return 10**np.sum(self.basis_vects*self.basis_weights, axis=1)
+
+def build_dct_basis(nx, nf):
+    xs = np.arange(nx)*2*np.pi/nx
+    return jax.vmap(lambda i, x: np.cos(x * i/2), in_axes=(0,None), out_axes = (1))(np.arange(nf), xs)
+
+
 class CombinedBinnedSpectrum(CombinedSpectrum):
     spectrum_weights: Array
     def __init__(self, wavels, filt_weights, spec_weights):
         super().__init__(wavels, filt_weights)
-        self.spectrum_weights = np.asarray(spec_weights, float)
+        self.spectrum_weights = np.interp(np.linspace(0, 1, len(wavels)), np.linspace(0,1,len(spec_weights)), np.asarray(spec_weights, float))
+        #self.spectrum_weights = np.asarray(spec_weights, float)
     
     def spec_weights(self):
-        return 10**self.spectrum_weights
+        return 10**(self.spectrum_weights/100)
+
 
 
 class CombinedFourierSpectrum(CombinedSpectrum):

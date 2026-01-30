@@ -89,12 +89,18 @@ class InjectedExposure(Exposure):
         self.mjd = 0.0
         self.wcs = None
 
-        generated_data = self.fit(model, self) * t_exp * 5
-        err = np.sqrt(generated_data + 3**2)/np.sqrt(n_exp)
+        gain = 3
+
+        generated_data = self.fit(model, self) * t_exp * gain
+
+        err = np.sqrt(generated_data/(gain*t_exp) + 10**2)/np.sqrt(n_exp)
+
         data = jr.normal(jr.key(0),generated_data.shape)*err + generated_data
 
-        self.data = data/t_exp/5
-        self.err = err/t_exp/5
+        #err = np.sqrt(data/(gain*exptime) + err**2)
+
+        self.data = data/t_exp/gain
+        self.err = err/t_exp/gain
         self.bad = np.zeros(self.data.shape)
 
         self.exptime = t_exp
@@ -300,17 +306,17 @@ class ModelFit(zdx.Base):
         return detector.model(psf_obj, return_psf=False)
 
 class SinglePointFit(ModelFit):
-    nwavels: int = eqx.field(static=True)
-    spectrum: CombinedSpectrum
-    def __init__(self, spectrum, nwavels):
-        self.source = dl.PointSource(wavelengths=[1])
-        self.nwavels = nwavels
-        self.spectrum = spectrum
+    #nwavels: int = eqx.field(static=True)
+    #spectrum: CombinedSpectrum
+    def __init__(self, spectrum_basis, filter):
+        nwavels, nbasis = spectrum_basis.shape
+        wv, inten = calc_throughput(filter, nwavels)
+        self.source = dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))
     
     def get_key(self, exposure, param):
         if param == "positions":
             return exposure.key
-        elif param == "spectrum":
+        elif param == "spectrum" or param == "flux":
             return f"{exposure.target}_{exposure.filter}"
         else:
             return super().get_key(exposure, param)
@@ -322,12 +328,11 @@ class SinglePointFit(ModelFit):
             return super().map_param(exposure, param)
 
     def update_source(self, model, exposure):
+        
         spectrum_coeffs = model.get(exposure.fit.map_param(exposure, "spectrum"))
-        wv, inten = calc_throughput(exposure.filter, nwavels=self.nwavels)
-        spectrum = self.spectrum(wv, inten, spectrum_coeffs)
 
-        source = self.source.set("spectrum", spectrum)
-        source = source.set("flux", spectrum.flux)
+        source = self.source.set("spectrum.basis_weights", spectrum_coeffs)
+        source = source.set("flux", source.spectrum.flux)
         source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
         
         return source    

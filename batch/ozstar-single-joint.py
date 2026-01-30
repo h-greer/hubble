@@ -65,7 +65,7 @@ wid = 80
 oversample = 4
 
 nw_short = 5
-np_short = 3
+np_short = 1
 nw_long = 15
 np_long = 10
 
@@ -77,105 +77,6 @@ detector = NICMOSDetector(oversample, wid)
 
 ddir = "../data/MAST_2024-09-22T03_37_01.724Z/HST/"
 
-# brown dwarf
-
-files = [
-    #'n8yj53vfq_cal.fits',
-    #'n8yj53vkq_cal.fits',
-    'n8yj02x0q_cal.fits',
-    #'n8yj02wyq_cal.fits'
-
-]
-
-files = [
-    #'n8yj63wmq_cal.fits',
-    #'n8yj63woq_cal.fits',
-    #"n8yj63wlq_cal.fits",
-    "n8yj63wnq_cal.fits"
-]
-
-"""
-
-# lhs 1846
-ddir = "../data/MAST_2025-03-02T22_29_29.259Z/HST/"
-
-files = ["n8ku01ffq_cal.fits", "n8ku01fgq_cal.fits"][:1]
-
-ddir = "../data/MAST_2024-09-08T07_59_18.213Z/HST/"
-
-files = [
-    # F095N
-    "n43ca5fjq_cal.fits",
-    "n43ca5fkq_cal.fits",
-    "n43ca5flq_cal.fits",
-    "n43ca5fmq_cal.fits",
-    #F190N
-    "n43ca5feq_cal.fits",
-    "n43ca5ffq_cal.fits",
-    "n43ca5fgq_cal.fits",
-    "n43ca5fhq_cal.fits",
-    #F187N
-    #"n43c03dnq_cal.fits",
-    #"n43c03doq_cal.fits",
-    #"n43c03dpq_cal.fits",
-    #"n43c03drq_cal.fits",
-    #F108N
-    #"n43c03dsq_cal.fits",
-    #"n43c03duq_cal.fits",
-    ##"n43c03dvq_cal.fits",
-    ##"n43c03dwq_cal.fits",
-][-1:]
-
-# hyades
-
-ddir = "../data/MAST_2024-09-26T22_53_13.719Z/HST/"
-
-files = [
-    "n8ry37p8q_cal.fits",
-    "n8ry37p9q_cal.fits",
-
-    #"n8ry13mqq_cal.fits",
-    #"n8ry13mrq_cal.fits"
-][:-1]
-
-
-ddir = '../data/MAST_2025-03-06T11_35_52.340Z/HST/'
-
-files = [
-    #F110M
-    'n4be02npq_cal.fits',
-    'n4be02nsq_cal.fits',
-    'n4be02nvq_cal.fits',
-    'n4be02nyq_cal.fits',
-
-    #F145M
-    'n4be02nqq_cal.fits',
-    'n4be02ntq_cal.fits',
-    'n4be02nwq_cal.fits',
-    'n4be02o0q_cal.fits',
-]#[:1]#[-2:-1]
-"""
-
-#extra_bad = np.isnan(np.zeros((wid,wid))).at[wid//2-3:wid//2+3,:].set(np.nan)
-
-#exposures_single = [exposure_from_file(ddir + file, SinglePointPolySpectrumFit(nwavels), crop=wid, extra_bad=extra_bad) for file in files]
-
-#exposures_single = [exposure_from_file(ddir + file, SinglePointFit(CombinedFourierSpectrum, nwavels), crop=wid, extra_bad=extra_bad) for file in files]
-
-#exposures_binary = [exposure_from_file(ddir + file, BinaryPolySpectrumFit(nwavels), crop=wid, extra_bad=extra_bad) for file in files]
-
-files = [
-    #'n8yj63wmq_cal.fits',
-    #'n8yj63woq_cal.fits',
-    #"n8yj63wlq_cal.fits",
-    "n8yj63wnq_cal.fits"
-]
-
-
-#exposures_single = [
-#    exposure_from_file(ddir + "n8yj63wnq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 5), crop=wid),
-#    exposure_from_file(ddir + "n8yj63wmq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 15), crop=wid),
-#    ]
 
 files = [
     #'n8yj53vfq_cal.fits',
@@ -187,7 +88,7 @@ files = [
 exposures_single = [
     #exposure_from_file(ddir + "n8yj02wxq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 5), crop=wid),
     exposure_from_file(ddir + "n8yj02wzq_cal.fits", SinglePointFit(CombinedFourierSpectrum, nw_short), crop=wid),
-    exposure_from_file(ddir + "n8yj02x0q_cal.fits", SinglePointFit(CombinedFourierSpectrum, nw_long), crop=wid),
+    #exposure_from_file(ddir + "n8yj02x0q_cal.fits", SinglePointFit(CombinedFourierSpectrum, nw_long), crop=wid),
     #exposure_from_file(ddir + "n8yj02wyq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 15), crop=wid),
     ]
 

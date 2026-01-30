@@ -27,10 +27,10 @@ def plot_params(models, groups, xw = 4, save=False):
     print(len(groups))
 
 
-    fig, axs = plt.subplots(xw,yw,figsize=(xw*10,yw*8))
+    fig, axs = plt.subplots(xw,yw,figsize=(xw*10,yw*8), squeeze=False)
     for i, param in enumerate(groups):
         sp = axs[i%xw, i//xw]
-        if param in ["fluxes", "contrast", "positions", "aberrations", 
+        if param in ["fluxes", "flux", "contrast", "positions", "aberrations", 
                     "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear",
                     "primary_rot","primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "primary_distortion", "cold_mask_distortion", "defocus"]:
 
