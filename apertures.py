@@ -6,6 +6,9 @@ import dLux.utils as dlu
 
 import zodiax as zdx
 
+from abcdLux.lct import *
+from abcdLux.abcd import *
+
 """
 
 Custom apertures for the features of the HST/NICMOS optical system
@@ -142,57 +145,27 @@ class NICMOSOptics(dl.AngularOpticalSystem):
             oversample
         )
 
-### Fresnel propagators ###
-def _fft(phasor, pad=2):
-    padded = dlu.resize(phasor, phasor.shape[0] * pad)
-    return 1 / padded.shape[0] * np.fft.fft2(padded)
-
-
-def _ifft(phasor, pad=1):
-    padded = dlu.resize(phasor, phasor.shape[0] * pad)
-    return phasor.shape[0] * np.fft.ifft2(padded)
-
-
-def _fftshift(phasor):
-    return np.fft.fftshift(phasor)
-
-
-def transfer_fn(coords, npixels, wavelength, pscale, distance):
-    rho_sq = (coords**2).sum(0)
-    return _fftshift(np.exp(-1.0j * np.pi * wavelength * distance * rho_sq))
-
-
-def transfer(wf, distance, pad=2):
-    npix = pad * wf.npixels
-    diam = pad * wf.diameter
-    freqs = np.fft.fftshift(np.fft.fftfreq(npix, diam / npix))
-    coords = np.array(np.meshgrid(freqs, freqs))
-    return transfer_fn(coords, wf.npixels, wf.wavelength, pad * wf.pixel_scale, distance)
-
-
-def plane_to_plane(wf, distance, pad=2):
-    fft_wf = _fft(wf.phasor, pad=pad)
-    tf = transfer(wf, distance, pad=pad)
-    phasor = dlu.resize(_ifft(fft_wf * tf), wf.npixels)
-    return wf.set(["amplitude", "phase"], [np.abs(phasor), np.angle(phasor)])
-
 
 class NICMOSFresnelOptics(dl.AngularOpticalSystem):
     defocus: np.ndarray
-    def __init__(self, wf_npixels, psf_npixels, oversample, defocus, n_zernikes = 26):
+    fnumber: np.ndarray
+    def __init__(self, wf_npixels, psf_npixels, oversample, defocus, fnumber, n_zernikes = 26):
         self.diameter=2.4
         self.wf_npixels = wf_npixels
         self.psf_npixels = psf_npixels
         self.psf_pixel_scale = 0.0432
         self.oversample = oversample
         self.defocus = defocus
+        self.fnumber = fnumber
 
         layers = []
 
-        layers += [("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=2))]
-
         layers += [
-            ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=2)),
+            dl.CompoundAperture([
+                    ("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=2)),
+                    ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=2)),
+                    #("bar",dl.Spider(width=2.4,angles=[90],))
+                ],normalise=True, transformation=dl.CoordTransform(rotation=0)),
         ]
 
         layers += [dl.AberratedAperture(
@@ -208,19 +181,30 @@ class NICMOSFresnelOptics(dl.AngularOpticalSystem):
         wf = dl.Wavefront(self.wf_npixels, self.diameter, wavelength)
         wf = wf.tilt(offset)
 
-        true_pixel_scale = self.psf_pixel_scale / self.oversample
-        pixel_scale = dlu.arcsec2rad(true_pixel_scale)
-        psf_npixels = self.psf_npixels * self.oversample
-
-
         # Apply layers
         for layer in list(self.layers.values()):
             wf *= layer
 
-        
-        wf = wf.propagate(psf_npixels, pixel_scale)
+        u_in = wf.phasor
 
-        wf = plane_to_plane(wf, self.defocus*1e-9, pad=2)
+        fl = self.fnumber*self.diameter
+        abcd = compose_abcd([abcd_lens(fl), abcd_free_space(fl + self.defocus)])
+
+        N_in = self.wf_npixels
+        dx_in = self.diameter/self.wf_npixels
+
+        N_out = self.psf_npixels*self.oversample
+        dx_out = 40e-6/self.oversample
+
+        # patch over abcdLux bug
+        x_in = dlu.nd_coords(N_in, dx_in)
+        x_out = dlu.nd_coords(N_out, dx_out)
+
+        u_out = lct_prop_basic(u_in, x_in, x_out, wavelength, abcd)
+
+        wf = dl.Wavefront(N_out, N_out*dx_out, wavelength).set(
+            ["amplitude", "phase"], [np.abs(u_out), np.angle(u_out)]
+        )
 
         if return_wf:
             return wf

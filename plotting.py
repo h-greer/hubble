@@ -110,26 +110,33 @@ def plot_comparison(model, params, exposures, save=False, graticule=False):
         apt =axs[2].imshow(support_mask*opd,cmap=cmap,vmin=-olim, vmax=olim)
         plt.colorbar(apt, ax=axs[2]).set_label("OPD (nm)")
         #axs[4].imshow(telescope.detector.pixel_response.pixel_response)
-        resid = (exp.data - fit)/exp.err
-        print(np.nanmean(np.abs(resid)))
+        resid = (exp.data - fit)/exp.err        
+        print(np.nanstd(resid))
         rlim = np.nanmax(np.abs(resid))
-        resid=axs[3].imshow(resid, cmap='seismic',vmin=-rlim, vmax=rlim)
-        plt.colorbar(resid,ax=axs[3])
+        residual=axs[3].imshow(resid, cmap='seismic',vmin=-rlim, vmax=rlim)
+        plt.colorbar(residual,ax=axs[3])
 
         if graticule:
             axs[3].axvline((wid-1)/2 + params.get(exp.map_param("positions"))[0], color='k',linestyle='--')
             axs[3].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
 
+        x = np.nanmax(np.abs(resid))
+        xs = np.linspace(-x, x, 200)
+        ys = jsp.stats.norm.pdf(xs)/np.sqrt(np.nanstd(resid))
 
-        lpdf = posterior(model,exp,return_im=True)#*nanmap
-        lpd = axs[4].imshow(lpdf)
-        plt.colorbar(lpd, ax=axs[4])
+        axs[4].set_title(f"Noise normalised residual sigma: {np.nanstd(resid):.3}")
+        axs[4].hist(resid.flatten(), bins=50, density=True)
+        axs[4].plot(xs, ys, c='k')
+
+        #lpdf = posterior(model,exp,return_im=True)#*nanmap
+        #lpd = axs[4].imshow(lpdf)
+        #plt.colorbar(lpd, ax=axs[4])
 
         axs[0].set_title("Measured PSF")
         axs[1].set_title("Recovered PSF")
         axs[2].set_title("Recovered Aperture")
         axs[3].set_title("Residuals")
-        axs[4].set_title("Log Likelihood Map")
+        #axs[4].set_title("Log Likelihood Map")
 
         for i in range(4):
             axs[i].set_xticks([])

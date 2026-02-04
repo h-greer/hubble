@@ -120,7 +120,9 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     err = fits.getdata(fname, ext=2)
     info = fits.getdata(fname, ext=3)
 
-    bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32))
+    detector_mask = np.full((256, 256), False, dtype=bool).at[127:130, :].set(True).at[:, 127:130].set(True)
+
+    bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32) | detector_mask)
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
 
@@ -170,7 +172,8 @@ class ModelFit(zdx.Base):
     def get_key(self, exposure, param):
         match param:            
             case "aberrations":
-                return "global"#exposure.key
+                #return "global"
+                return exposure.key
             case "breathing":
                 return exposure.key
             case "cold_mask_shift":
@@ -269,7 +272,11 @@ class ModelFit(zdx.Base):
 
         if "defocus" in model.params.keys():
             disp = model.get(self.map_param(exposure, "defocus"))
-            optics = optics.set("defocus", disp)
+            optics = optics.set("defocus", disp*1e-2)
+        
+        if "fnumber" in model.params.keys():
+            fn = model.get(self.map_param(exposure, "fnumber"))
+            optics = optics.set("fnumber", fn)
 
         if "primary_distortion" in model.params.keys():
             dist = model.get(self.map_param(exposure, "primary_distortion"))
@@ -432,42 +439,36 @@ class BreathingSinglePointFit(SinglePointFit, BreathingFit):
 
 
 class BinaryFit(ModelFit):
-    nwavels: int = eqx.field(static=True)
-    spectrum: CombinedSpectrum
-    def __init__(self, spectrum, nwavels):
-        self.source = dl.Scene([("primary",dl.PointSource(wavelengths=[1])), ("secondary",dl.PointSource(wavelengths=[1]))])
-        self.nwavels = nwavels
-        self.spectrum = spectrum
-    
+    def __init__(self, spectrum_basis, filter):
+        nwavels, nbasis = spectrum_basis.shape
+        wv, inten = calc_throughput(filter, nwavels)
+        self.source = dl.Scene([
+            ("primary",dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))), 
+            ("secondary",dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis)))
+        ])
+            
     def get_key(self, exposure, param):
         if param == "positions":
             return exposure.key
         elif param == "primary_spectrum" or param == "secondary_spectrum":
             return f"{exposure.target}_{exposure.filter}"
-        #elif param == "contrast":
-        #    return f"{exposure.target}_{exposure.filter}"
         else:
             return super().get_key(exposure, param)
     
     def map_param(self, exposure, param):
         if param in ["positions", "primary_spectrum", "secondary_spectrum"]:
             return f"{param}.{exposure.get_key(param)}"
-        #elif param in ["separation", "position_angle"]:
-        #    return param
         else:
             return super().map_param(exposure, param)
 
     def update_source(self, model, exposure):
         primary_coeffs = model.get(exposure.fit.map_param(exposure, "primary_spectrum"))
         secondary_coeffs = model.get(exposure.fit.map_param(exposure, "secondary_spectrum"))
-        wv, inten = calc_throughput(exposure.filter, nwavels=self.nwavels)
-        primary_spectrum = self.spectrum(wv, inten, primary_coeffs)
-        secondary_spectrum = self.spectrum(wv, inten, secondary_coeffs)
 
-        source = self.source.set("primary.spectrum", primary_spectrum)
-        source = source.set("primary.flux", primary_spectrum.flux)
-        source = source.set("secondary.spectrum", secondary_spectrum)
-        source = source.set("secondary.flux", secondary_spectrum.flux)
+        source = self.source.set("primary.spectrum.basis_weights", primary_coeffs)
+        source = source.set("primary.flux", source.primary.spectrum.flux)
+        source = source.set("secondary.spectrum.basis_weights", secondary_coeffs)
+        source = source.set("secondary.flux", source.secondary.spectrum.flux)
 
 
         position = model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432)
