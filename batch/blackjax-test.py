@@ -319,12 +319,12 @@ models[-1]
 initial_position = models[-1]#ModelParams({"positions": models[-1].get("positions"), "position_angle": models[-1].get("position_angle")})
 rng_key = jr.key(0)
 
-warmup = blackjax.window_adaptation(blackjax.nuts, loglike, progress_bar=True)
+warmup = blackjax.window_adaptation(blackjax.nuts, loglike, is_mass_matrix_diagonal=False, progress_bar=True)
 rng_key, warmup_key, sample_key = jax.random.split(rng_key, 3)
-(state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=100)
+(state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=1000)
 
 kernel = blackjax.nuts(loglike, **parameters).step
-states = inference_loop(sample_key, kernel, state, 100)
+states = inference_loop(sample_key, kernel, state, 1000)
 
 mcmc_samples = states.position
 #mcmc_samples["scale"] = np.exp(mcmc_samples["log_scale"]).block_until_ready()
