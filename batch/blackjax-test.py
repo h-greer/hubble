@@ -22,6 +22,7 @@ import dLux as dl
 import dLux.utils as dlu
 
 import blackjax
+import pickle
 
 # Visualisation imports
 from tqdm.auto import tqdm
@@ -347,3 +348,5 @@ for key in mcmc_samples.keys():
 mcmc_samples.keys()
 
 
+with open("chains.pickle", 'wb') as file:
+    pickle.dump(mcmc_samples.params, file)
