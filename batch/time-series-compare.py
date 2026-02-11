@@ -97,7 +97,7 @@ for exp in exposures_raw:
     if exp.data.shape == (wid, wid):
         exposures_single.append(exp)
 
-exposures_single=exposures_single[1:10]
+exposures_single=exposures_single[1:3]
 
 # %%
 len(exposures_single)
