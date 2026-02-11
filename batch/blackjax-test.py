@@ -320,7 +320,7 @@ models[-1]
 initial_position = models[-1]#ModelParams({"positions": models[-1].get("positions"), "position_angle": models[-1].get("position_angle")})
 rng_key = jr.key(0)
 
-warmup = blackjax.window_adaptation(blackjax.nuts, loglike, is_mass_matrix_diagonal=False, progress_bar=True)
+warmup = blackjax.window_adaptation(blackjax.nuts, loglike, progress_bar=True)
 rng_key, warmup_key, sample_key = jax.random.split(rng_key, 3)
 (state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=1000)
 
