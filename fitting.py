@@ -33,7 +33,7 @@ def optimise(params, model, exposures, things, niter, reduce_ram=False, recalcul
 
     print("Calculating Fishers")
 
-    fish = lambda model, exposure, params: fisher_fn(model, exposure, params, reduce_ram=reduce_ram)
+    fish = lambda model, exposure, params: zdx.filter_jit(fisher_fn(model, exposure, params, reduce_ram=reduce_ram))
 
     #fishers = calc_fishers(model, exposures, paths)
     fishers = calc_fishers(model, exposures, paths, fisher_fn, recalculate=recalculate)
