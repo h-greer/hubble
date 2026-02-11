@@ -89,7 +89,7 @@ clumps = lut[kmeans.labels_]
 
 files = [cfiles[i] for i in range(len(cfiles)) if clumps[i] == number]
 
-exposures_raw = [exposure_from_file(ddir + file, SinglePointFit(spectrum_basis, "F187N"), crop=wid) for file in files]
+exposures_raw = [exposure_from_file(file, SinglePointFit(spectrum_basis, "F187N"), crop=wid) for file in files]
 
 
 exposures_single = []
