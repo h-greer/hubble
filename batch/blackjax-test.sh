@@ -12,6 +12,6 @@ module load python/3.11.5
 
 source /fred/oz440/hayden/venv/bin/activate
 
-python blackjax_test.py
+python blackjax-test.py
 
 deactivate
