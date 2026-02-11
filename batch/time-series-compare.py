@@ -73,8 +73,6 @@ spectrum_basis = np.ones((1, 3))
 
 number = 18
 
-number = int(sys.argv[1])-1
-
 ddir = "../data/MAST_2025-06-24T0210/HST/"
 
 cfiles = glob.glob(ddir+"*_cal.fits")
