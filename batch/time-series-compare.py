@@ -21,6 +21,9 @@ import dLux as dl
 import dLux.utils as dlu
 
 #jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_log_compiles", True)
+jax.config.update("jax_explain_cache_misses", True)
+
 
 from sklearn.decomposition import PCA
 from astropy.io import fits
@@ -54,7 +57,7 @@ def set_array(pytree):
     floats = jtu.tree_map(lambda x: np.array(x, dtype=dtype), floats)
     return eqx.combine(floats, other)
 
-wid = 24#64
+wid = 64#64
 oversample = 4
 
 nwavels = 3
@@ -97,7 +100,7 @@ for exp in exposures_raw:
     if exp.data.shape == (wid, wid):
         exposures_single.append(exp)
 
-exposures_single=exposures_single[1:3]
+exposures_single=exposures_single[1:5]
 
 # %%
 len(exposures_single)
@@ -247,16 +250,8 @@ paths = flatten(groups)
 optimisers = [things[i] for i in groups]
 groups = [list(x) if isinstance(x, tuple) else x for x in groups]
 
-
-with jax.profiler.trace("./profile-trace/"):
-    fish = lambda model, exposure, params: zdx.filter_jit(fisher_fn(model, exposure, params, reduce_ram=False))
-
-    #fishers = calc_fishers(model, exposures, paths)
-    fishers = calc_fishers(model_single, exposures_single, paths, fisher_fn, recalculate=True)
-    print(fishers)
 # %%
-    #losses, models = optimise(params, model_single, exposures_single, things, 50, recalculate=True)
-
+losses, models = optimise(params, model_single, exposures_single, things, 300, recalculate=True)
 
 # # %%
 # losses[-1]
