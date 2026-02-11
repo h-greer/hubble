@@ -316,7 +316,7 @@ def inference_loop(rng_key, kernel, initial_state, num_samples):
 models[-1]
 
 # %%
-initial_position = ModelParams({"positions": models[-1].get("positions"), "position_angle": models[-1].get("position_angle")})
+initial_position = models[-1]#ModelParams({"positions": models[-1].get("positions"), "position_angle": models[-1].get("position_angle")})
 rng_key = jr.key(0)
 
 warmup = blackjax.window_adaptation(blackjax.nuts, loglike, progress_bar=True)
