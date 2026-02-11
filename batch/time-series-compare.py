@@ -171,7 +171,7 @@ plt.colorbar()
 np.nanmax(exposures_single[0].data)
 
 # %%
-plot_comparison(model_single, params, exposures_single)
+#plot_comparison(model_single, params, exposures_single)
 
 # %%
 exposures_single[0].pam
@@ -257,8 +257,8 @@ losses[-1]
 plt.plot(np.asarray(losses[-20:])/(len(exposures_single)*wid**2))
 
 # %%
-plot_params(models, groups, xw = 3)
-plot_comparison(model_single, models[-1], exposures_single)
+#plot_params(models, groups, xw = 3)
+#plot_comparison(model_single, models[-1], exposures_single)
 
 # %%
 models[-1].params
