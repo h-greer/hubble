@@ -97,7 +97,7 @@ for exp in exposures_raw:
     if exp.data.shape == (wid, wid):
         exposures_single.append(exp)
 
-exposures_single=exposures_single[1:]
+exposures_single=exposures_single[1:10]
 
 # %%
 len(exposures_single)
@@ -247,8 +247,11 @@ paths = flatten(groups)
 optimisers = [things[i] for i in groups]
 groups = [list(x) if isinstance(x, tuple) else x for x in groups]
 
+
+with jax.profiler.trace("./profile-trace/"):
 # %%
-losses, models = optimise(params, model_single, exposures_single, things, 300, recalculate=True)
+    losses, models = optimise(params, model_single, exposures_single, things, 300, recalculate=True)
+
 
 # %%
 losses[-1]
