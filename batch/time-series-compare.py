@@ -249,8 +249,13 @@ groups = [list(x) if isinstance(x, tuple) else x for x in groups]
 
 
 with jax.profiler.trace("./profile-trace/"):
+    fish = lambda model, exposure, params: zdx.filter_jit(fisher_fn(model, exposure, params, reduce_ram=False))
+
+    #fishers = calc_fishers(model, exposures, paths)
+    fishers = calc_fishers(model_single, exposures_single, paths, fisher_fn, recalculate=True)
+    print(fishers)
 # %%
-    losses, models = optimise(params, model_single, exposures_single, things, 50, recalculate=True)
+    #losses, models = optimise(params, model_single, exposures_single, things, 50, recalculate=True)
 
 
 # # %%
