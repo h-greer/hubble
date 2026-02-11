@@ -253,97 +253,97 @@ with jax.profiler.trace("./profile-trace/"):
     losses, models = optimise(params, model_single, exposures_single, things, 50, recalculate=True)
 
 
-# %%
-losses[-1]
+# # %%
+# losses[-1]
 
-# %%
-plt.plot(np.asarray(losses[-20:])/(len(exposures_single)*wid**2))
+# # %%
+# plt.plot(np.asarray(losses[-20:])/(len(exposures_single)*wid**2))
 
-# %%
-#plot_params(models, groups, xw = 3)
-#plot_comparison(model_single, models[-1], exposures_single)
+# # %%
+# #plot_params(models, groups, xw = 3)
+# #plot_comparison(model_single, models[-1], exposures_single)
 
-# %%
-models[-1].params
-
-
+# # %%
+# models[-1].params
 
 
 
-# %%
-fsh = calc_fishers(models[-1].inject(model_single), exposures_single, ["despace"], fisher_fn, recalculate=True, save=False)
-
-# %%
-1/np.sqrt(list(fsh.values())[0].flatten()[0])
-
-# %%
-defocuses = [x for x in models[-1].params["despace"].values()]
-errs = [np.sqrt(1/float(x.flatten()[0])) for x in fsh.values()]
-mjds = [exp.mjd for exp in exposures_single]
-print(mjds)
-mins= [(x - mjds[0])*24*60 for x in mjds]
 
 
-# %%
-np.asarray([x for x in models[-1].params["cold_mask_shift"].values()])
+# # %%
+# fsh = calc_fishers(models[-1].inject(model_single), exposures_single, ["despace"], fisher_fn, recalculate=True, save=False)
 
-# %%
-np.asarray([x for x in models[-1].params["spectrum"].values()])
+# # %%
+# 1/np.sqrt(list(fsh.values())[0].flatten()[0])
 
-# %%
-plt.errorbar(mins, defocuses, np.squeeze(np.asarray(errs)))
-plt.xlabel("Time (minutes)")
-plt.ylabel("Despace (µm)")
-
-# %%
-import pandas as pd
-model = pd.read_csv("focus2.txt", sep=", ")[1:]
+# # %%
+# defocuses = [x for x in models[-1].params["despace"].values()]
+# errs = [np.sqrt(1/float(x.flatten()[0])) for x in fsh.values()]
+# mjds = [exp.mjd for exp in exposures_single]
+# print(mjds)
+# mins= [(x - mjds[0])*24*60 for x in mjds]
 
 
-# %%
-import interpax as ipx
+# # %%
+# np.asarray([x for x in models[-1].params["cold_mask_shift"].values()])
 
-# %%
-mjds_nacho = np.array(mjds)
-defocus_nacho = -np.array(defocuses)
-err_nacho = np.array(errs)
+# # %%
+# np.asarray([x for x in models[-1].params["spectrum"].values()])
 
-mjds_st = model["Julian Date"].to_numpy()
-msk = (mjds_st > np.min(mjds_nacho)) & (mjds_st < np.max(mjds_nacho))
-defocus_st = model["Model"].to_numpy()
+# # %%
+# plt.errorbar(mins, defocuses, np.squeeze(np.asarray(errs)))
+# plt.xlabel("Time (minutes)")
+# plt.ylabel("Despace (µm)")
 
-mjds_interpd = np.linspace(mjds_st.min(), mjds_st.max(), 10000)
-defocus_interpd = ipx.interp1d(mjds_interpd, mjds_st, defocus_st, "linear")
-msk_interpd = (mjds_interpd > np.min(mjds_nacho)) & (mjds_interpd < np.max(mjds_nacho))
+# # %%
+# import pandas as pd
+# model = pd.read_csv("focus2.txt", sep=", ")[1:]
 
-numpy.savez(
-    "time-series-compare.npz",
-    mjds_nacho=mjds_nacho,
-    defocus_nacho=defocus_nacho,
-    err_nacho=err_nacho,
-    mjds_st=mjds_st,
-    msk=msk,
-    defocus_st=defocus_st,
-    mjds_interpd=mjds_interpd,
-    defocus_interpd=defocus_interpd,
-    msk_interpd=msk_interpd,
-)
 
-rang = np.max(defocus_nacho)-np.min(defocus_nacho)
+# # %%
+# import interpax as ipx
 
-top = np.max(defocus_interpd[msk_interpd])
+# # %%
+# mjds_nacho = np.array(mjds)
+# defocus_nacho = -np.array(defocuses)
+# err_nacho = np.array(errs)
 
-fig, ax1 = plt.subplots(figsize=(10,10))
-ax1.errorbar(mjds_nacho, defocus_nacho, yerr=err_nacho, fmt="o", label="Phase Retrieval")
-ax2 = ax1.twinx()
-ax2.scatter(mjds_st[msk], defocus_st[msk], color="r")
-ax2.plot(mjds_interpd[msk_interpd], defocus_interpd[msk_interpd], color="r", label="STScI Model")
-ax2.set_ylim(top-rang, top)
-ax1.set_xlabel("MJD")
-ax1.set_ylabel("Phase Retrieval Despace (μm)")
-ax2.set_ylabel("STScI Focus Model (μm)")
-lines, labels = ax1.get_legend_handles_labels()
-lines2, labels2 = ax2.get_legend_handles_labels()
-ax2.legend(lines + lines2, labels + labels2, loc=0)
-plt.tight_layout()
-plt.savefig("time-series-compare.png")
+# mjds_st = model["Julian Date"].to_numpy()
+# msk = (mjds_st > np.min(mjds_nacho)) & (mjds_st < np.max(mjds_nacho))
+# defocus_st = model["Model"].to_numpy()
+
+# mjds_interpd = np.linspace(mjds_st.min(), mjds_st.max(), 10000)
+# defocus_interpd = ipx.interp1d(mjds_interpd, mjds_st, defocus_st, "linear")
+# msk_interpd = (mjds_interpd > np.min(mjds_nacho)) & (mjds_interpd < np.max(mjds_nacho))
+
+# numpy.savez(
+#     "time-series-compare.npz",
+#     mjds_nacho=mjds_nacho,
+#     defocus_nacho=defocus_nacho,
+#     err_nacho=err_nacho,
+#     mjds_st=mjds_st,
+#     msk=msk,
+#     defocus_st=defocus_st,
+#     mjds_interpd=mjds_interpd,
+#     defocus_interpd=defocus_interpd,
+#     msk_interpd=msk_interpd,
+# )
+
+# rang = np.max(defocus_nacho)-np.min(defocus_nacho)
+
+# top = np.max(defocus_interpd[msk_interpd])
+
+# fig, ax1 = plt.subplots(figsize=(10,10))
+# ax1.errorbar(mjds_nacho, defocus_nacho, yerr=err_nacho, fmt="o", label="Phase Retrieval")
+# ax2 = ax1.twinx()
+# ax2.scatter(mjds_st[msk], defocus_st[msk], color="r")
+# ax2.plot(mjds_interpd[msk_interpd], defocus_interpd[msk_interpd], color="r", label="STScI Model")
+# ax2.set_ylim(top-rang, top)
+# ax1.set_xlabel("MJD")
+# ax1.set_ylabel("Phase Retrieval Despace (μm)")
+# ax2.set_ylabel("STScI Focus Model (μm)")
+# lines, labels = ax1.get_legend_handles_labels()
+# lines2, labels2 = ax2.get_legend_handles_labels()
+# ax2.legend(lines + lines2, labels + labels2, loc=0)
+# plt.tight_layout()
+# plt.savefig("time-series-compare.png")
