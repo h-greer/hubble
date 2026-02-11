@@ -322,10 +322,10 @@ rng_key = jr.key(0)
 
 warmup = blackjax.window_adaptation(blackjax.nuts, loglike, progress_bar=True)
 rng_key, warmup_key, sample_key = jax.random.split(rng_key, 3)
-(state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=1000)
+(state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=4000)
 
 kernel = blackjax.nuts(loglike, **parameters).step
-states = inference_loop(sample_key, kernel, state, 1000)
+states = inference_loop(sample_key, kernel, state, 4000)
 
 mcmc_samples = states.position
 #mcmc_samples["scale"] = np.exp(mcmc_samples["log_scale"]).block_until_ready()
