@@ -87,7 +87,6 @@ n8o101a3q_cal.fits
 
 
 files_f108N = """
-n8o102j5q_cal.fits
 n8o101adq_cal.fits
 n8o101atq_cal.fits
 n8o101b9q_cal.fits
@@ -95,7 +94,7 @@ n8o101b9q_cal.fits
 
 exposures_f108N = [exposure_from_file(ddir + file, BinaryFit(spectrum_basis, "F108N"), crop=wid) for file in files_f108N]
 exposures_f190N = [exposure_from_file(ddir + file, BinaryFit(spectrum_basis, "F190N"), crop=wid) for file in files_f190N]
-exposures_single = exposures_f190N#exposures_f108N+exposures_f190N
+exposures_single = exposures_f108N+exposures_f190N
 
 # %%
 for e in exposures_single:
