@@ -199,10 +199,12 @@ class ModelFit(zdx.Base):
                 return exposure.key
             case "jitter":
                 return exposure.key
+            case "despace":
+                return exposure.key
             case _: raise ValueError(f"Parameter {param} has no key")
     
     def map_param(self, exposure, param):
-        if param in ["aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "bias", "jitter", "primary_distortion", "cold_mask_distortion", "defocus"]:
+        if param in ["aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "bias", "jitter", "primary_distortion", "cold_mask_distortion", "defocus", "despace"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
@@ -274,9 +276,17 @@ class ModelFit(zdx.Base):
             disp = model.get(self.map_param(exposure, "defocus"))
             optics = optics.set("defocus", disp*1e-2)
         
+        if "despace" in model.params.keys():
+            disp = model.get(self.map_param(exposure, "despace"))
+            optics = optics.set("despace", disp*1e-6)
+        
         if "fnumber" in model.params.keys():
             fn = model.get(self.map_param(exposure, "fnumber"))
             optics = optics.set("fnumber", fn)
+
+        if "mag" in model.params.keys():
+            fn = model.get(self.map_param(exposure, "mag"))
+            optics = optics.set("mag", fn)
 
         if "primary_distortion" in model.params.keys():
             dist = model.get(self.map_param(exposure, "primary_distortion"))

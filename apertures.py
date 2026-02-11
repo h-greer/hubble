@@ -210,6 +210,79 @@ class NICMOSFresnelOptics(dl.AngularOpticalSystem):
             return wf
         return wf.psf
 
+def abcd_magnification(m):
+    return np.array([[m, 0.], [0., 1/m]])
+
+class NICMOSSecondaryFresnelOptics(dl.AngularOpticalSystem):
+    defocus: np.ndarray
+    despace: np.ndarray
+    mag: np.ndarray
+    def __init__(self, wf_npixels, psf_npixels, oversample, defocus, despace, mag, n_zernikes = 26):
+        self.diameter=2.4
+        self.wf_npixels = wf_npixels
+        self.psf_npixels = psf_npixels
+        self.psf_pixel_scale = 0.0432
+        self.oversample = oversample
+        self.defocus = defocus
+        self.despace = despace
+        self.mag = mag
+
+        layers = []
+
+        layers += [
+            dl.CompoundAperture([
+                    ("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=2)),
+                    ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=2)),
+                    #("bar",dl.Spider(width=2.4,angles=[90],))
+                ],normalise=True, transformation=dl.CoordTransform(rotation=0)),
+        ]
+
+        layers += [dl.AberratedAperture(
+                    dl.layers.CircularAperture(1.2, transformation=dl.CoordTransform()),
+                    noll_inds=np.arange(5,5+n_zernikes),
+                    coefficients = np.zeros(n_zernikes),
+                )]
+
+        self.layers = dlu.list2dictionary(layers, ordered=True)
+    
+    def propagate_mono(self, wavelength, offset=np.zeros(2), return_wf=False):
+
+        wf = dl.Wavefront(self.wf_npixels, self.diameter, wavelength)
+        wf = wf.tilt(offset)
+
+        # Apply layers
+        for layer in list(self.layers.values()):
+            wf *= layer
+
+        u_in = wf.phasor
+
+        abcd = compose_abcd([
+            abcd_lens(5.52085),
+            abcd_free_space(4.907028205 + self.despace),
+            abcd_lens(-0.6790325),
+            abcd_free_space(6.3919974 + self.despace + self.defocus),
+            abcd_magnification(self.mag),
+        ])
+
+        N_in = self.wf_npixels
+        dx_in = self.diameter/self.wf_npixels
+
+        N_out = self.psf_npixels*self.oversample
+        dx_out = 40e-6/self.oversample
+
+        # patch over abcdLux bug
+        x_in = dlu.nd_coords(N_in, dx_in)
+        x_out = dlu.nd_coords(N_out, dx_out)
+
+        u_out = lct_prop_basic(u_in, x_in, x_out, wavelength, abcd)
+
+        wf = dl.Wavefront(N_out, N_out*dx_out, wavelength).set(
+            ["amplitude", "phase"], [np.abs(u_out), np.angle(u_out)]
+        )
+
+        if return_wf:
+            return wf
+        return wf.psf
 
 class NICMOSColdMaskFresnelOptics(dl.AngularOpticalSystem):
     defocus: np.ndarray
