@@ -97,7 +97,7 @@ for exp in exposures_raw:
     if exp.data.shape == (wid, wid):
         exposures_single.append(exp)
 
-exposures_single=exposures_single[:10]
+exposures_single=exposures_single[1:]
 
 # %%
 len(exposures_single)
@@ -312,6 +312,19 @@ defocus_st = model["Model"].to_numpy()
 mjds_interpd = np.linspace(mjds_st.min(), mjds_st.max(), 10000)
 defocus_interpd = ipx.interp1d(mjds_interpd, mjds_st, defocus_st, "linear")
 msk_interpd = (mjds_interpd > np.min(mjds_nacho)) & (mjds_interpd < np.max(mjds_nacho))
+
+numpy.savez(
+    "time-series-compare.npz",
+    mjds_nacho=mjds_nacho,
+    defocus_nacho=defocus_nacho,
+    err_nacho=err_nacho,
+    mjds_st=mjds_st,
+    msk=msk,
+    defocus_st=defocus_st,
+    mjds_interpd=mjds_interpd,
+    defocus_interpd=defocus_interpd,
+    msk_interpd=msk_interpd,
+)
 
 rang = np.max(defocus_nacho)-np.min(defocus_nacho)
 
