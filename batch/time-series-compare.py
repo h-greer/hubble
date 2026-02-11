@@ -10,7 +10,7 @@ import jax.scipy as jsp
 import jax
 import numpy
 
-jax.config.update("jax_enable_x64", True)
+#jax.config.update("jax_enable_x64", True)
 
 # Optimisation imports
 import zodiax as zdx
