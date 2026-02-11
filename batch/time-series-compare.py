@@ -54,7 +54,7 @@ def set_array(pytree):
     floats = jtu.tree_map(lambda x: np.array(x, dtype=dtype), floats)
     return eqx.combine(floats, other)
 
-wid = 64#64
+wid = 24#64
 oversample = 4
 
 nwavels = 3
@@ -250,7 +250,7 @@ groups = [list(x) if isinstance(x, tuple) else x for x in groups]
 
 with jax.profiler.trace("./profile-trace/"):
 # %%
-    losses, models = optimise(params, model_single, exposures_single, things, 300, recalculate=True)
+    losses, models = optimise(params, model_single, exposures_single, things, 50, recalculate=True)
 
 
 # %%
