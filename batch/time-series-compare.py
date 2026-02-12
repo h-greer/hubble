@@ -10,7 +10,7 @@ import jax.scipy as jsp
 import jax
 import numpy
 
-#jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_enable_x64", True)
 
 # Optimisation imports
 import zodiax as zdx
@@ -100,7 +100,7 @@ for exp in exposures_raw:
     if exp.data.shape == (wid, wid):
         exposures_single.append(exp)
 
-exposures_single=exposures_single[1:]
+exposures_single=exposures_single[1:50]
 
 # %%
 len(exposures_single)
