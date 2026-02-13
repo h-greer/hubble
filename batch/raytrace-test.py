@@ -304,7 +304,11 @@ rng_key = jr.key(0)
 
 samples = sample_raytrace(key=rng_key, params_init=pms, \
     log_prob_fn=loglike, n_steps=8000, n_leapfrog_steps=10, \
-    step_size=5e-4, refresh_rate=0.0, metro_check=1, sample_hmc=False)
+    step_size=1e-3, refresh_rate=0.0, metro_check=1, sample_hmc=False)
+
 
 with open("raytrace-chains.pickle", 'wb') as file:
     pickle.dump(samples, file)
+
+with open("raytrace-chains-unflat.pickle", 'wb') as file:
+    pickle.dump([unflat(x).params for x in samples[0]], file)
