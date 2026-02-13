@@ -16,6 +16,7 @@ jax.config.update("jax_enable_x64", True)
 # Optimisation imports
 import zodiax as zdx
 import optax
+import optimistix as optx
 
 # dLux imports
 import dLux as dl
@@ -290,7 +291,35 @@ print(models[-1].params["secondary_spectrum"])
 print(models[-1].params["separation"]*42)
 print(models[-1].params["position_angle"])
 
-initial_position = models[-1]
+
+def loss_fn(params, exposures, model):
+    mdl = params.inject(model)
+    res = np.sum(np.asarray([posterior(mdl,exposure) for exposure in exposures]))
+    return np.where(res==0.0, np.inf, res)
+
+@eqx.filter_jit
+def fun(params, args):
+    exposures, model = args
+    return loss_fn(params, exposures, model)
+
+def optimise_optimistix(params, model, exposures, things, niter):
+    paths = list(things.keys())
+    optimisers = [things[i] for i in paths]
+
+    model_params = ModelParams({p: params.get(p) for p in things.keys()})
+
+    solver = optx.BFGS(rtol=1e-6, atol=1e-6,verbose=frozenset({"step_size", "loss"}))
+    sol = optx.minimise(fun, solver, model_params, (exposures, model), throw=False, max_steps=niter)
+    
+    return sol
+
+sol = optimise_optimistix(models[-1], models[-1].inject(model_single), exposures_single, things, 5000)
+print(sol.value.params)
+print(fun(sol.value, (exposures_single, model_single)), (losses[-1]))
+
+best_params = sol.value
+
+initial_position = sol.value
 
 pms, unflat = jax.flatten_util.ravel_pytree(initial_position)
 
@@ -303,8 +332,8 @@ loglike = lambda params: -loss_fn(params, exposures_single, models[-1].inject(mo
 rng_key = jr.key(0)
 
 samples = sample_raytrace(key=rng_key, params_init=pms, \
-    log_prob_fn=loglike, n_steps=50000, n_leapfrog_steps=10, \
-    step_size=1e-4, refresh_rate=0.0, metro_check=1, sample_hmc=False)
+    log_prob_fn=loglike, n_steps=10000, n_leapfrog_steps=10, \
+    step_size=5e-4, refresh_rate=0.0, metro_check=1, sample_hmc=False)
 
 
 with open("raytrace-chains.pickle", 'wb') as file:
