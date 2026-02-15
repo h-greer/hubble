@@ -267,7 +267,7 @@ plot_comparison(model_single, initial_models[-1], exposures_single)
 initial_models[-1].params
 
 # %%
-losses, models = optimise(initial_models[-1].inject(params), initial_models[-1].inject(model_single), exposures_single, things, 300, recalculate=False)
+losses, models = optimise(initial_models[-1].inject(params), initial_models[-1].inject(model_single), exposures_single, things, 5000, recalculate=True)
 
 # %%
 plt.plot(np.asarray(losses[-50:])/(len(exposures_single)*wid**2))
