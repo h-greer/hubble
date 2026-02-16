@@ -96,7 +96,7 @@ n8o101b9q_cal.fits
 
 exposures_f108N = [exposure_from_file(ddir + file, BinaryFit(spectrum_basis, "F108N"), crop=wid) for file in files_f108N]
 exposures_f190N = [exposure_from_file(ddir + file, BinaryFit(spectrum_basis, "F190N"), crop=wid) for file in files_f190N]
-exposures_single = exposures_f108N+exposures_f190N
+exposures_single = exposures_f108N#+exposures_f190N
 
 # %%
 for e in exposures_single:
@@ -365,7 +365,7 @@ rng_key = jr.key(0)
 
 samples = sample_raytrace(key=rng_key, params_init=pms, \
     log_prob_fn=loglike, n_steps=10000, n_leapfrog_steps=10, \
-    step_size=3e-1, refresh_rate=0.0, metro_check=1, sample_hmc=False)
+    step_size=5e-1, refresh_rate=0.0, metro_check=1, sample_hmc=False)
 
 
 with open("raytrace-chains.pickle", 'wb') as file:
