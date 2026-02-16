@@ -40,7 +40,7 @@ plt.rcParams["font.size"] = 24
 from detectors import *
 from apertures import *
 from models import *
-from fisher import *
+from newfisher import *
 from stats import posterior
 from fitting import *
 from plotting import *
@@ -319,12 +319,44 @@ print(fun(sol.value, (exposures_single, model_single)), (losses[-1]))
 
 best_params = sol.value
 
-initial_position = sol.value
+#initial_position = sol.value
+
+def populate_fishers(fishers, exposures, model_params):
+
+    # Build the lr model structure
+    params_dict = jax.tree.map(lambda x: np.zeros((x.size, x.size)), model_params).params
+
+    # Loop over exposures
+    for exp in exposures:
+
+        # Loop over parameters
+        for param in model_params.keys():
+
+            # Check if the fishers have values for this exposure
+            key = f"{exp.key}.{param}"
+            if key not in fishers.keys():
+                continue
+
+            # Add the Fisher matrices
+            if isinstance(params_dict[param], dict):
+                params_dict[param][exp.get_key(param)] += fishers[key]
+            else:
+                params_dict[param] += fishers[key]
+
+    fisher_params = model_params.set("params", params_dict)
+
+    return jtu.tree_map(lambda x: np.diag(x), fisher_params)
+
+fsh = jax.flatten_util.ravel_pytree(populate_fishers(fishers, exposures_single, best_params))[0]
+bpf = jax.flatten_util.ravel_pytree(best_params)[0]
+
+initial_position = best_params.map(lambda x: np.zeros_like(x))
 
 pms, unflat = jax.flatten_util.ravel_pytree(initial_position)
 
 def loss_fn(params, exposures, model):
-    mdl = unflat(params).inject(model)
+    params_transformed = params / fsh + bpf
+    mdl = unflat(params_transformed).inject(model)
     return np.nansum(np.asarray([posterior(mdl,exposure) for exposure in exposures]))
 
 loglike = lambda params: -loss_fn(params, exposures_single, models[-1].inject(model_single))
@@ -333,11 +365,11 @@ rng_key = jr.key(0)
 
 samples = sample_raytrace(key=rng_key, params_init=pms, \
     log_prob_fn=loglike, n_steps=10000, n_leapfrog_steps=10, \
-    step_size=5e-4, refresh_rate=0.0, metro_check=1, sample_hmc=False)
+    step_size=3e-1, refresh_rate=0.0, metro_check=1, sample_hmc=False)
 
 
 with open("raytrace-chains.pickle", 'wb') as file:
     pickle.dump(samples, file)
 
 with open("raytrace-chains-unflat.pickle", 'wb') as file:
-    pickle.dump([unflat(x).params for x in samples[0]], file)
+    pickle.dump([unflat(x/fsh + bpf).params for x in samples[0]], file)
