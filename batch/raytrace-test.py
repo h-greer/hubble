@@ -319,7 +319,7 @@ print(fun(sol.value, (exposures_single, model_single)), (losses[-1]))
 
 best_params = sol.value
 
-#initial_position = sol.value
+fishers = calc_fishers(best_params.inject(model_single), exposures_single, things, fisher_fn, recalculate=True)
 
 def populate_fishers(fishers, exposures, model_params):
 
