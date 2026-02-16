@@ -365,7 +365,7 @@ rng_key = jr.key(0)
 
 samples = sample_raytrace(key=rng_key, params_init=pms, \
     log_prob_fn=loglike, n_steps=10000, n_leapfrog_steps=10, \
-    step_size=5e-1, refresh_rate=0.0, metro_check=1, sample_hmc=False)
+    step_size=1e0, refresh_rate=0.05, metro_check=1, sample_hmc=False)
 
 
 with open("raytrace-chains.pickle", 'wb') as file:
