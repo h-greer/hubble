@@ -46,7 +46,7 @@ plt.rcParams["font.size"] = 24
 from detectors import *
 from apertures import *
 from models import *
-from newfisher import *
+from fisher import *
 from stats import posterior
 from fitting import *
 from plotting import *
