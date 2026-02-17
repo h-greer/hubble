@@ -253,7 +253,7 @@ optimisers = [things[i] for i in groups]
 groups = [list(x) if isinstance(x, tuple) else x for x in groups]
 
 # %%
-losses, models = optimise(params, model_single, exposures_single, things, 100, recalculate=False)
+losses, models = optimise(params, model_single, exposures_single, things, 1000, recalculate=False)
 
 # %%
 losses[-1]
