@@ -120,7 +120,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     err = fits.getdata(fname, ext=2)
     info = fits.getdata(fname, ext=3)
 
-    detector_mask = np.full((256, 256), False, dtype=bool).at[127:130, :].set(True).at[:, 127:130].set(True)
+    detector_mask = np.full((256, 256), False, dtype=bool).at[127:128, :].set(True).at[:, 127:128].set(True)
 
     bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32) | detector_mask)
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
@@ -163,7 +163,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     return Exposure(filename, name, filter, tf(data), tf(err_with_poisson), tf(bad_with_poisson), fit, mjd, exptime, wcs, pam)
 
 class ModelFit(zdx.Base):
-    source: dl.Telescope = eqx.field(static=True)
+    source: dl.Telescope
 
     @abstractmethod
     def update_source(self, model, exposure):
@@ -325,16 +325,22 @@ class ModelFit(zdx.Base):
 class SinglePointFit(ModelFit):
     #nwavels: int = eqx.field(static=True)
     #spectrum: CombinedSpectrum
-    def __init__(self, spectrum_basis, filter):
+    time_series: bool = eqx.field(static=True)
+
+    def __init__(self, spectrum_basis, filter, time_series=False):
         nwavels, nbasis = spectrum_basis.shape
         wv, inten = calc_throughput(filter, nwavels)
         self.source = dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))
+        self.time_series=time_series
     
     def get_key(self, exposure, param):
         if param == "positions":
             return exposure.key
         elif param == "spectrum" or param == "flux":
-            return f"{exposure.target}_{exposure.filter}"
+            if time_series:
+                return exposure.key
+            else:    
+                return f"{exposure.target}_{exposure.filter}"
         else:
             return super().get_key(exposure, param)
     

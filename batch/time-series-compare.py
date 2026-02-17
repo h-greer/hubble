@@ -46,7 +46,7 @@ plt.rcParams["font.size"] = 24
 from detectors import *
 from apertures import *
 from models import *
-from fisher import *
+from newfisher import *
 from stats import posterior
 from fitting import *
 from plotting import *
@@ -92,13 +92,15 @@ clumps = lut[kmeans.labels_]
 
 files = [cfiles[i] for i in range(len(cfiles)) if clumps[i] == number]
 
-exposures_raw = [exposure_from_file(file, SinglePointFit(spectrum_basis, "F187N"), crop=wid) for file in files]
+exposures_raw = [exposure_from_file(file, SinglePointFit(spectrum_basis, "F187N", time_series=True), crop=wid) for file in files][::2]
 
 
 exposures_single = []
 for exp in exposures_raw:
     if exp.data.shape == (wid, wid):
         exposures_single.append(exp)
+    else:
+        print("bad")
 
 #exposures_single=exposures_single[1:50]
 
