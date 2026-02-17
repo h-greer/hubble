@@ -92,7 +92,7 @@ clumps = lut[kmeans.labels_]
 
 files = [cfiles[i] for i in range(len(cfiles)) if clumps[i] == number]
 
-exposures_raw = [exposure_from_file(file, SinglePointFit(spectrum_basis, "F187N", time_series=True), crop=wid) for file in files][::2]
+exposures_raw = [exposure_from_file(file, SinglePointFit(spectrum_basis, "F187N", time_series=True), crop=wid) for file in files][::5]
 
 
 exposures_single = []
@@ -253,7 +253,7 @@ optimisers = [things[i] for i in groups]
 groups = [list(x) if isinstance(x, tuple) else x for x in groups]
 
 # %%
-losses, models = optimise(params, model_single, exposures_single, things, 300, recalculate=True)
+losses, models = optimise(params, model_single, exposures_single, things, 300, recalculate=False)
 
 # %%
 losses[-1]
@@ -262,8 +262,8 @@ losses[-1]
 plt.plot(np.asarray(losses[-20:])/(len(exposures_single)*wid**2))
 
 # %%
-#plot_params(models, groups, xw = 3)
-#plot_comparison(model_single, models[-1], exposures_single)
+plot_params(models, groups, xw = 3, save="time-series-compare-params")
+plot_comparison(model_single, models[-1], exposures_single, save="time-series-compare-comparison")
 
 # %%
 models[-1].params
