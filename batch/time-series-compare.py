@@ -287,12 +287,6 @@ mins= [(x - mjds[0])*24*60 for x in mjds]
 
 
 # %%
-np.asarray([x for x in models[-1].params["cold_mask_shift"].values()])
-
-# %%
-np.asarray([x for x in models[-1].params["spectrum"].values()])
-
-# %%
 plt.errorbar(mins, defocuses, np.squeeze(np.asarray(errs)))
 plt.xlabel("Time (minutes)")
 plt.ylabel("Despace (µm)")
