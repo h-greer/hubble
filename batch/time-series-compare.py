@@ -237,13 +237,13 @@ things = {
     "positions": opt(g*15, 0),
     "spectrum": opt(g*20, 10),#, (20, 1.5)),
     #"cold_mask_shift": opt(g*100, 45),
-    "cold_mask_shift": opt(g*80, 50),
+    # "cold_mask_shift": opt(g*80, 50),
     #"cold_mask_rot": opt(g*10, 100),
     "bias": opt(g*8, 20),
     #"defocus": opt(g*20, 40),
-    "despace": opt(g*10, 30),
-    "mag": opt(g*10, 80),
-    "aberrations": opt(g*1, 60),
+    "despace": opt(g*1, 30),
+    #"mag": opt(g*10, 80),
+    # "aberrations": opt(g*1, 60),
 }
 
 
@@ -253,7 +253,7 @@ optimisers = [things[i] for i in groups]
 groups = [list(x) if isinstance(x, tuple) else x for x in groups]
 
 # %%
-losses, models = optimise(params, model_single, exposures_single, things, 300, recalculate=False)
+losses, models = optimise(params, model_single, exposures_single, things, 50, recalculate=False)
 
 # %%
 losses[-1]
