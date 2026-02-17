@@ -109,7 +109,7 @@ len(exposures_single)
 
 # %%
 for e in exposures_single:
-    print(e.mjd*86400)
+    print(e.mjd)
     print(e.exptime)
     print(e.target)
     print(e.filter)
@@ -241,7 +241,7 @@ things = {
     #"cold_mask_rot": opt(g*10, 100),
     "bias": opt(g*8, 20),
     #"defocus": opt(g*20, 40),
-    "despace": opt(g*1, 30),
+    "despace": opt(g*0.2, 30),
     #"mag": opt(g*10, 80),
     # "aberrations": opt(g*1, 60),
 }
@@ -253,7 +253,7 @@ optimisers = [things[i] for i in groups]
 groups = [list(x) if isinstance(x, tuple) else x for x in groups]
 
 # %%
-losses, models = optimise(params, model_single, exposures_single, things, 50, recalculate=False)
+losses, models = optimise(params, model_single, exposures_single, things, 100, recalculate=False)
 
 # %%
 losses[-1]
@@ -263,7 +263,7 @@ plt.plot(np.asarray(losses[-20:])/(len(exposures_single)*wid**2))
 
 # %%
 plot_params(models, groups, xw = 3, save="time-series-compare-params")
-plot_comparison(model_single, models[-1], exposures_single, save="time-series-compare-comparison")
+plot_comparison(model_single, models[-1], exposures_single, save="time-series-compare-comparison/")
 
 # %%
 models[-1].params

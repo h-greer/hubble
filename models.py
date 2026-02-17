@@ -28,7 +28,7 @@ class Exposure(zdx.Base):
     mjd: str = eqx.field(static=True)
     exptime: str = eqx.field(static=True)
     wcs: object = eqx.field(static=True)
-    pam: object = eqx.field(static=True)
+    pam: Array#object = eqx.field(static=True)
     data: Array
     err: Array
     bad: Array
@@ -120,7 +120,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     err = fits.getdata(fname, ext=2)
     info = fits.getdata(fname, ext=3)
 
-    detector_mask = np.full((256, 256), False, dtype=bool).at[127:128, :].set(True).at[:, 127:128].set(True)
+    detector_mask = np.full((256, 256), False, dtype=bool).at[127:130, :].set(True).at[:, 127:130].set(True)
 
     bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32) | detector_mask)
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
