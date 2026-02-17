@@ -236,14 +236,14 @@ g = 1e-2
 things = {
     "positions": opt(g*15, 0),
     "spectrum": opt(g*20, 10),#, (20, 1.5)),
-    #"cold_mask_shift": opt(g*100, 45),
-    # "cold_mask_shift": opt(g*80, 50),
+    #"cold_mask_shift": opt(g*100, 100),
+     "cold_mask_shift": opt(g*80, 100),
     #"cold_mask_rot": opt(g*10, 100),
     "bias": opt(g*8, 20),
     #"defocus": opt(g*20, 40),
-    "despace": opt(g*0.2, 30),
+    "despace": opt(g*0.3, 30),
     #"mag": opt(g*10, 80),
-    # "aberrations": opt(g*1, 60),
+    "aberrations": opt(g*1, 200),
 }
 
 
