@@ -16,7 +16,7 @@ from detectors import *
 from spectra import *
 from models import *
 from stats import *
-from newfisher import *
+from fisher import *
 
 def get_optimiser_new(model_params, optimisers):
     param_spec = ModelParams({param: param for param in model_params.keys()})
@@ -33,9 +33,6 @@ def optimise(params, model, exposures, things, niter, reduce_ram=False, recalcul
 
     print("Calculating Fishers")
 
-    fish = lambda model, exposure, params: zdx.filter_jit(fisher_fn(model, exposure, params, reduce_ram=reduce_ram))
-
-    #fishers = calc_fishers(model, exposures, paths)
     fishers = calc_fishers(model, exposures, paths, fisher_fn, recalculate=recalculate)
     print(fishers)
     model_params = ModelParams({p: model.get(p) for p in things.keys()})

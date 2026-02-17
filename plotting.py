@@ -15,7 +15,7 @@ from detectors import *
 from spectra import *
 from models import *
 from stats import *
-from newfisher import *
+from fisher import *
 
 from matplotlib import pyplot as plt
 import matplotlib

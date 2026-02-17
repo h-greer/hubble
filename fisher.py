@@ -1,167 +1,137 @@
-import jax
-import zodiax as zdx
-import equinox as eqx
-import jax.numpy as np
-from jax import jit, grad, jvp, linearize, lax, vmap
-import jax.tree_util as jtu
 import os
+import zodiax as zdx
+import jax.numpy as np
+from jax import jit, grad, linearize, lax, vmap
 from tqdm.auto import tqdm
-from stats import posterior
+import jax
 
-import dLux as dl
+from stats import posterior
 import dLux.utils as dlu
 
 
-def fisher_fn(model, exposure, params, new_diag=False):
-    return FIM(model, params, posterior, exposure, new_diag=new_diag)
-
-
-def self_fisher_fn(model, exposure, params, new_diag=False):
-    return fisher_fn(model, exposure, params, new_diag=new_diag)
 
 def calc_fisher(
     model,
     exposure,
     param,
     file_path,
+    fisher_fn,
     recalculate=False,
-    save=True,
     overwrite=False,
-    new_diag=False,
 ):
+    param_path = exposure.map_param(param)
+
     # Check that the param exists - caught later
     try:
-        leaf = model.get(exposure.map_param(param))
+        leaf = model.get(param_path)
         if not isinstance(leaf, np.ndarray):
-            raise ValueError(f"Leaf at path '{param}' is not an array")
+            print(f"{exposure.key} - Leaf at path '{param_path}' is not an array.")
+            return None
         N = leaf.size
-    except ValueError as e:
-        # Param doesn't exist, return None
-        print(e)
+    except ValueError:
+        print(f"{exposure.key} - Invalid path {param_path}, no leaf found")
         return None
 
     # Check for cached fisher mats
-    exists = os.path.exists(file_path)
+    if os.path.exists(file_path):
 
-    # Check if we need to recalculate
-    if exists and not recalculate:
-        fisher = np.load(file_path)
-        if fisher.shape[0] != N:
+        try:
+            fisher = np.load(file_path)
 
-            # Overwrite shape miss-matches
-            if overwrite:
-                fisher = self_fisher_fn(model, exposure, [param], new_diag=new_diag)
-                if save:
-                    np.save(file_path, fisher)
-            else:
-                raise ValueError(f"Shape mismatch for {param}")
+            # Always recalculate nan values
+            if np.isnan(fisher).any():
+                recalculate = True
 
-    # Calculate and save
+            # Check shape matches expectation
+            if fisher.shape[0] != N:
+
+                # If overwrite, set recalculate to True
+                if overwrite:
+                    recalculate = True
+
+                # Else raise an error
+                else:
+                    raise ValueError(
+                        f"Saved fisher has a shape miss-match for {exposure.key}, {param_path}"
+                    )
+
+        # Some bug causes non-arrays to be saved. Overwrite them in this case
+        except ValueError:
+            recalculate = True
+
+    # File doesn't exists, need to recalculate
     else:
-        fisher = self_fisher_fn(model, exposure, [param], new_diag=new_diag)
-        if save:
-            np.save(file_path, fisher)
-    #print(fisher)
-    return fisher
+        recalculate = True
 
+    # Finally calculate fisher matrix if needed
+    if recalculate:
+        # fisher = FIM(model, [param], loss_fn, exposure)
+        fisher = fisher_fn(model, exposure, [param])
+
+    # Check for nans
+    if np.isnan(fisher).any():
+        raise ValueError(f"Fisher matrix has nan value for exposure {exposure.key}, {param_path}")
+
+    return fisher
 
 
 def calc_fishers(
     model,
     exposures,
     parameters,
-    param_map_fn=None,
+    fisher_fn,
     recalculate=False,
     overwrite=False,
     save=True,
-    new_diag=False,
+    verbose=True,
     cache="files/fishers",
 ):
 
+    # Ensure the cache directory exists
     if not os.path.exists(cache):
         os.makedirs(cache)
 
-    # Iterate over exposures
-    fisher_exposures = {}
-    for exp in tqdm(exposures):
+    # Set up tqdm looper if verbose
+    if verbose:
+        looper = tqdm(exposures, desc="")
+    else:
+        looper = exposures
+
+    # Loop over exposures
+    fishers = {}
+    for exp in looper:
 
         # Iterate over params
-        fisher_params = {}
-        looper = tqdm(range(0, len(parameters)), leave=False, desc="")
-        for idx in looper:
-            param = parameters[idx]
-            looper.set_description(param)
+        for param in parameters:
+
+            # Update the looper if verbose
+            if verbose:
+                looper.set_description(param)
 
             # Ensure the path to save to exists
             save_path = f"{cache}/{exp.filename}/"
             if not os.path.exists(save_path):
                 os.makedirs(save_path)
 
-            # Path to the file
+            # Get the path to the file
             file_path = os.path.join(save_path, f"{param}.npy")
 
             # Get path correct for parameters
-            # param_path = key_mapper(model, exp, param)
             param_path = exp.map_param(param)
-
-            # Allows for custom mapping of parameters
-            if param_map_fn is not None:
-                param_path = param_map_fn(model, exp, param)
 
             # Calculate fisher for each exposure
             fisher = calc_fisher(
-                model, exp, param_path, file_path, recalculate, save, overwrite, new_diag
+                model, exp, param_path, file_path, fisher_fn, recalculate, overwrite
             )
 
-            # Store the fisher
-            if fisher is not None:
-                fisher_params[param] = fisher
-            else:
-                print(f"Could not calculate fisher for {param_path} - {exp.key}")
+            # Cache the fisher matrix
+            if save:
+                np.save(file_path, fisher)
 
-        fisher_exposures[exp.key] = fisher_params
+            # Put the fisher matrix into the dictionary
+            fishers[f"{exp.key}.{param}"] = fisher
 
-    return fisher_exposures
-
-
-def hessian_diag(fn, x):
-    """Source: https://github.com/google/jax/issues/924"""
-    eye = np.eye(len(x))
-    return np.array(
-        [jvp(lambda x: jvp(fn, (x,), (eye[i],))[1], (x,), (eye[i],))[1] for i in range(len(x))]
-    )
-
-
-def hessian(f, x, fast=False):
-    if fast:
-        # print("Running Vmapped")
-        # I think this basically just returns np.eye?
-        basis = np.eye(x.size).reshape(-1, *x.shape)
-
-        _, hvp = linearize(grad(f), x)
-        hvp = jit(hvp)
-
-        # Compile on first input
-        # TODO: I Think this needs to be re-worked so that we call the vmapped jit fn,
-        # not the function, then the vmapped version. ie
-        # hvp = vmap(jit(hvp))
-        # first = hvp(np.array([(basis[0])]))
-        first = np.array([hvp(basis[0])])  # Add empty dim for concatenation
-
-        # Vmap others
-        others = vmap(hvp)(basis[1:])
-
-        # Recombine
-        return np.stack(np.concatenate([first, others], axis=0)).reshape(x.shape + x.shape)
-    else:
-        # print("Running non-vmapped")
-        _, hvp = linearize(grad(f), x)
-        # Jit the sub-function here since it is called many times
-        # TODO: Test effect on speed
-        hvp = jit(hvp)
-        # basis = np.eye(np.prod(np.array(x.shape))).reshape(-1, *x.shape)
-        basis = np.eye(x.size).reshape(-1, *x.shape)
-        return np.stack([hvp(e) for e in basis]).reshape(x.shape + x.shape)
+    return fishers
 
 
 """
@@ -176,21 +146,36 @@ hessian is _naturally_ diagonal, else the results are spurious.
 """
 
 
-def hvp(f, x, v):
-    return jvp(grad(f), (x,), (v,))[1]
+def hessian(f, x, has_aux=False, batch_size=1):
+    # Jit the sub-function here since it is called many times
+    if has_aux:
+        _, hvp, aux = linearize(grad(f, has_aux=has_aux), x, has_aux=has_aux)
+    else:
+        _, hvp = linearize(grad(f), x)
+    hvp = jit(hvp)
+
+    # Build the basis
+    basis = np.eye(x.size).reshape(-1, *x.shape)
+
+    if batch_size == 1:
+        return np.stack([hvp(e) for e in basis]).reshape(x.shape + x.shape)
+
+    hvp = vmap(hvp)
+
+    # Break it into batches
+    n_batch = np.maximum(1, len(basis) // batch_size)
+    basis = np.array_split(basis, n_batch)
+    return np.concatenate([hvp(batch) for batch in basis])
 
 
-# TODO: Update this to take the matrix mapper class
 def FIM(
     pytree,
     parameters,
     loglike_fn,
     *loglike_args,
-    shape_dict={},
-    save_ram=True,
-    vmapped=False,
-    diag=False,
-    new_diag=False,
+    has_aux=False,
+    reduce_ram=False,
+    batch_size=1,
     **loglike_kwargs,
 ):
     # Build X vec
@@ -210,20 +195,15 @@ def FIM(
         parametric_pytree = _perturb(X, pytree, parameters, shapes, lengths)
         return loglike_fn(parametric_pytree, *loglike_args, **loglike_kwargs)
 
-    if diag:
-        diag = hvp(loglike_fn_vec, X, np.ones_like(X))
-        return np.eye(diag.shape[0]) * diag[:, None]
-
-    if new_diag:
-        return hessian_diag(loglike_fn_vec, X)
-
-    if save_ram:
-        return hessian(loglike_fn_vec, X)
-
-    if vmapped:
-        return hessian(loglike_fn_vec, X, fast=True)
-
-    return jax.hessian(loglike_fn_vec)(X)
+    # Note reduce ram is removed until has_aux is implemented
+    if reduce_ram:
+        return hessian(loglike_fn_vec, X, has_aux=has_aux, batch_size=batch_size)
+    else:
+        if has_aux:
+            fim, aux = jit(jax.hessian(loglike_fn_vec, has_aux=has_aux))(X)
+        else:
+            fim = jit(jax.hessian(loglike_fn_vec, has_aux=has_aux))(X)
+    return fim
 
 
 def _perturb(X, pytree, parameters, shapes, lengths):
@@ -241,75 +221,20 @@ def _perturb(X, pytree, parameters, shapes, lengths):
 
     return pytree.add(parameters, xs)
 
-
-
-
-
-def calc_lrs(model, exposures, fishers, params=None, order=1):
-    # Get the parameters from the fishers
-    if params is None:
-        params = []
-        for exp_key, fisher_dict in fishers.items():
-            for param in fisher_dict.keys():
-                params.append(param)
-        params = list(set(params))
-
-    # Build a filter, we need to handle parameters that are stored in dicts
-    # TODO: Add this to model?
-    bool_model = jtu.tree_map(lambda _: False, model)
-    for param in params:
-        leaf = model.get(param)
-        if isinstance(leaf, dict):
-            true_leaf = jtu.tree_map(lambda x: True, leaf)
-        else:
-            true_leaf = True
-        bool_model = bool_model.set(param, true_leaf)
-
-    # Make an empty fisher model
-    # Flag and deal with large arrays
-    grad_model = eqx.filter(model, bool_model)
-    #is_large = jtu.tree_map(lambda x: x.size > 1e4, grad_model)
-    #bool_model = jtu.tree_map(lambda x, y: x and not y, bool_model, is_large)
-    grad_model = eqx.filter(model, bool_model)
-    fisher_model = jtu.tree_map(lambda x: np.zeros((x.size, x.size)), grad_model)
-    #large_grad_model = eqx.filter(model, is_large)
-    #large_lr_model = jtu.tree_map(lambda x: np.ones(x.shape), large_grad_model)
-
-    # Loop over exposures
-    for exp in exposures:
-
-        # Loop over parameters
-        for param in params:
-
-            # Check if the parameter is in the fisher
-            if param not in fishers[exp.key].keys():
-                continue
-
-            param_path = exp.map_param(param)
-            fisher_model = fisher_model.add(param_path, fishers[exp.key][param])
-
-    # Convert fisher to lr model
-    inv_fn = lambda fmat, leaf: dlu.nandiv(-1, np.diag(fmat), 1).reshape(leaf.shape)
-    #lr_model = jtu.tree_map(inv_fn, fisher_model, model)
-    lr_model = jtu.tree_map(lambda x, y: None if x is None else inv_fn(x, y), fisher_model, model, is_leaf=lambda x: x is None)
-
-    #lr_model = eqx.combine(lr_model, large_lr_model)
-    return lr_model
-
 def populate_lr_model(fishers, exposures, model_params):
 
     # Build the lr model structure
-    params_dict = jtu.tree_map(lambda x: np.zeros((x.size, x.size)), model_params).params
+    params_dict = jax.tree.map(lambda x: np.zeros((x.size, x.size)), model_params).params
 
     # Loop over exposures
     for exp in exposures:
 
         # Loop over parameters
-        for param in model_params.params.keys():
+        for param in model_params.keys():
 
             # Check if the fishers have values for this exposure
             key = f"{exp.key}.{param}"
-            if key not in fishers.params.keys():
+            if key not in fishers.keys():
                 continue
 
             # Add the Fisher matrices
@@ -324,4 +249,7 @@ def populate_lr_model(fishers, exposures, model_params):
     def inv_fn(fmat, leaf):
         return dlu.nandiv(-1, np.diag(fmat), fill=1).reshape(leaf.shape)
 
-    return jtu.tree_map(inv_fn, fisher_params, model_params)
+    return jax.tree.map(inv_fn, fisher_params, model_params)
+
+def fisher_fn(model, exposure, params, reduce_ram=False):
+    return FIM(model, params, posterior, exposure, reduce_ram=reduce_ram)
