@@ -337,7 +337,7 @@ class SinglePointFit(ModelFit):
         if param == "positions":
             return exposure.key
         elif param == "spectrum" or param == "flux":
-            if time_series:
+            if self.time_series:
                 return exposure.key
             else:    
                 return f"{exposure.target}_{exposure.filter}"
