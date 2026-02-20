@@ -391,10 +391,10 @@ fm = populate_fisher_model(fsh, exposures_single, models[-1])
 fm.get("spectrum.HZ4_F110W")
 
 # %%
-cov_f110w = np.linalg.inv(fsh['n8ry01tkq.spectrum'])#+fsh['n8yj02wyq.spectrum'])
+cov_f110w = numpy.linalg.inv(fm.get("spectrum.HZ4_F110W"))#+fsh['n8yj02wyq.spectrum'])
 spectrum_err = np.diag(np.sqrt(np.abs(cov_f110w)))
 
-cov_f160w = np.linalg.inv(fsh['n8ry03vbq.spectrum'])#+fsh['n8yj02wyq.spectrum'])
+cov_f160w = numpy.linalg.inv(fm.get("spectrum.HZ4_F110W"))#+fsh['n8yj02wyq.spectrum'])
 
 
 # %%
