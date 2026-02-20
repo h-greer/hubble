@@ -63,7 +63,7 @@ wid = 90
 oversample = 4
 
 nwavels = 30#13#6
-npoly=25#2
+npoly=22#2
 
 n_zernikes = 30#30#12
 
@@ -539,21 +539,26 @@ np.sqrt(pcov[0,0])
 # %%
 np.round(153.2, -2)
 
-# %%
 plt.figure(figsize=(10,7))
 
 plt.plot(np.sort(wavels)*1e6, planck_wavelength(np.sort(wavels), *popt), label=fr"Blackbody Curve")# $T = {np.round(popt[0], -3):3.0f}$")
 plt.plot(wv*1e6, sp, label = "F110W Spectrum")
 plt.plot(wv2*1e6, sp2, label = "F160W Spectrum")
 
-plt.axvline(1.28)
-plt.axvline(1.09)
-plt.axvline(0.955)
-plt.axvline(1.09)
+plt.axvline(1.282)
+plt.axvline(1.094)
+plt.axvline(0.9546)
+plt.axvline(1.005)
+plt.axvline(0.923)
+plt.axvline(0.901)
+
+plt.axvline(1.51)
+
 
 
 plt.xlabel("Wavelength (um)")
-plt.legend()
+plt.savefig("wd-spectrum-compare.png")
+#plt.legend()
 
 # %%
 plt.figure(figsize=(10,7))
