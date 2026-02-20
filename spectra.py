@@ -40,6 +40,9 @@ class CombinedSpectrum(dl.Spectrum):
     @property
     def flux(self):
         return np.sum(self.spec_weights())
+    
+    def proper_flux(self):
+        return np.sum(self.spec_weights()*self.filt_weights)
 
     def normalise(self):
         return self

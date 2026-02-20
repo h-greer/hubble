@@ -32,7 +32,7 @@ def plot_params(models, groups, xw = 4, save=False):
         sp = axs[i%xw, i//xw]
         if param in ["fluxes", "flux", "contrast", "positions", "aberrations", 
                     "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear",
-                    "primary_rot","primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "primary_distortion", "cold_mask_distortion", "defocus", "despace", "resolved"]:
+                    "primary_rot","primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "primary_distortion", "cold_mask_distortion", "defocus", "despace", "resolved", "jitter"]:
 
             for j in range(len(list(models[-1].get(param).values()))):
                 vals = np.asarray([list(x.get(param).values())[j].flatten() for x in models]).T
@@ -56,7 +56,6 @@ def plot_comparison(model, params, exposures, save=False, graticule=False):
 
         fig, axs = plt.subplots(1,5, figsize=(50,8))
 
-        fig.tight_layout()
 
         cmap = matplotlib.colormaps['inferno']
         cmap.set_bad('k',1)
@@ -92,7 +91,7 @@ def plot_comparison(model, params, exposures, save=False, graticule=False):
             axs[1].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
 
         #axs[2].imshow(cropped_err)
-        cmap = matplotlib.colormaps['seismic']
+        cmap = matplotlib.colormaps['bwr']
         cmap.set_bad('k',1)
 
         #start_aberrations = model.get(exp.fit.map_param(exp, "start_aberrations"))#*1e-9
@@ -113,7 +112,7 @@ def plot_comparison(model, params, exposures, save=False, graticule=False):
         resid = (exp.data - fit)/exp.err        
         print(np.nanstd(resid))
         rlim = np.nanmax(np.abs(resid))
-        residual=axs[3].imshow(resid, cmap='seismic',vmin=-rlim, vmax=rlim)
+        residual=axs[3].imshow(resid, cmap='bwr',vmin=-rlim, vmax=rlim)
         plt.colorbar(residual,ax=axs[3])
 
         if graticule:
@@ -122,11 +121,13 @@ def plot_comparison(model, params, exposures, save=False, graticule=False):
 
         x = np.nanmax(np.abs(resid))
         xs = np.linspace(-x, x, 200)
-        ys = jsp.stats.norm.pdf(xs)/np.sqrt(np.nanstd(resid))
+        ys = jsp.stats.norm.pdf(xs, scale=np.nanstd(resid))#/np.sqrt(np.nanstd(resid))
 
-        axs[4].set_title(f"Noise normalised residual sigma: {np.nanstd(resid):.3}")
+        axs[4].set_title(fr"Noise normalised residual $\sigma ={np.nanstd(resid):.3}$")
         axs[4].hist(resid.flatten(), bins=50, density=True)
         axs[4].plot(xs, ys, c='k')
+        #axs[4].set_xlabel("z-score")
+        #axs[4].set_ylabel("Counts")
 
         #lpdf = posterior(model,exp,return_im=True)#*nanmap
         #lpd = axs[4].imshow(lpdf)
@@ -141,6 +142,8 @@ def plot_comparison(model, params, exposures, save=False, graticule=False):
         for i in range(4):
             axs[i].set_xticks([])
             axs[i].set_yticks([])
+        
+        fig.tight_layout()
 
         if save:
             fig.savefig(f"{save}_{f}.png")
@@ -160,7 +163,7 @@ def plot_spectra(model, params, exposures):
         spectrum_cov = np.linalg.inv(fisher)
         spectrum_err = np.diag(np.sqrt(np.abs(spectrum_cov)))
 
-        plt.imshow(spectrum_cov, cmap='seismic', vmin=-np.max(np.abs(spectrum_cov)), vmax=np.max(np.abs(spectrum_cov)))
+        plt.imshow(spectrum_cov, cmap='bwr', vmin=-np.max(np.abs(spectrum_cov)), vmax=np.max(np.abs(spectrum_cov)))
         plt.colorbar()
 
         plt.figure(figsize=(10,10))

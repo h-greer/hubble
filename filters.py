@@ -26,6 +26,7 @@ filter_files = {
     'F170M': get_filter("../data/HST_NICMOS1.F170M.dat")[120:-180],
     'F095N': get_filter("../data/HST_NICMOS1.F095N.dat"),
     'F145M': get_filter("../data/HST_NICMOS1.F145M.dat"),
+    'F165M': get_filter("../data/HST_NICMOS1.F165M.dat"),
     'F190N': get_filter("../data/HST_NICMOS1.F190N.dat"),
     'F166N': get_filter("../data/HST_NICMOS1.F166N.dat"),
     'F108N': get_filter("../data/HST_NICMOS1.F108N.dat"),
@@ -34,7 +35,7 @@ filter_files = {
     #'F110W': np.asarray(pd.read_csv("../data/HST_NICMOS1.F110W.dat", sep=' '))[::20,:],
     'F110W': get_filter("../data/HST_NICMOS1.F110W.dat")[80:-150],#[::20,:],
     'F110M': get_filter("../data/HST_NICMOS1.F110M.dat"),
-    'F160W': get_filter("../data/HST_NICMOS1.F160W.dat"),
+    'F160W': get_filter("../data/HST_NICMOS1.F160W.dat")[120:-200],
     'POL0S': get_filter("../data/HST_NICMOS1.POL0S.dat"),
     'POL240S': get_filter("../data/HST_NICMOS1.POL240S.dat"),
     'POL120S': get_filter("../data/HST_NICMOS1.POL120S.dat"),
@@ -63,7 +64,7 @@ def calc_throughput(filt, nwavels=9):
         areas.append(jsp.integrate.trapezoid(y=throughput, x=wl_array))
 
     areas = np.array(areas)
-    weights = areas / areas.sum()
+    weights = areas #/ areas.sum()
 
     wavels *= 1e-10
     return np.array([wavels, weights])

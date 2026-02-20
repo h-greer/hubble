@@ -50,7 +50,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 radius = 0.065*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4615*1.2, 0.7555*1.2),
+                    translation = (-0.4615*1.2, -0.7555*1.2),
                 ),
                 softening = self.softening
             ),
@@ -58,7 +58,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 radius = 0.065*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4564*1.2, -0.7606*1.2),
+                    translation = (-0.4564*1.2, 0.7606*1.2),
                 ),
                 softening=self.softening
             )
@@ -130,7 +130,7 @@ class NICMOSOptics(dl.AngularOpticalSystem):
             2.4,
             [
                 dl.CompoundAperture([
-                    ("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4),softening=2)),
+                    ("main_aperture",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4, softening=2))),
                     ("cold_mask",NICMOSColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=2)),
                     #("bar",dl.Spider(width=2.4,angles=[90],))
                 ],normalise=True, transformation=dl.CoordTransform(rotation=0)),
