@@ -78,20 +78,7 @@ basis_file = np.load("spectrum_basis.npy")[:,:npoly]
 spectrum_basis = ipx.interp1d(np.linspace(0,1,nwavels), np.linspace(0,1,basis_file.shape[0]), basis_file)
 spectrum_basis = spectrum_basis/np.sqrt(np.mean(spectrum_basis**2, axis=0))
 
-#spectrum_basis = build_dct_basis(nwavels, npoly)
 
-
-
-ddir = "../data/MAST_2025-12-15T00_12_09.074Z/HST/"
-
-exposures_single = [
-    #exposure_from_file(ddir + "n8yj63wnq_cal.fits", SinglePointFit(spectrum_basis, "F110W"), crop=wid),
-    #exposure_from_file(ddir + "n8yj63wnq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 5), crop=wid),
-    exposure_from_file(ddir + "n9nk05mfq_cal.fits", SinglePointFit(spectrum_basis, "F110W"), crop=wid),
-    
-    #exposure_from_file(ddir + "n8yj63wlq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 5), crop=wid),
-    #exposure_from_file(ddir + "n8yj63wmq_cal.fits", SinglePointFit(CombinedFourierSpectrum, 15), crop=wid),
-]
 
 
 ddir = "../data/MAST_2024-09-26T22_53_13.719Z/HST/"
