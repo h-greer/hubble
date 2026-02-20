@@ -63,9 +63,9 @@ wid = 90
 oversample = 4
 
 nwavels = 30#13#6
-npoly=15#2
+npoly=25#2
 
-n_zernikes = 20#30#12
+n_zernikes = 30#30#12
 
 optics = NICMOSSecondaryFresnelOptics(512, wid, oversample, mag=3.3, defocus=0., despace=0., n_zernikes = n_zernikes)
 
@@ -242,7 +242,7 @@ things = {
     "cold_mask_shift": opt(g*1, 30),
     
     "bias": opt(g*3, 20),
-    "aberrations": opt(g*0.05, 80),
+    "aberrations": opt(g*0.03, 80),
     #"jitter": opt(g*1, 120),
 
     "despace": opt(g*0.8, 50),
