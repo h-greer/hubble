@@ -432,6 +432,7 @@ vals, vects = np.linalg.eig(fm.get("spectrum.HZ4_F110W"))#+fsh['n8yj02wyq.spectr
 
 order = np.argsort(vals)[::-1]
 
+plt.figure()
 
 plt.semilogy(np.sort(np.real(vals))[::-1])
 plt.savefig("wd-eigvals.png")
@@ -576,5 +577,5 @@ plt.plot(wavels*1e6, planck_wavelength(wavels, *popt), label=fr"Blackbody Curve"
 plt.xlabel("Wavelength (um)")
 #plt.legend()
 
-plt.save("wd-spectrum.png")
+plt.savefig("wd-spectrum.png")
 
