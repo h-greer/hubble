@@ -350,6 +350,28 @@ plot_comparison(final_params.inject((model_single)), final_params, exposures_sin
 # %%
 # calculate spectrum
 
+
+plt.figure(figsize=(10,10))
+
+wv, filt = calc_throughput("F110W", nwavels=nwavels)
+
+spec = CombinedBasisSpectrum(wv, filt, final_params.get("spectrum.HZ4_F110W"), spectrum_basis)
+
+wv2, filt2 = calc_throughput("F160W", nwavels=nwavels)
+
+spec2 = CombinedBasisSpectrum(wv2, filt2, final_params.get("spectrum.HZ4_F160W"), spectrum_basis)
+
+
+sp = spec.spec_weights()/spec.flux*spec.proper_flux()/(wv*1e6)
+sp2 = spec2.spec_weights()/spec2.flux*spec2.proper_flux()/(wv2*1e6)
+
+#plt.plot(wavels, params.get("spectrum.U10764_F110W"))
+plt.plot(wv*1e6, sp)
+plt.plot(wv2*1e6, sp2)
+
+plt.xlabel("Wavelength (um)")
+plt.savefig("wd-spec-basic.png")
+
 # %%
 fsh = calc_fishers(final_params.inject(model_single), exposures_single, ["spectrum"], fisher_fn, recalculate=True, save=False)
 fsh
@@ -410,12 +432,6 @@ vals, vects = np.linalg.eig(fm.get("spectrum.HZ4_F110W"))#+fsh['n8yj02wyq.spectr
 
 order = np.argsort(vals)[::-1]
 
-#plt.figure(figsize=(10,10))
-#plt.xlabel("Coefficient")
-
-#for i in range(5):
-#    plt.plot(np.arange(npoly),np.real(vects[:,order[i]]), label=f"{i}")
-#plt.legend()
 
 plt.semilogy(np.sort(np.real(vals))[::-1])
 
@@ -427,25 +443,6 @@ plt.semilogy(np.sort(np.real(vals))[::-1])
 #(filt/(wv*1e6)).sum()/(filt2/(wv*1e6)).sum()
 
 # %%
-plt.figure(figsize=(10,10))
-
-wv, filt = calc_throughput("F110W", nwavels=nwavels)
-
-spec = CombinedBasisSpectrum(wv, filt, final_params.get("spectrum.HZ4_F110W"), spectrum_basis)
-
-wv2, filt2 = calc_throughput("F160W", nwavels=nwavels)
-
-spec2 = CombinedBasisSpectrum(wv2, filt2, final_params.get("spectrum.HZ4_F160W"), spectrum_basis)
-
-
-sp = spec.spec_weights()/spec.flux*spec.proper_flux()/(wv*1e6)
-sp2 = spec2.spec_weights()/spec2.flux*spec2.proper_flux()/(wv2*1e6)
-
-#plt.plot(wavels, params.get("spectrum.U10764_F110W"))
-plt.plot(wv*1e6, sp)
-plt.plot(wv2*1e6, sp2)
-
-plt.xlabel("Wavelength (um)")
 
 
 # %%
