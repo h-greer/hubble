@@ -109,7 +109,7 @@ class InjectedExposure(Exposure):
 
 
 
-tf = lambda x: np.flip(x)#np.rot90(x,k=3)#np.flip(x)#, axis=0)
+tf = lambda x: x#np.flip(x)#np.rot90(x,k=3)#np.flip(x)#, axis=0)
 
 def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
@@ -120,7 +120,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     err = fits.getdata(fname, ext=2)
     info = fits.getdata(fname, ext=3)
 
-    detector_mask = np.full((256, 256), False, dtype=bool).at[127:130, :].set(True).at[:, 127:130].set(True)
+    detector_mask = np.full((256, 256), False, dtype=bool).at[127:130, :].set(True)#.at[:, 127:130].set(True)
 
     bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32) | detector_mask)
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
@@ -177,22 +177,22 @@ class ModelFit(zdx.Base):
             case "breathing":
                 return exposure.key
             case "cold_mask_shift":
-                #return "global"#exposure.key#"global"
-                return str(round(exposure.mjd))
+                return "global"#exposure.key#"global"
+                #return str(round(exposure.mjd))
             case "cold_mask_rot":
                 return "global"#exposure.key#"global"
             case "cold_mask_scale":
-                return exposure.filter
+                return "global"#return str(round(exposure.mjd))
             case "cold_mask_shear":
-                return exposure.filter
+                return "global"#return str(round(exposure.mjd))
             case "primary_rot":
-                return exposure.filter
+                return "global"#return str(round(exposure.mjd))
             case "primary_scale":
-                return exposure.filter
+                return "global"#return str(round(exposure.mjd))
             case "primary_shear":
-                return exposure.filter
+                return "global"#return str(round(exposure.mjd))
             case "primary_distortion" | "cold_mask_distortion":
-                return "global"
+                return "global"#return "global"
             case "defocus":
                 return exposure.key
             case "bias":
@@ -306,7 +306,7 @@ class ModelFit(zdx.Base):
             detector = detector.set("bias.value", bias)
         if "jitter" in model.params.keys():
             jitter = model.get(self.map_param(exposure, "jitter"))
-            detector = detector.set("jitter.sigma", jitter)
+            detector = detector.set("jitter.sigma", np.abs(jitter))
         return detector
 
     def __call__(self, model, exposure):
