@@ -62,10 +62,10 @@ extra_bad = None
 wid = 90
 oversample = 4
 
-nwavels = 20#13#6
+nwavels = 30#13#6
 npoly=15#2
 
-n_zernikes = 30#30#12
+n_zernikes = 20#30#12
 
 optics = NICMOSSecondaryFresnelOptics(512, wid, oversample, mag=3.3, defocus=0., despace=0., n_zernikes = n_zernikes)
 
@@ -413,10 +413,10 @@ fm = populate_fisher_model(fsh, exposures_single, models[-1])
 fm.get("spectrum.HZ4_F110W")
 
 # %%
-cov_f110w = numpy.linalg.inv(fm.get("spectrum.HZ4_F110W"))#+fsh['n8yj02wyq.spectrum'])
+cov_f110w = np.linalg.inv(fm.get("spectrum.HZ4_F110W"))#+fsh['n8yj02wyq.spectrum'])
 spectrum_err = np.diag(np.sqrt(np.abs(cov_f110w)))
 
-cov_f160w = numpy.linalg.inv(fm.get("spectrum.HZ4_F110W"))#+fsh['n8yj02wyq.spectrum'])
+cov_f160w = np.linalg.inv(fm.get("spectrum.HZ4_F160W"))#+fsh['n8yj02wyq.spectrum'])
 
 
 # %%
@@ -434,6 +434,7 @@ order = np.argsort(vals)[::-1]
 
 
 plt.semilogy(np.sort(np.real(vals))[::-1])
+plt.savefig("wd-eigvals.png")
 
 # %%
 #spec.filt_weights.sum()
