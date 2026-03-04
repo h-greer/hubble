@@ -221,7 +221,7 @@ def _perturb(X, pytree, parameters, shapes, lengths):
 
     return pytree.add(parameters, xs)
 
-def populate_lr_model(fishers, exposures, model_params):
+def populate_fishers(fishers, exposures, model_params):
 
     # Build the lr model structure
     params_dict = jax.tree.map(lambda x: np.zeros((x.size, x.size)), model_params).params
@@ -244,6 +244,12 @@ def populate_lr_model(fishers, exposures, model_params):
                 params_dict[param] += fishers[key]
 
     fisher_params = model_params.set("params", params_dict)
+
+    return fisher_params
+
+def populate_lr_model(fishers, exposures, model_params):
+
+    fisher_params = populate_fishers(fishers, exposures, model_params)
 
     # Convert fisher to lr model
     def inv_fn(fmat, leaf):

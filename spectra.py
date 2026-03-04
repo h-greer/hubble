@@ -8,6 +8,7 @@ import dLux as dl
 import dLux.utils as dlu
 
 from dLux import Spectrum as Spectrum
+from dLux.spectra import SimpleSpectrum
 
 import zodiax as zdx
 import equinox as eqx
@@ -18,17 +19,16 @@ def nearest_interpolate(x, xp, fp):
     locs = np.argmin(np.abs(dists),axis=0)
     return fp[locs]    
 
-class CombinedSpectrum(dl.Spectrum):
-    wavelengths: Array
+class CombinedSpectrum(SimpleSpectrum):
     filt_weights: Array
     basis_weights: Array
 
     def __init__(self, wavels, filt_weights, basis_weights):
+        super().__init__(wavels)
         self.filt_weights = np.asarray(filt_weights, float)
-        self.wavelengths = np.asarray(wavels, dtype=float)
+        #self.wavelengths = np.asarray(wavels, dtype=float)
         self.basis_weights = np.asarray(basis_weights, dtype=float)
 
-    @property
     def spec_weights(self):
         pass
 

@@ -435,16 +435,17 @@ order = np.argsort(vals)[::-1]
 plt.figure()
 
 plt.semilogy(np.sort(np.real(vals))[::-1])
-plt.savefig("wd-eigvals.png")
+plt.savefig("wd-eigvals-f110w.png")
 
 # %%
-#spec.filt_weights.sum()
-#spec2.filt_weights.sum()
+vals, vects = np.linalg.eig(fm.get("spectrum.HZ4_F160W"))#+fsh['n8yj02wyq.spectrum'])
 
-# %%
-#(filt/(wv*1e6)).sum()/(filt2/(wv*1e6)).sum()
+order = np.argsort(vals)[::-1]
 
-# %%
+plt.figure()
+
+plt.semilogy(np.sort(np.real(vals))[::-1])
+plt.savefig("wd-eigvals-f160w.png")
 
 
 # %%

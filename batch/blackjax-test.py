@@ -300,6 +300,54 @@ def loss_fn(params, exposures, model):
 loglike = lambda params: -loss_fn(params, exposures_single, models[-1].inject(model_single))
 
 
+def run_mclmc(logdensity_fn, num_steps, initial_position, key, transform, desired_energy_variance= 5e-4):
+    init_key, tune_key, run_key = jax.random.split(key, 3)
+
+    # create an initial state for the sampler
+    initial_state = blackjax.mcmc.mclmc.init(
+        position=initial_position, logdensity_fn=logdensity_fn, rng_key=init_key
+    )
+
+    # build the kernel
+    kernel = lambda inverse_mass_matrix : blackjax.mcmc.mclmc.build_kernel(
+        logdensity_fn=logdensity_fn,
+        integrator=blackjax.mcmc.integrators.isokinetic_mclachlan,
+        inverse_mass_matrix=inverse_mass_matrix,
+    )
+
+    # find values for L and step_size
+    (
+        blackjax_state_after_tuning,
+        blackjax_mclmc_sampler_params,
+        _
+    ) = blackjax.mclmc_find_L_and_step_size(
+        mclmc_kernel=kernel,
+        num_steps=num_steps,
+        state=initial_state,
+        rng_key=tune_key,
+        diagonal_preconditioning=False,
+        desired_energy_var=desired_energy_variance
+    )
+
+    # use the quick wrapper to build a new kernel with the tuned parameters
+    sampling_alg = blackjax.mclmc(
+        logdensity_fn,
+        L=blackjax_mclmc_sampler_params.L,
+        step_size=blackjax_mclmc_sampler_params.step_size,
+    )
+
+    # run the sampler
+    _, samples = blackjax.util.run_inference_algorithm(
+        rng_key=run_key,
+        initial_state=blackjax_state_after_tuning,
+        inference_algorithm=sampling_alg,
+        num_steps=num_steps,
+        transform=transform,
+        progress_bar=True,
+    )
+
+    return samples, blackjax_state_after_tuning, blackjax_mclmc_sampler_params, run_key
+
 # %%
 def inference_loop(rng_key, kernel, initial_state, num_samples):
     @jax.jit

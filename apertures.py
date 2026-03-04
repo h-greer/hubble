@@ -50,7 +50,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 radius = 0.065*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4615*1.2, -0.7555*1.2),
+                    translation = (-0.4615*1.2, 0.7555*1.2),
                 ),
                 softening = self.softening
             ),
@@ -58,7 +58,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 radius = 0.065*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4564*1.2, 0.7606*1.2),
+                    translation = (-0.4564*1.2, -0.7606*1.2),
                 ),
                 softening=self.softening
             )

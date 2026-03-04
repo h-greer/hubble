@@ -136,7 +136,7 @@ def plot_comparison(model, params, exposures, save=False, graticule=False):
         axs[0].set_title("Measured PSF")
         axs[1].set_title("Recovered PSF")
         axs[2].set_title("Recovered Aperture")
-        axs[3].set_title("Residuals")
+        axs[3].set_title("Residual z-score")
         #axs[4].set_title("Log Likelihood Map")
 
         for i in range(4):
@@ -147,34 +147,3 @@ def plot_comparison(model, params, exposures, save=False, graticule=False):
 
         if save:
             fig.savefig(f"{save}_{f}.png")
-
-def plot_spectra(model, params, exposures):
-
-    model = params.inject(model)
-
-    fishers = calc_fishers(model, exposures, ["spectrum"], recalculate=True)
-
-    for exp in exposures:
-
-
-        spec = params.get("spectrum")[exp.fit.get_key(exp, "spectrum")]
-        fisher = fishers[exp.filename]["spectrum"]
-
-        spectrum_cov = np.linalg.inv(fisher)
-        spectrum_err = np.diag(np.sqrt(np.abs(spectrum_cov)))
-
-        plt.imshow(spectrum_cov, cmap='bwr', vmin=-np.max(np.abs(spectrum_cov)), vmax=np.max(np.abs(spectrum_cov)))
-        plt.colorbar()
-
-        plt.figure(figsize=(10,10))
-
-        nwavels = 30#len(spec)
-
-        wv, filt = calc_throughput("F110W", nwavels=nwavels)
-
-
-        for i in range(200):
-            coeffs = numpy.random.multivariate_normal(spec, spectrum_cov)
-            plt.plot(wv, jax.nn.softplus(NonNormalisedClippedPolySpectrum(np.linspace(-1, 1, nwavels), coeffs).weights), color='b', alpha=0.1, zorder=0)
-
-        plt.scatter(wv, jax.nn.softplus(NonNormalisedClippedPolySpectrum(np.linspace(-1, 1, nwavels), spec).weights), color="orange", zorder=1)
