@@ -30,7 +30,7 @@ def loss_fn(params, exposures, model):
     mdl = params.inject(model)
     return np.nansum(np.asarray([posterior(mdl,exposure) for exposure in exposures]))
 
-def optimise_optimistix(params, model, exposures):
+def optimise_optimistix(params, model, exposures, project=True):
     f = lambda params: loss_fn(params, exposures, model)
     F, unflatten = zdx.batching.hessian(f, ModelParams(params), nbatches=len(exposures)*2)
 
@@ -44,7 +44,7 @@ def optimise_optimistix(params, model, exposures):
     X0, unravel = ravel_pytree(params)
 
     # Generate the projection matrix P, projection function, and initial vector
-    P = zdx.optimisation.eigen_projection(fmat=F)
+    P = zdx.optimisation.eigen_projection(fmat=F) if project else np.eye(F.shape[0])
     project_fn = lambda u: unravel(X0 + np.dot(P, u))
     X = np.zeros(P.shape[-1])
 
@@ -52,7 +52,7 @@ def optimise_optimistix(params, model, exposures):
     # Minimise algorithm
     args = (exposures, model, project_fn)
     solver = optx.BestSoFarMinimiser(optx.LBFGS(rtol=1e-6, atol=1e-6))
-    sol = optx.minimise(projected_loss_fn, solver, X, args, max_steps=10000, throw=False)
+    sol = optx.minimise(projected_loss_fn, solver, X, args, max_steps=1024, throw=False)
     return project_fn(sol.value)
 
 
