@@ -106,11 +106,6 @@ class InjectedExposure(Exposure):
         self.exptime = t_exp
         self.pam = 0.
 
-
-
-
-tf = lambda x: x#np.flip(x)#np.rot90(x,k=3)#np.flip(x)#, axis=0)
-
 def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
     hdr = fits.getheader(fname, ext=0)
@@ -160,7 +155,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
     bad_with_poisson = np.isnan(err_with_poisson)
 
-    return Exposure(filename, name, filter, tf(data), tf(err_with_poisson), tf(bad_with_poisson), fit, mjd, exptime, wcs, pam)
+    return Exposure(filename, name, filter, data, err_with_poisson, bad_with_poisson, fit, mjd, exptime, wcs, pam)
 
 class ModelFit(zdx.Base):
     source: dl.Telescope
