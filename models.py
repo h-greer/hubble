@@ -18,7 +18,7 @@ from apertures import *
 from detectors import *
 from spectra import *
 from filters import *
-from vis_models import LogVisModel
+#from vis_models import LogVisModel
 
 
 class Exposure(zdx.Base):
@@ -81,7 +81,7 @@ class BlankExposure(Exposure):
 
 
 class InjectedExposure(Exposure):
-    def __init__(self, name, filter, fit, model, t_exp, n_exp):
+    def __init__(self, name, filter, fit, model, t_exp, n_exp, read_noise=10.):
         self.filter = filter
         self.filename = f"{name}_{filter}"
         self.target = name
@@ -93,7 +93,7 @@ class InjectedExposure(Exposure):
 
         generated_data = self.fit(model, self) * t_exp * gain
 
-        err = np.sqrt(generated_data/(gain*t_exp) + 10**2)/np.sqrt(n_exp)
+        err = np.sqrt(generated_data/(gain*t_exp) + read_noise**2)/np.sqrt(n_exp)
 
         data = jr.normal(jr.key(0),generated_data.shape)*err + generated_data
 
@@ -362,48 +362,48 @@ class SinglePointFit(ModelFit):
 
 
 
-class SpectrumVisFit(ModelFit):
-    vis_model: LogVisModel
-    def __init__(self, spectrum, nwavels, vis_model):
-        super().__init__(spectrum, nwavels)
-        self.vis_model = vis_model
+# class SpectrumVisFit(ModelFit):
+#     vis_model: LogVisModel
+#     def __init__(self, spectrum, nwavels, vis_model):
+#         super().__init__(spectrum, nwavels)
+#         self.vis_model = vis_model
 
-    def get_key(self, exposure, param):
-        if param == "phases":
-            return exposure.key
-        elif param == "amplitudes":
-            return exposure.key
-        else:
-            return super().get_key(exposure, param)
+#     def get_key(self, exposure, param):
+#         if param == "phases":
+#             return exposure.key
+#         elif param == "amplitudes":
+#             return exposure.key
+#         else:
+#             return super().get_key(exposure, param)
     
-    def map_param(self, exposure, param):
-        if param == "phases":
-            return f"{param}.{exposure.get_key(param)}"
-        elif param == "amplitudes":
-            return f"{param}.{exposure.get_key(param)}"
-        else:
-            return super().map_param(exposure, param)
+#     def map_param(self, exposure, param):
+#         if param == "phases":
+#             return f"{param}.{exposure.get_key(param)}"
+#         elif param == "amplitudes":
+#             return f"{param}.{exposure.get_key(param)}"
+#         else:
+#             return super().map_param(exposure, param)
 
 
-    def __call__(self, model, exposure):
+#     def __call__(self, model, exposure):
 
-        source = self.update_source(model, exposure)
-        optics = self.update_optics(model, exposure)
-        detector = self.update_detector(model, exposure)
+#         source = self.update_source(model, exposure)
+#         optics = self.update_optics(model, exposure)
+#         detector = self.update_detector(model, exposure)
 
-        wfs = optics.model(source, return_wf=True)
+#         wfs = optics.model(source, return_wf=True)
 
-        phases = model.get(exposure.fit.map_param(exposure, "phases"))
-        amplitudes = model.get(exposure.fit.map_param(exposure, "amplitudes"))
+#         phases = model.get(exposure.fit.map_param(exposure, "phases"))
+#         amplitudes = model.get(exposure.fit.map_param(exposure, "amplitudes"))
 
-        psfs = self.vis_model.model_vis(wfs, amplitudes, phases, exposure.filter)
+#         psfs = self.vis_model.model_vis(wfs, amplitudes, phases, exposure.filter)
 
-        psf = psfs.data.sum(tuple(range(psfs.ndim)))
-        pixel_scale = psfs.pixel_scale.mean()
+#         psf = psfs.data.sum(tuple(range(psfs.ndim)))
+#         pixel_scale = psfs.pixel_scale.mean()
 
-        psf_obj = dl.PSF(psf, pixel_scale)
+#         psf_obj = dl.PSF(psf, pixel_scale)
         
-        return detector.model(psf_obj, return_psf=False)
+#         return detector.model(psf_obj, return_psf=False)
 
 
 class BreathingFit(ModelFit):

@@ -61,3 +61,8 @@ def build_dct_basis(nx, nf):
     return jax.vmap(lambda i, x: np.cos(x * i/2), in_axes=(0,None), out_axes = (1))(np.arange(nf), xs)
 
 
+
+def load_spectrum_basis(file, nwavels, npoly):
+    basis_file = np.load(file)[:,:npoly]
+    spectrum_basis = ipx.interp1d(np.linspace(0,1,nwavels), np.linspace(0,1,basis_file.shape[0]), basis_file)
+    return spectrum_basis/np.sqrt(np.mean(spectrum_basis**2, axis=0))
