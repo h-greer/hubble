@@ -12,6 +12,7 @@ from dLux.spectra import SimpleSpectrum
 
 import zodiax as zdx
 import equinox as eqx
+import interpax as ipx
 from abc import abstractmethod
 
 def nearest_interpolate(x, xp, fp):
@@ -63,6 +64,6 @@ def build_dct_basis(nx, nf):
 
 
 def load_spectrum_basis(filt, nwavels, npoly):
-    basis_file = np.load(f"data/spectrum_basis{filt}.npy")[:,:npoly]
+    basis_file = np.load(f"../data/spectrum_basis_{filt}.npy")[:,:npoly]
     spectrum_basis = ipx.interp1d(np.linspace(0,1,nwavels), np.linspace(0,1,basis_file.shape[0]), basis_file)
     return spectrum_basis/np.sqrt(np.mean(spectrum_basis**2, axis=0))

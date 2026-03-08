@@ -32,7 +32,7 @@ def loss_fn(params, exposures, model):
 
 def optimise_optimistix(params, model, exposures, project=True):
     f = lambda params: loss_fn(params, exposures, model)
-    F, unflatten = zdx.batching.hessian(f, ModelParams(params), nbatches=len(exposures)*2)
+    F, unflatten = zdx.batching.hessian(f, ModelParams(params), nbatches=len(exposures)*2, checkpoint=True)
 
     def projected_loss_fn(u, args):
         exposures, model, project_fn = args
@@ -58,7 +58,7 @@ def optimise_optimistix(params, model, exposures, project=True):
 
 def optimise_new(params, model, exposures, optimisers, epochs, diag=True, nbatches=1):
     f = lambda params: loss_fn(ModelParams(params), exposures, model)
-    F, unflatten = zdx.batching.hessian(f, params, nbatches=nbatches)
+    F, unflatten = zdx.batching.hessian(f, params, nbatches=nbatches, checkpoint=True)
 
     if diag:
         C = dlu.nandiv(1, np.abs(np.diag(np.diag(F))), fill=0.)
