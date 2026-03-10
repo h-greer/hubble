@@ -101,7 +101,7 @@ exposures_single_f108N = [exposure_from_file(ddir + file, SinglePointFit(spectru
 exposures_single_f190N = [exposure_from_file(ddir + file, SinglePointFit(spectrum_basis, "F190N"), crop=wid) for file in files_f190N]
 exposures_single_f164N = [exposure_from_file(ddir + file, SinglePointFit(spectrum_basis, "F164N"), crop=wid) for file in files_f164N]
 
-exposures_single = exposures_single_f190N+exposures_single_f108N+exposures_single_f164N
+exposures_single = exposures_single_f190N#+exposures_single_f108N+exposures_single_f164N
 
 # %%
 for e in exposures_binary:
