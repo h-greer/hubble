@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=12:00:00
-#SBATCH --mem-per-cpu=2000M
+#SBATCH --mem-per-cpu=4000M
 #SBATCH --gres=gpu:1
 
 module load python-scientific/3.13.1-foss-2025a
