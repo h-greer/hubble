@@ -327,8 +327,6 @@ plot_comparison(final_params_binary.inject((model_binary)), final_params_binary,
 
 
 
-
-
 f = lambda params: loss_fn(ModelParams(params), exposures_binary, model_binary)  
 F, unflatten = zdx.batching.hessian(f, params_history[-1], nbatches=len(exposures_binary)*5, checkpoint=True)
 
@@ -371,11 +369,11 @@ rng_key, warmup_key, sample_key = jax.random.split(rng_key, 3)
 
 #  perform a warmup to adapt the mass matrix
 warmup = blackjax.window_adaptation(blackjax.nuts, loglike, progress_bar=True)
-(state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=10)
+(state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=5)
 
 # run inference with the known mass matrix
 kernel = blackjax.nuts(loglike, **parameters).step
-states = inference_loop(sample_key, kernel, state, 10)
+states = inference_loop(sample_key, kernel, state, 5)
 
 # extract samples, blocking avoids lazy evaluation for timing purposes
 blackjax_samples = states.position.block_until_ready()
@@ -393,7 +391,7 @@ from chainconsumer import ChainConsumer, Chain, Truth
 # Helper function to get the scalar parameter names from the tree structure of the parameters
 def scalar_names_from_tree(tree):
     names = []
-    for path, leaf in jtu.leaves_with_path(tree):
+    for path, leaf in jax.tree.leaves_with_path(tree):
         base = "_".join([str(p.key if hasattr(p, "key") else p) for p in path])
         leaf = np.asarray(leaf)
         if leaf.ndim == 0:
@@ -405,10 +403,9 @@ def scalar_names_from_tree(tree):
 
 
 # Unpack the latent samples into a dataframe
-samples = sampler.get_samples()
 
 # Project latent samples -> original parameter space
-samples_dict = eqx.filter_vmap(mle_project_fn)(samples["Latent"])
+samples_dict = eqx.filter_vmap(project_fn)(blackjax_samples)
 flat_samples = jax.vmap(lambda p: ravel_pytree(p)[0])(samples_dict)
 
 
@@ -423,8 +420,6 @@ plt.figure()
 # Plot
 c = ChainConsumer()
 c.add_chain(mcmc_chain)
-c.add_chain(cov_chain)
-c.add_truth(Truth(location=truth_dict))
 fig = c.plotter.plot()
 
 plt.savefig("gl164-hmc.png")
