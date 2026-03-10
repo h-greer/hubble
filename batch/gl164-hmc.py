@@ -332,6 +332,8 @@ def loss_fn(params, exposures, model):
 
 f = lambda params: loss_fn(ModelParams(params), exposures_binary, model_binary)  
 F, unflatten = zdx.batching.hessian(f, params_history[-1], nbatches=len(exposures_binary)*5, checkpoint=True)
+F = np.ones_like(F)
+
 
 def projected_loss_fn(u, args):
     exposures, model, project_fn = args
@@ -372,11 +374,11 @@ rng_key, warmup_key, sample_key = jax.random.split(rng_key, 3)
 
 #  perform a warmup to adapt the mass matrix
 warmup = blackjax.window_adaptation(blackjax.nuts, loglike, progress_bar=True)
-(state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=3000)
+(state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=1000)
 
 # run inference with the known mass matrix
 kernel = blackjax.nuts(loglike, **parameters).step
-states = inference_loop(sample_key, kernel, state, 4000)
+states = inference_loop(sample_key, kernel, state, 10000)
 
 # extract samples, blocking avoids lazy evaluation for timing purposes
 blackjax_samples = states.position.block_until_ready()
