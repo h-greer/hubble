@@ -325,6 +325,9 @@ plot_comparison(final_params_binary.inject((model_binary)), final_params_binary,
 
 
 
+def loss_fn(params, exposures, model):
+    mdl = params.inject(model)
+    return np.nansum(np.asarray([posterior(mdl,exposure) for exposure in exposures]))
 
 
 f = lambda params: loss_fn(ModelParams(params), exposures_binary, model_binary)  
