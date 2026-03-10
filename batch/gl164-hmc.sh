@@ -9,7 +9,7 @@
 
 module load python-scientific/3.13.1-foss-2025a
 
-source ../../bin/activate
+source /fred/oz440/hayden/new-hubble/.venv/bin/activate
 
 python gl164-hmc.py
 
