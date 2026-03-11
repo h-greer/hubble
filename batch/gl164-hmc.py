@@ -334,3 +334,4 @@ c.add_chain(mcmc_chain)
 fig = c.plotter.plot()
 
 plt.savefig("gl164-hmc.png")
+mcmc_df.to_pickle("gl164-chains.pickle")
