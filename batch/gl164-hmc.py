@@ -60,7 +60,7 @@ oversample = 4
 nwavels = 3
 npoly=1
 
-n_zernikes = 20
+n_zernikes = 12
 
 optics = NICMOSFresnelOptics(512, wid, oversample, n_zernikes = n_zernikes, defocus=0., fnumber=80.)
 
