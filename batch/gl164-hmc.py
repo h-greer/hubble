@@ -330,6 +330,8 @@ flat_samples = jax.vmap(lambda p: ravel_pytree(p)[0])(samples_dict)
 param_names = scalar_names_from_tree(final_params_binary)
 mcmc_df = pd.DataFrame(np.asarray(flat_samples), columns=param_names)
 
+mcmc_df.to_pickle("gl164-chains.pickle")
+
 # Build chains
 mcmc_chain = Chain(samples=mcmc_df, name="MCMC posterior")
 
@@ -340,4 +342,3 @@ c.add_chain(mcmc_chain)
 fig = c.plotter.plot()
 
 plt.savefig("gl164-hmc.png")
-mcmc_df.to_pickle("gl164-chains.pickle")
