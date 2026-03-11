@@ -141,6 +141,7 @@ params = {
 
     "defocus": {},
     "fnumber": 78.75,
+    "quadrature": {},
 }
 
 
@@ -162,6 +163,8 @@ for idx, exp in enumerate(exposures_binary):
 
     params["bias"][exp.fit.get_key(exp, "bias")] = 0.
     params["jitter"][exp.fit.get_key(exp, "jitter")] = 7/43*oversample
+
+    params["quadrature"][exp.fit.get_key(exp, "quadrature")] = 0.
 
 
 model_binary = set_array(NICMOSModel(exposures_binary, params, optics, detector))
@@ -195,6 +198,8 @@ things_binary = {
     "defocus": sgd(g*6, 70),
     "fnumber": sgd(g*3, 110),
     "cold_mask_shear": sgd(g*2, 110),
+
+    "quadrature": sgd(g*10, 900)
 }
 
 

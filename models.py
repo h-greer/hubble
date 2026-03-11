@@ -323,16 +323,15 @@ class ModelFit(zdx.Base):
     def loglike(self, model, exposure, per_pix=False, return_im=False):
         psf = self(model, exposure)
 
+        data = exposure.data
+        err = exposure.err
+        bad = exposure.bad
+        err = np.where(bad, 1., err)
+
         # add excess noise in quadrature
         if "quadrature" in model.params.keys():
             quad_error = 10**model.get(self.map_param(exposure, "quadrature"))
-            err = np.sqrt(exposure.err**2 + quad_error**2)
-        else:
-            err = exposure.err
-
-        data = exposure.data
-        
-        bad = exposure.bad
+            err = err*quad_error#np.sqrt(err**2 + quad_error**2 + 1e-10)        
 
         posterior_im = gauss_log_likelihood(psf, (data, err, bad))
         if return_im:

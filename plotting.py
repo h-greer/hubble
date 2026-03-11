@@ -32,7 +32,7 @@ def plot_params(models, groups, xw = 4, save=False):
         sp = axs[i%xw, i//xw]
         if param in ["fluxes", "flux", "contrast", "positions", "aberrations", 
                     "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear",
-                    "primary_rot","primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "primary_distortion", "cold_mask_distortion", "defocus", "despace", "resolved", "jitter"]:
+                    "primary_rot","primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "primary_distortion", "cold_mask_distortion", "defocus", "despace", "resolved", "jitter", "quadrature"]:
 
             for j in range(len(list(models[-1].get(param).values()))):
                 vals = np.asarray([list(x.get(param).values())[j].flatten() for x in models]).T
@@ -110,7 +110,7 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
         plt.colorbar(apt, ax=axs[2]).set_label("OPD (nm)")
         #axs[4].imshow(telescope.detector.pixel_response.pixel_response)
         if quadrature:
-            resid = (exp.data - fit)/np.sqrt(exp.err**2 + 10**model.get(exp.fit.map_param(exp, "quadrature")))
+            resid = (exp.data - fit)/(exp.err * 10**model.get(exp.fit.map_param(exp, "quadrature")))
         else:
             resid = (exp.data - fit)/exp.err
 
