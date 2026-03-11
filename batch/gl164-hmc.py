@@ -199,7 +199,7 @@ things_binary = {
     "fnumber": sgd(g*3, 110),
     "cold_mask_shear": sgd(g*2, 110),
 
-    "quadrature": sgd(g*10, 900)
+    "quadrature": sgd(g*20, 900)
 }
 
 
@@ -226,7 +226,7 @@ opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_bin
 losses, params_history = optimise_new(opt_params, model_binary, exposures_binary, things_binary, 1000, nbatches=len(exposures_single)*5)
 
 # %%
-plot_params(params_history, list(things_binary.keys()), xw = 4)
+plot_params(params_history, list(things_binary.keys()), xw = 4, save="gl164-params")
 plot_comparison(model_binary, ModelParams(params_history[-1]), exposures_binary)
 
 # %%
