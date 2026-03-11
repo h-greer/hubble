@@ -234,7 +234,7 @@ plot_comparison(final_params_binary.inject((model_binary)), final_params_binary,
 
 def loss_fn(params, exposures, model):
     mdl = params.inject(model)
-    return -np.nansum(np.asarray([posterior(mdl,exposure) for exposure in exposures]))
+    return np.nansum(np.asarray([posterior(mdl,exposure) for exposure in exposures]))
 
 
 f = lambda params: loss_fn(ModelParams(params), exposures_binary, model_binary)  
@@ -258,7 +258,7 @@ X = np.zeros(P.shape[-1])
 
 
 # wrap all the extra parameters into a dedicated log likelihood
-loglike = lambda params: projected_loss_fn(params, (exposures_binary, model_binary, project_fn))
+loglike = lambda params: -projected_loss_fn(params, (exposures_binary, model_binary, project_fn))
 
 # inference loop from Blackjax docs
 def inference_loop(rng_key, kernel, initial_state, num_samples):
