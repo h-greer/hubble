@@ -225,7 +225,7 @@ plot_params(params_history, list(things_binary.keys()), xw = 4)
 plot_comparison(model_binary, ModelParams(params_history[-1]), exposures_binary)
 
 # %%
-final_params_binary = optimise_optimistix(params_history[-1], model_binary, exposures_binary)
+final_params_binary = ModelParams(params_history[-1])#optimise_optimistix(params_history[-1], model_binary, exposures_binary)
 
 # %%
 plot_comparison(final_params_binary.inject((model_binary)), final_params_binary, exposures_binary)
