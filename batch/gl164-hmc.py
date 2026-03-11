@@ -246,6 +246,7 @@ def loss_fn(params, exposures, model):
 
 f = lambda params: loss_fn(ModelParams(params), exposures_binary, model_binary)  
 F, unflatten = zdx.batching.hessian(f, final_params_binary, nbatches=len(exposures_binary)*5, checkpoint=True)
+F = np.eye(F.shape[0])
 
 
 def projected_loss_fn(u, args):
