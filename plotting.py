@@ -51,7 +51,7 @@ def plot_params(models, groups, xw = 4, save=False):
         fig.savefig(f"{save}.png")
 
 
-def plot_comparison(model, params, exposures, save=False, graticule=False):
+def plot_comparison(model, params, exposures, quadrature=False, save=False, graticule=False):
     for f, exp in enumerate(exposures):
 
         fig, axs = plt.subplots(1,5, figsize=(50,8))
@@ -109,7 +109,11 @@ def plot_comparison(model, params, exposures, save=False, graticule=False):
         apt =axs[2].imshow(support_mask*opd,cmap=cmap,vmin=-olim, vmax=olim)
         plt.colorbar(apt, ax=axs[2]).set_label("OPD (nm)")
         #axs[4].imshow(telescope.detector.pixel_response.pixel_response)
-        resid = (exp.data - fit)/exp.err        
+        if quadrature:
+            resid = (exp.data - fit)/np.sqrt(exp.err**2 + 10**model.get(exp.fit.map_param(exp, "quadrature")))
+        else:
+            resid = (exp.data - fit)/exp.err
+
         print(np.nanstd(resid))
         rlim = np.nanmax(np.abs(resid))
         residual=axs[3].imshow(resid, cmap='bwr',vmin=-rlim, vmax=rlim)

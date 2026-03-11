@@ -18,6 +18,7 @@ from apertures import *
 from detectors import *
 from spectra import *
 from filters import *
+from stats import gauss_log_likelihood
 #from vis_models import LogVisModel
 
 
@@ -196,10 +197,12 @@ class ModelFit(zdx.Base):
                 return exposure.key
             case "despace":
                 return exposure.key
+            case "quadrature":
+                return exposure.key
             case _: raise ValueError(f"Parameter {param} has no key")
     
     def map_param(self, exposure, param):
-        if param in ["aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "bias", "jitter", "primary_distortion", "cold_mask_distortion", "defocus", "despace"]:
+        if param in ["aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "bias", "jitter", "primary_distortion", "cold_mask_distortion", "defocus", "despace", "quadrature"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
@@ -316,6 +319,30 @@ class ModelFit(zdx.Base):
         psf_obj = dl.PSF(psf, pixel_scale)
         
         return detector.model(psf_obj, return_psf=False)
+    
+    def loglike(self, model, exposure, per_pix=False, return_im=False):
+        psf = self(model, exposure)
+
+        # add excess noise in quadrature
+        if "quadrature" in model.params.keys():
+            quad_error = 10**model.get(self.map_param(exposure, "quadrature"))
+            err = np.sqrt(exposure.err**2 + quad_error**2)
+        else:
+            err = exposure.err
+
+        data = exposure.data
+        
+        bad = exposure.bad
+
+        posterior_im = gauss_log_likelihood(psf, (data, err, bad))
+        if return_im:
+            return posterior_im
+        
+        if per_pix:
+            return np.nanmean(posterior_im)
+        return np.nansum(posterior_im)
+        
+        
 
 class SinglePointFit(ModelFit):
     #nwavels: int = eqx.field(static=True)
