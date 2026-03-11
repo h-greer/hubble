@@ -62,7 +62,7 @@ nbasis_f160w = 5
 
 n_zernikes = 20
 
-optics = NICMOSSecondaryFresnelOptics(512, wid, oversample, mag=3.3, defocus=0., despace=0., n_zernikes = n_zernikes)
+optics = NICMOSFresnelOptics(512, wid, oversample, n_zernikes = n_zernikes, defocus=0., fnumber=80.)
 
 detector = NICMOSDetector(oversample, wid)
 
@@ -90,9 +90,6 @@ exposures_single = [
     exposure_from_file(ddir + "n8ry06vqq_cal.fits", SinglePointFit(spectrum_basis_f160w, "F160W"), crop=wid),
 ]
 
-
-# %%
-plt.plot(spectrum_basis_f160w[:,0])
 
 # %%
 for e in exposures_single:
@@ -126,11 +123,9 @@ params = {
     "jitter": {},
 
     "defocus": {},#1e5#{}
-    "despace": {},
-    "mag": 3.3,
+    "fnumber": 80.,
+    #"quadrature": {},
 }
-
-positions = [[0.,0.,],[0.,0.,],[0.,0.,],[0.,0.,]]#[[0.43251792, 0.33013815],[ 0.49417186, -0.5629123 ]]
 
 
 for idx, exp in enumerate(exposures_single):
@@ -147,11 +142,11 @@ for idx, exp in enumerate(exposures_single):
     params["primary_scale"][exp.fit.get_key(exp, "primary_scale")] = np.asarray([1.,1.])
     params["primary_shear"][exp.fit.get_key(exp, "primary_shear")] = np.asarray([0.,0.])
     params["defocus"][exp.fit.get_key(exp, "defocus")] = 0.#-0.233#2.4#800.#160.*20
-    params["despace"][exp.fit.get_key(exp, "despace")] = 0.#2.4#800.#160.*20
     
 
     params["bias"][exp.fit.get_key(exp, "bias")] = 0.
     params["jitter"][exp.fit.get_key(exp, "jitter")] = 7/43*oversample
+    #params["quadrature"][exp.fit.get_key(exp, "quadrature")] = -2.
 
 
 model_single = set_array(NICMOSModel(exposures_single, params, optics, detector))
@@ -171,18 +166,18 @@ g = 5e-2
 
 things = {
     "positions": sgd(g*2.5, 0),
-    "spectrum": sgd(g*1, 10),
-    "cold_mask_shift": sgd(g*1, 30),
+    "spectrum": sgd(g*4, 10),
+    "cold_mask_shift": sgd(g*3, 30),
     
     "bias": sgd(g*3, 20),
-    "aberrations": sgd(g*0.03, 70),
-    #"jitter": opt(g*1, 120),
+    "aberrations": sgd(g*0.1, 70),
+    #"jitter": sgd(g*1, 120),
 
-    "despace": sgd(g*0.8, 50),
-    "mag": sgd(g*10, 100),
-
+    "defocus": sgd(g*5, 30),
+    #"fnumber": sgd(g*100, 100),
     "cold_mask_shear": sgd(g*0.5, 100),
 }
+
 
 things_start = {
     "positions": sgd(g*5, 0),
@@ -198,14 +193,14 @@ opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_sta
 losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_start, 10)
 
 # %%
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single)
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False)
 
 # %%
 orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 150, nbatches=5)
+losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 150, nbatches=5*len(exposures_single))
 
 # %%
 plt.plot(np.asarray(losses[-50:])/(len(exposures_single)*wid**2))
@@ -214,8 +209,8 @@ plt.plot(np.asarray(losses[-50:])/(len(exposures_single)*wid**2))
 params_history_relative = [jax.tree.map(lambda x, y: x-y, x, params_history[0]) for x in params_history]
 
 # %%
-plot_params(params_history_relative, groups, xw = 3,save="wd-spectrum-params")
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single)
+plot_params(params_history_relative, groups, xw = 3, save="wd-spectrum-params")
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False)
 
 # %%
 final_params = ModelParams(params_history[-1])#optimise_optimistix(params_history[-1], model_single, exposures_single, project=False)
