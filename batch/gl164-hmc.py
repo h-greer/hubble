@@ -60,7 +60,7 @@ oversample = 4
 nwavels = 3
 npoly=1
 
-n_zernikes = 30
+n_zernikes = 20
 
 optics = NICMOSFresnelOptics(512, wid, oversample, n_zernikes = n_zernikes, defocus=0., fnumber=80.)
 
@@ -231,6 +231,8 @@ plot_comparison(model_binary, ModelParams(params_history[-1]), exposures_binary)
 
 # %%
 final_params_binary = ModelParams(params_history[-1])#optimise_optimistix(params_history[-1], model_binary, exposures_binary)
+
+print(final_params_binary.params)
 
 # %%
 plot_comparison(final_params_binary.inject((model_binary)), final_params_binary, exposures_binary)
