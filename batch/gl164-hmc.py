@@ -223,7 +223,7 @@ orig_params = params_binary.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_binary})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_binary, exposures_binary, things_binary, 1000, nbatches=len(exposures_single)*5)
+losses, params_history = optimise_new(opt_params, model_binary, exposures_binary, things_binary, 5000, nbatches=len(exposures_single)*5)
 
 # %%
 plot_params(params_history, list(things_binary.keys()), xw = 4, save="gl164-params")
@@ -246,8 +246,6 @@ def loss_fn(params, exposures, model):
 
 f = lambda params: loss_fn(ModelParams(params), exposures_binary, model_binary)  
 F, unflatten = zdx.batching.hessian(f, final_params_binary, nbatches=len(exposures_binary)*5, checkpoint=True)
-F = np.eye(F.shape[0])
-
 
 def projected_loss_fn(u, args):
     exposures, model, project_fn = args
