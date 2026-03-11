@@ -114,59 +114,6 @@ for e in exposures_binary:
 # %%
 params = {
     "positions": {},
-    "spectrum": {},
-
-    "aberrations": {},
-
-
-    "cold_mask_shift": {},
-    "cold_mask_rot": {},
-    "cold_mask_scale": {},
-    "cold_mask_shear": {},
-    "primary_scale": {},
-    "primary_rot": {},
-    "primary_shear": {},
-    "outer_radius": 1.2*0.955,
-    "secondary_radius": 0.372*1.2,
-    "spider_width": 0.077*1.2,
-    "scale": 0.043142,
-
-    "softening": 10.,
-    "bias": {},
-    "jitter": {},
-
-    "defocus": {},
-    "fnumber": 78.75,
-}
-
-
-for idx, exp in enumerate(exposures_binary):
-    params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([0.,0.])
-    params["spectrum"][exp.fit.get_key(exp, "primary_spectrum")] = np.zeros(npoly).at[0].set(np.log10(np.nansum(exp.data)/nwavels))
-
-    params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(n_zernikes)
-
-    params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([8.,8.])
-    params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = -45.
-    params["cold_mask_scale"][exp.fit.get_key(exp, "cold_mask_scale")] = np.asarray([1.,1.])
-    params["cold_mask_shear"][exp.fit.get_key(exp, "cold_mask_shear")] = np.asarray([0.,0.])
-    params["primary_rot"][exp.fit.get_key(exp, "primary_rot")] = -45. + 90. 
-    params["primary_scale"][exp.fit.get_key(exp, "primary_scale")] = np.asarray([1.,1.])
-    params["primary_shear"][exp.fit.get_key(exp, "primary_shear")] = np.asarray([0.,0.])
-    params["defocus"][exp.fit.get_key(exp, "defocus")] = 0.0
-
-    params["bias"][exp.fit.get_key(exp, "bias")] = 0.
-    params["jitter"][exp.fit.get_key(exp, "jitter")] = 7/43*oversample
-
-
-model_single = set_array(NICMOSModel(exposures_single, params, optics, detector))
-
-
-params_single = ModelParams(params)
-
-# %%
-params = {
-    "positions": {},
     "primary_spectrum": {},
     "secondary_spectrum": {},
 
@@ -232,20 +179,6 @@ def sgd(lr, delay, momentum=0.5):
 g = 5e-2
 
 
-things_single = {
-    "positions": sgd(g*2.5, 0),
-    "spectrum": sgd(g*3, 10),
-    "cold_mask_shift": sgd(g*10, 30),
-    
-    "bias": sgd(g*3, 20),
-    "aberrations": sgd(g*0.1, 70),
-    #"jitter": sgd(g*1, 120),
-
-    "defocus": sgd(g*6, 30),
-    "fnumber": sgd(g*3, 100),
-    "cold_mask_shear": sgd(g*0.5, 100),
-}
-
 things_binary = {
     "positions": sgd(g*2.5, 0),
     "position_angle": sgd(g*10, 10),
@@ -269,35 +202,9 @@ things_start = {
     "positions": sgd(g*5, 0),
 }
 
-# %%
-orig_params = params_single.params
-opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_start})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_start, 10)
-
-# %%
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single)
-
-# %%
-orig_params = params_single.params | params_history[-1]
-opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_single})
-
-# %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_single, 500, nbatches=len(exposures_single)*2)
-
-# %%
-plot_params(params_history, list(things_single.keys()), xw = 3)
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single)
-
-# %%
-final_params_single = optimise_optimistix(params_history[-1], model_single, exposures_single)
-
-# %%
-plot_comparison(final_params_single.inject((model_single)), final_params_single, exposures_single)
-
-# %%
-orig_params = params_single.params
+orig_params = params_binary.params
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_start})
 
 # %%
@@ -327,7 +234,7 @@ plot_comparison(final_params_binary.inject((model_binary)), final_params_binary,
 
 def loss_fn(params, exposures, model):
     mdl = params.inject(model)
-    return np.nansum(np.asarray([posterior(mdl,exposure) for exposure in exposures]))
+    return -np.nansum(np.asarray([posterior(mdl,exposure) for exposure in exposures]))
 
 
 f = lambda params: loss_fn(ModelParams(params), exposures_binary, model_binary)  
