@@ -318,7 +318,7 @@ plot_params(params_history, list(things_binary.keys()), xw = 4)
 plot_comparison(model_binary, ModelParams(params_history[-1]), exposures_binary)
 
 # %%
-final_params_binary = ModelParams(params_history[-1])#optimise_optimistix(params_history[-1], model_binary, exposures_binary)
+final_params_binary = optimise_optimistix(params_history[-1], model_binary, exposures_binary)
 
 # %%
 plot_comparison(final_params_binary.inject((model_binary)), final_params_binary, exposures_binary)
@@ -331,7 +331,7 @@ def loss_fn(params, exposures, model):
 
 
 f = lambda params: loss_fn(ModelParams(params), exposures_binary, model_binary)  
-F, unflatten = zdx.batching.hessian(f, params_history[-1], nbatches=len(exposures_binary)*5, checkpoint=True)
+F, unflatten = zdx.batching.hessian(f, final_params_binary, nbatches=len(exposures_binary)*5, checkpoint=True)
 F = np.eye(F.shape[0])
 
 
@@ -341,8 +341,8 @@ def projected_loss_fn(u, args):
     return loss_fn(ModelParams(params), exposures, model)
 
 # Estimate our initial parameters from the data
-params = ModelParams(params_history[-1])
-X0, unravel = ravel_pytree(params_history[-1])
+params = ModelParams(final_params_binary)
+X0, unravel = ravel_pytree(final_params_binary)
 
 # Generate the projection matrix P, projection function, and initial vector
 P = zdx.optimisation.eigen_projection(fmat=F)
@@ -374,11 +374,11 @@ rng_key, warmup_key, sample_key = jax.random.split(rng_key, 3)
 
 #  perform a warmup to adapt the mass matrix
 warmup = blackjax.window_adaptation(blackjax.nuts, loglike, progress_bar=True)
-(state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=50000)
+(state, parameters), _ = warmup.run(warmup_key, initial_position, num_steps=5000)
 
 # run inference with the known mass matrix
 kernel = blackjax.nuts(loglike, **parameters).step
-states = inference_loop(sample_key, kernel, state, 50000)
+states = inference_loop(sample_key, kernel, state, 5000)
 
 # extract samples, blocking avoids lazy evaluation for timing purposes
 blackjax_samples = states.position.block_until_ready()
@@ -415,7 +415,7 @@ flat_samples = jax.vmap(lambda p: ravel_pytree(p)[0])(samples_dict)
 
 
 # Get the parameter names for the dataframe columns and the truth dict
-param_names = scalar_names_from_tree(params_history[-1])
+param_names = scalar_names_from_tree(final_params_binary)
 mcmc_df = pd.DataFrame(np.asarray(flat_samples), columns=param_names)
 
 # Build chains
