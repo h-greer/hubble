@@ -60,7 +60,7 @@ oversample = 4
 nwavels = 3
 npoly=1
 
-n_zernikes = 12
+n_zernikes = 20
 
 optics = NICMOSFresnelOptics(512, wid, oversample, n_zernikes = n_zernikes, defocus=0., fnumber=80.)
 
@@ -192,12 +192,12 @@ things_binary = {
     "cold_mask_shift": sgd(g*20, 50),
     
     "bias": sgd(g*3, 40),
-    "aberrations": sgd(g*0.2, 90),
+    "aberrations": sgd(g*0.4, 90),
     #"jitter": sgd(g*1, 120),
 
     "defocus": sgd(g*6, 70),
     "fnumber": sgd(g*3, 110),
-    "cold_mask_shear": sgd(g*2, 110),
+    "cold_mask_shear": sgd(g*4, 110),
 
     "quadrature": sgd(g*20, 900)
 }
