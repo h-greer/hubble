@@ -166,8 +166,8 @@ g = 5e-2
 
 things = {
     "positions": sgd(g*2.5, 0),
-    "spectrum": sgd(g*4, 10),
-    "cold_mask_shift": sgd(g*3, 30),
+    "spectrum": sgd(g*1, 10),
+    "cold_mask_shift": sgd(g*1, 30),
     
     "bias": sgd(g*3, 20),
     "aberrations": sgd(g*0.1, 70),
