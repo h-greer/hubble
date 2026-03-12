@@ -80,14 +80,14 @@ exposures_single = [
     exposure_from_file(ddir + "n8ry02tpq_cal.fits", SinglePointFit(spectrum_basis_f110w, "F110W"), crop=wid),
     exposure_from_file(ddir + "n8ry02tqq_cal.fits", SinglePointFit(spectrum_basis_f110w, "F110W"), crop=wid),
 
-    exposure_from_file(ddir + "n8ry03vbq_cal.fits", SinglePointFit(spectrum_basis_f160w, "F160W"), crop=wid),
+    #exposure_from_file(ddir + "n8ry03vbq_cal.fits", SinglePointFit(spectrum_basis_f160w, "F160W"), crop=wid),
     exposure_from_file(ddir + "n8ry03vcq_cal.fits", SinglePointFit(spectrum_basis_f160w, "F160W"), crop=wid),
     exposure_from_file(ddir + "n8ry04vfq_cal.fits", SinglePointFit(spectrum_basis_f160w, "F160W"), crop=wid),
     exposure_from_file(ddir + "n8ry04vgq_cal.fits", SinglePointFit(spectrum_basis_f160w, "F160W"), crop=wid),
     exposure_from_file(ddir + "n8ry05vmq_cal.fits", SinglePointFit(spectrum_basis_f160w, "F160W"), crop=wid),
     exposure_from_file(ddir + "n8ry05vnq_cal.fits", SinglePointFit(spectrum_basis_f160w, "F160W"), crop=wid),
     exposure_from_file(ddir + "n8ry06vpq_cal.fits", SinglePointFit(spectrum_basis_f160w, "F160W"), crop=wid),
-    exposure_from_file(ddir + "n8ry06vqq_cal.fits", SinglePointFit(spectrum_basis_f160w, "F160W"), crop=wid),
+    #exposure_from_file(ddir + "n8ry06vqq_cal.fits", SinglePointFit(spectrum_basis_f160w, "F160W"), crop=wid),
 ]
 
 
