@@ -3,7 +3,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=00:15:00
+#SBATCH --time=00:12:00
 #SBATCH --mem-per-cpu=5000M
 #SBATCH -o breathing-data/exp%a.out
 #SBATCH --array=2048-4380
