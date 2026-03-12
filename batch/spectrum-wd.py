@@ -167,10 +167,10 @@ g = 5e-2
 things = {
     "positions": sgd(g*2.5, 0),
     "spectrum": sgd(g*1, 10),
-    "cold_mask_shift": sgd(g*1, 30),
+    "cold_mask_shift": sgd(g*3, 30),
     
     "bias": sgd(g*3, 20),
-    "aberrations": sgd(g*0.1, 70),
+    "aberrations": sgd(g*0.05, 70),
     #"jitter": sgd(g*1, 120),
 
     "defocus": sgd(g*5, 30),
@@ -248,25 +248,22 @@ plt.colorbar()
 
 
 # %%
-vals, vects = np.linalg.eig(F)#+fsh['n8yj02wyq.spectrum'])
+vals, vects = np.linalg.eig(F[:nbasis_f110w, :nbasis_f110w])#+fsh['n8yj02wyq.spectrum'])
 
 order = np.argsort(vals)[::-1]
 
-#plt.figure(figsize=(10,10))
-#plt.xlabel("Coefficient")
-
-#for i in range(5):
-#    plt.plot(np.arange(npoly),np.real(vects[:,order[i]]), label=f"{i}")
-#plt.legend()
-
+plt.figure()
 plt.semilogy(np.sort(np.real(vals))[::-1])
+plt.savefig("wd-eigenmodes-f110w.png")
 
-# %%
-#spec.filt_weights.sum()
-#spec2.filt_weights.sum()
+vals, vects = np.linalg.eig(F[nbasis_f110w:, nbasis_f110w:])
 
-# %%
-#(filt/(wv*1e6)).sum()/(filt2/(wv*1e6)).sum()
+order = np.argsort(vals)[::-1]
+
+plt.figure()
+plt.semilogy(np.sort(np.real(vals))[::-1])
+plt.savefig("wd-eigenmodes-f160w.png")
+
 
 # %%
 plt.figure(figsize=(10,10))
