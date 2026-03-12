@@ -87,7 +87,7 @@ if number >= len(cfiles):
 
 fname = cfiles[number]
 
-fits.getheader(fname, ext=0)["FILT"]
+filt = fits.getheader(fname, ext=0)['FILTER']
 
 spectrum_basis = np.ones((1, 3))
 
