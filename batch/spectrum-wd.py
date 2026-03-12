@@ -57,8 +57,8 @@ oversample = 4
 
 nwavels_f110w = 30
 nwavels_f160w = 22
-nbasis_f110w = 22
-nbasis_f160w = 12
+nbasis_f110w = 20
+nbasis_f160w = 8
 
 n_zernikes = 20
 
