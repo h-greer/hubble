@@ -3,6 +3,10 @@ import sys
 sys.path.insert(0, '..')
 
 # %%
+
+import os
+os.environ["JAX_PLATFORMS"] = "cpu"
+
 # Basic imports
 import jax.numpy as np
 import jax.random as jr
@@ -21,6 +25,8 @@ import optimistix as optx
 # dLux imports
 import dLux as dl
 import dLux.utils as dlu
+
+import glob
 
 # Visualisation imports
 from tqdm.auto import tqdm
