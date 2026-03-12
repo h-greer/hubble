@@ -55,10 +55,10 @@ def set_array(pytree):
 wid = 90
 oversample = 4
 
-nwavels_f110w = 20
-nwavels_f160w = 15
-nbasis_f110w = 10
-nbasis_f160w = 5
+nwavels_f110w = 30
+nwavels_f160w = 25
+nbasis_f110w = 30
+nbasis_f160w = 25
 
 n_zernikes = 20
 
