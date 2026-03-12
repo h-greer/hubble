@@ -91,7 +91,7 @@ filt = fits.getheader(fname, ext=0)['FILTER']
 
 spectrum_basis = np.ones((1, 3))
 
-exposures_raw = [exposure_from_file(fname, SinglePointFit(spectrum_basis, filt, time_series=True), crop=wid) for file in files]
+exposures_raw = [exposure_from_file(fname, SinglePointFit(spectrum_basis, filt, time_series=True), crop=wid)]
 
 
 exposures_single = []
