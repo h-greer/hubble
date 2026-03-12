@@ -75,21 +75,21 @@ files_f190N = """
 n8o101a1q_cal.fits
 n8o101a2q_cal.fits
 n8o101a3q_cal.fits
-""".split()[:2]
+""".split()[:1]
 
 
 files_f108N = """
 n8o101adq_cal.fits
 n8o101atq_cal.fits
 n8o101b9q_cal.fits
-""".split()[:2]
+""".split()[:1]
 
 
 files_f164N = """
 n8o101a8q_cal.fits
 n8o101a9q_cal.fits
 n8o101aaq_cal.fits
-""".split()[:2]
+""".split()[:1]
 
 exposures_binary_f108N = [exposure_from_file(ddir + file, BinaryFit(spectrum_basis, "F108N"), crop=wid) for file in files_f108N]
 exposures_binary_f190N = [exposure_from_file(ddir + file, BinaryFit(spectrum_basis, "F190N"), crop=wid) for file in files_f190N]
@@ -290,7 +290,7 @@ warmup = blackjax.window_adaptation(blackjax.nuts, loglike, progress_bar=True)
 
 # run inference with the known mass matrix
 kernel = blackjax.nuts(loglike, **parameters).step
-states = inference_loop(sample_key, kernel, state, 5000)
+states = inference_loop(sample_key, kernel, state, 50000)
 
 # extract samples, blocking avoids lazy evaluation for timing purposes
 blackjax_samples = states.position.block_until_ready()
