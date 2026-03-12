@@ -242,4 +242,4 @@ print(final_params.params)
 f = lambda params: loss_fn(ModelParams(params), exposures_single, final_params.inject((model_single)))
 F, unflatten = zdx.batching.hessian(f, final_params, nbatches=5*len(exposures_single))
 
-numpy.savez(f"{exposures_single[0].key}.npz", mjd=exp.mjd, params=final_params.params, fisher=F)
+numpy.savez(f"breathing-data/{exposures_single[0].key}.npz", mjd=exp.mjd, params=final_params.params, fisher=F)

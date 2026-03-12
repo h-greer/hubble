@@ -3,9 +3,10 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=00:10:00
-#SBATCH --mem-per-cpu=8000M
-#SBATCH --array=0-2
+#SBATCH --time=00:15:00
+#SBATCH --mem-per-cpu=5000M
+#SBATCH -o breathing-data/orbit-%a.out
+#SBATCH --array=0-5
 
 module load python-scientific/3.13.1-foss-2025a
 
