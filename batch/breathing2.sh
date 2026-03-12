@@ -6,7 +6,7 @@
 #SBATCH --time=00:15:00
 #SBATCH --mem-per-cpu=5000M
 #SBATCH -o breathing-data/exp%a.out
-#SBATCH --array=0-5
+#SBATCH --array=2048-4380
 
 module load python-scientific/3.13.1-foss-2025a
 
