@@ -222,6 +222,8 @@ opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 # %%
 losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 500, nbatches=len(exposures_single))
 
+print(params_history[-1])
+
 # %%
 plt.plot(losses[:])
 
@@ -242,4 +244,6 @@ print(final_params.params)
 f = lambda params: loss_fn(ModelParams(params), exposures_single, final_params.inject((model_single)))
 F, unflatten = zdx.batching.hessian(f, final_params, nbatches=5*len(exposures_single))
 
-numpy.savez(f"breathing-data/{exposures_single[0].key}.npz", mjd=exp.mjd, params=final_params.params, fisher=F)
+unc = unflatten(np.sqrt(np.diag(np.linalg.inv(F)))).params
+
+numpy.savez(f"breathing-data/{exposures_single[0].key}.npz", mjd=exp.mjd, params=final_params.params, uncertainty = unc, fisher=F)
