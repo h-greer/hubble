@@ -61,7 +61,7 @@ def set_array(pytree):
 wid = 64
 oversample = 4
 
-nwavels = 3#13#6
+nwavels = 5#13#6
 npoly=1#10#2
 
 n_zernikes = 20#30#12
