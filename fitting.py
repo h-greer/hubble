@@ -30,10 +30,13 @@ def loss_fn(params, exposures, model):
     mdl = params.inject(model)
     return np.nansum(np.asarray([posterior(mdl,exposure) for exposure in exposures]))
 
-def optimise_optimistix(params, model, exposures, project=True):
+def optimise_optimistix(params, model, exposures, project=True, diag=False):
     if project:
         f = lambda params: loss_fn(params, exposures, model)
         F, unflatten = zdx.batching.hessian(f, ModelParams(params), nbatches=len(exposures)*5, checkpoint=True)
+        if diag:
+            F = np.diag(np.diag(F))
+            
 
     def projected_loss_fn(u, args):
         exposures, model, project_fn = args
