@@ -9,12 +9,6 @@ import zodiax as zdx
 from abcdLux.lct import *
 from abcdLux.abcd import *
 
-"""
-
-Custom apertures for the features of the HST/NICMOS optical system
-Values in here *ARE NOT TO BE TRUSTED*, they are taken out of TinyTim and my imagination where relevant.
-
-"""
 
 class HSTMainAperture(dl.CompoundAperture):
     softening : float
