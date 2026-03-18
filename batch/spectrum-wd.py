@@ -55,8 +55,8 @@ def set_array(pytree):
 wid = 90
 oversample = 4
 
-nwavels_f110w = 25
-nwavels_f160w = 25
+nwavels_f110w = 20
+nwavels_f160w = 20
 nbasis_f110w = 20
 nbasis_f160w = 10
 
@@ -201,7 +201,7 @@ orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 500, nbatches=5*len(exposures_single))
+losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 500, nbatches=10*len(exposures_single))
 
 # %%
 plt.plot(np.asarray(losses[-50:])/(len(exposures_single)*wid**2))
@@ -214,7 +214,7 @@ plot_params(params_history_relative, groups, xw = 3, save="wd-spectrum-params")
 plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False)
 
 # %%
-final_params = optimise_optimistix(params_history[-1], model_single, exposures_single, project=True, diag=True)
+final_params = optimise_optimistix(params_history[-1], model_single, exposures_single, project=True, diag=True, nbatches=10*len(exposures_single))
 
 # %%
 final_params.params
