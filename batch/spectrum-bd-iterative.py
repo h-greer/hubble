@@ -56,7 +56,7 @@ wid = 72
 oversample = 4
 
 nwavels = 50#13#6
-npoly=10
+npoly=12
 
 n_zernikes = 20
 
@@ -380,7 +380,7 @@ plt.xlabel("Wavelength (um)")
 plt.axvline(0.81)
 plt.axvline(1.385)
 
-plt.save("spectrum-bd.png")
+plt.savefig("spectrum-bd.png")
 
 # # %%
 # final_params.params
