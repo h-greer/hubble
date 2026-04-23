@@ -55,7 +55,7 @@ def set_array(pytree):
 wid = 72
 oversample = 4
 
-nwavels = 50#13#6
+nwavels = 200#13#6
 npoly=12
 
 n_zernikes = 20
@@ -262,7 +262,7 @@ final_params.params
 
 # %%
 f = lambda params: loss_fn(ModelParams(final_params.params|params), exposures_single, final_params.inject((model_single)))
-F, unflatten = zdx.batching.hessian(f, {"spectrum":params_history[-1]["spectrum"]}, nbatches=2*len(exposures_single))
+F, unflatten = zdx.batching.hessian(f, {"spectrum":params_history[-1]["spectrum"]}, nbatches=20)
 
 # %%
 plt.imshow(F[-(npoly):, -(npoly):])
