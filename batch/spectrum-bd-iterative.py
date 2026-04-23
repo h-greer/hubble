@@ -68,8 +68,8 @@ ddir = "../data/MAST_2024-09-22T03_37_01.724Z/HST/"
 
 
 
-spectrum_basis_f110w = load_spectrum_basis("F110W", nwavels, npoly)
-spectrum_basis_f110w = load_custom_spectrum_basis("../data/iterative_spectrum_basis.npy", nwavels, npoly, direct=True)
+# spectrum_basis_f110w = load_spectrum_basis("F110W", nwavels, npoly)
+# spectrum_basis_f110w = load_custom_spectrum_basis("../data/iterative_spectrum_basis.npy", nwavels, npoly, direct=True)
 
 
 spectrum_data = np.load("../data/iterative_basis_binned.npz")
