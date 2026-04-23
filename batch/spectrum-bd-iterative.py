@@ -56,7 +56,7 @@ wid = 72
 oversample = 4
 
 nwavels = 100#13#6
-npoly=12
+npoly=15
 
 n_zernikes = 20
 
@@ -287,7 +287,7 @@ np.sqrt(np.diag(cov_f110w))
 print("mode covariances")
 print(final_params.get("spectrum.U20581_F110W")[0]/np.sqrt(np.diag(cov_f110w)))
 
-print(final_params.get("spectrum.U20581_F110W")[0]/np.sqrt(np.real(np.linalg.eigvals(F[-(npoly):, -(npoly):]))))
+print(final_params.get("spectrum.U20581_F110W")[0]*np.sqrt(np.real(np.linalg.eigvals(F[-(npoly):, -(npoly):]))))
 
 
 # %%
