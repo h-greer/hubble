@@ -68,7 +68,7 @@ class Exposure(zdx.Base):
 class BlankExposure(Exposure):
     def __init__(self, name, filter, fit):
         self.filter = filter
-        self.filename = f"{name}_{filter}"
+        self.filename = f"{name}"
         self.target = name
         self.fit = fit
         self.mjd = 0.0
@@ -84,7 +84,7 @@ class BlankExposure(Exposure):
 class InjectedExposure(Exposure):
     def __init__(self, name, filter, fit, model, t_exp, n_exp, read_noise=10.):
         self.filter = filter
-        self.filename = f"{name}_{filter}"
+        self.filename = f"{name}"
         self.target = name
         self.fit = fit
         self.mjd = 0.0
@@ -105,6 +105,21 @@ class InjectedExposure(Exposure):
         self.bad = np.zeros(self.data.shape)
 
         self.exptime = t_exp
+        self.pam = 0.
+
+class LoadedExposure(Exposure):
+    def __init__(self, name, filter, fit, data, err, bad):
+        self.filter = filter
+        self.filename = f"{name}"
+        self.target = name
+        self.fit = fit
+        self.mjd = 0.0
+        self.wcs = None
+
+        self.data = data
+        self.err = err
+        self.bad = bad
+        self.exptime = 0.
         self.pam = 0.
 
 def exposure_from_file(fname, fit, extra_bad=None, crop=None):
@@ -135,6 +150,8 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
     gain = float(hdr['ADCGAIN'])
 
     mjd = hdr['EXPSTART']
+
+    print(hdr["CAL_VER"])
 
     if crop:
         w = WCS(image_hdr)
@@ -348,10 +365,13 @@ class SinglePointFit(ModelFit):
     #spectrum: CombinedSpectrum
     time_series: bool = eqx.field(static=True)
 
-    def __init__(self, spectrum_basis, filter, time_series=False):
+    def __init__(self, spectrum_basis, filter, time_series=False, precombined=False, wavels=None):
         nwavels, nbasis = spectrum_basis.shape
-        wv, inten = calc_throughput(filter, nwavels)
-        self.source = dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))
+        if precombined:
+            self.source = dl.PointSource(spectrum=PreCombinedBasisSpectrum(wavels, np.zeros(nbasis), spectrum_basis))
+        else:
+            wv, inten = calc_throughput(filter, nwavels)
+            self.source = dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))
         self.time_series=time_series
     
     def get_key(self, exposure, param):

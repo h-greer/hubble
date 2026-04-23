@@ -33,7 +33,7 @@ filter_files = {
     'F108N': get_filter("../data/HST_NICMOS1.F108N.dat")[40:140],
     'F187N': get_filter("../data/HST_NICMOS1.F187N.dat")[50:210],
     'F090M': get_filter("../data/HST_NICMOS1.F090M.dat"),
-    'F110W': get_filter("../data/HST_NICMOS1.F110W.dat")[80:-150],
+    'F110W': get_filter("../data/HST_NICMOS1.F110W.dat"),#[80:-150],
     'F110M': get_filter("../data/HST_NICMOS1.F110M.dat"),
     'F160W': get_filter("../data/HST_NICMOS1.F160W.dat")[120:-200],
     'POL0S': get_filter("../data/HST_NICMOS1.POL0S.dat"),
@@ -41,13 +41,8 @@ filter_files = {
     'POL120S': get_filter("../data/HST_NICMOS1.POL120S.dat"),
 }
 
-def calc_throughput(filt, nwavels=9):
-
-    filtr = filter_files[filt]
-
-
-    wl_array = filtr[:,0]
-    throughput_array = filtr[:,1]
+def filter_integrate(wl_array, throughput_array, nwavels, norm=False):
+    
 
     # filter_path = os.path.join()
     #file_path = pkg.resource_filename(__name__, f"/data/filters/{filt}.dat")
@@ -61,10 +56,22 @@ def calc_throughput(filt, nwavels=9):
         cond1 = edges[i] < wl_array
         cond2 = wl_array < edges[i + 1]
         throughput = np.where(cond1 & cond2, throughput_array, 0)
-        areas.append(jsp.integrate.trapezoid(y=throughput, x=wl_array))
+        areas.append(jsp.integrate.trapezoid(y=throughput, x=wl_array)/np.sum(cond1 & cond2))
 
     areas = np.array(areas)
-    weights = areas #/ areas.sum()
+    weights = areas if not norm else areas / np.sum(areas)
+    return wavels, weights
+
+
+def calc_throughput(filt, nwavels=9):
+
+    filtr = filter_files[filt]
+
+    wl_array = filtr[:,0]
+    throughput_array = filtr[:,1]
+
+    wavels, weights = filter_integrate(wl_array, throughput_array, nwavels)
+    
 
     wavels *= 1e-10
     return np.array([wavels, weights])
