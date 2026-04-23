@@ -262,7 +262,7 @@ final_params.params
 
 # %%
 f = lambda params: loss_fn(ModelParams(final_params.params|params), exposures_single, final_params.inject((model_single)))
-F, unflatten = zdx.batching.hessian(f, {"spectrum":params_history[-1]["spectrum"]}, nbatches=20)
+F, unflatten = zdx.batching.hessian(f, {"spectrum":params_history[-1]["spectrum"]}, nbatches=10)
 
 # %%
 plt.imshow(F[-(npoly):, -(npoly):])
