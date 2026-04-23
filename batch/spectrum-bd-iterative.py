@@ -311,7 +311,7 @@ wavels, bandpass = calc_throughput("F110W", nwavels=nwavels*2)
 #final_params = ModelParams(params_history[-1])
 
 # %%
-fname = "2M1439.fits"
+fname = "../data/2M1439.fits"
 data = fits.getdata(fname, ext=0).astype(np.float32)
 
 # %%
