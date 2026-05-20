@@ -290,7 +290,7 @@ warmup = blackjax.window_adaptation(blackjax.nuts, loglike, progress_bar=True)
 
 # run inference with the known mass matrix
 kernel = blackjax.nuts(loglike, **parameters).step
-states = inference_loop(sample_key, kernel, state, 50000)
+states = inference_loop(sample_key, kernel, state, 10000)
 
 # extract samples, blocking avoids lazy evaluation for timing purposes
 blackjax_samples = states.position.block_until_ready()
