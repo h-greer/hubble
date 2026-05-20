@@ -75,21 +75,21 @@ files_f190N = """
 n8o101a1q_cal.fits
 n8o101a2q_cal.fits
 n8o101a3q_cal.fits
-""".split()[:2]
+""".split()[:1]
 
 
 files_f108N = """
 n8o101adq_cal.fits
 n8o101atq_cal.fits
 n8o101b9q_cal.fits
-""".split()[:2]
+""".split()[:1]
 
 
 files_f164N = """
 n8o101a8q_cal.fits
 n8o101a9q_cal.fits
 n8o101aaq_cal.fits
-""".split()[:2]
+""".split()[:1]
 
 exposures_binary_f108N = [exposure_from_file(ddir + file, BinaryFit(spectrum_basis, "F108N"), crop=wid) for file in files_f108N]
 exposures_binary_f190N = [exposure_from_file(ddir + file, BinaryFit(spectrum_basis, "F190N"), crop=wid) for file in files_f190N]
@@ -147,8 +147,8 @@ params = {
 
 for idx, exp in enumerate(exposures_binary):
     params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([0.,0.])
-    params["primary_spectrum"][exp.fit.get_key(exp, "primary_spectrum")] = np.zeros(npoly).at[0].set(np.log10(np.nansum(exp.data)/nwavels))
-    params["secondary_spectrum"][exp.fit.get_key(exp, "secondary_spectrum")] = np.array([3.2-np.log10(6.3)]) if exp.filter == "F108N" else np.array([3.5-np.log10(6.9)])
+    params["primary_spectrum"][exp.fit.get_key(exp, "primary_spectrum")] = np.zeros(npoly).at[0].set((np.nansum(exp.data)/nwavels))*0.85
+    params["secondary_spectrum"][exp.fit.get_key(exp, "secondary_spectrum")] = np.array([(np.nansum(exp.data)/nwavels)/(6.3)]) if exp.filter == "F108N" else np.array([(np.nansum(exp.data)/nwavels)/(6.9)])
 
     params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(n_zernikes)#+1.
 
