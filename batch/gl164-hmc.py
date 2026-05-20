@@ -195,7 +195,7 @@ things_binary = {
     "aberrations": sgd(g*0.4, 90),
     #"jitter": sgd(g*1, 120),
 
-    "defocus": sgd(g*6, 70),
+    "defocus": sgd(g*0.5, 70),
     "fnumber": sgd(g*3, 110),
     "cold_mask_shear": sgd(g*4, 110),
 
