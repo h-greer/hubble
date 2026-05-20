@@ -81,15 +81,19 @@ def optimise_no_norm(params, model, exposures, optimisers, epochs):
     return losses, params_history
 
 
-def optimise_new(params, model, exposures, optimisers, epochs, diag=True, nbatches=1):
-    f = lambda params: loss_fn(ModelParams(params), exposures, model)
-    F, unflatten = zdx.batching.hessian(f, params, nbatches=nbatches, checkpoint=True)
+def optimise_new(params, model, exposures, optimisers, epochs, diag=True, nbatches=1, use_c=False, return_c=False):
 
-    if diag:
-        C = dlu.nandiv(1, np.abs(np.diag(np.diag(F))), fill=0.)
-        print(np.diag(C))
+    if use_c is not False:
+        C = use_c
     else:
-        C = np.linalg.inv(F)
+        f = lambda params: loss_fn(ModelParams(params), exposures, model)
+        F, unflatten = zdx.batching.hessian(f, params, nbatches=nbatches, checkpoint=True)
+
+        if diag:
+            C = dlu.nandiv(1, np.abs(np.diag(np.diag(F))), fill=0.)
+            print(np.diag(C))
+        else:
+            C = np.linalg.inv(F)
         
     optim, state = opt.map_optimisers(params, optimisers)
 
@@ -110,6 +114,9 @@ def optimise_new(params, model, exposures, optimisers, epochs, diag=True, nbatch
         losses.append(loss)
         params_history.append(params)
     losses = np.array(losses)
+
+    if return_c:
+        return losses, params_history, C
 
     return losses, params_history
 

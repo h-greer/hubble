@@ -168,7 +168,7 @@ new-zodiax/
 .venv2/
 *.DS_Store
 abcdlux/
-*.fits
+data/MAST_*.fits
 *.png
 batch/*/*
 data/MAST_*/*

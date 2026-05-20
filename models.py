@@ -540,6 +540,51 @@ class BinaryFit(ModelFit):
         
         return source
 
+class PointSourceContrastFit(ModelFit):
+    def __init__(self, spectrum_basis, filter):
+        nwavels, nbasis = spectrum_basis.shape
+        wv, inten = calc_throughput(filter, nwavels)
+        self.source = dl.Scene([
+            ("primary",dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))), 
+            ("secondary",dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis)))
+        ])
+            
+    def get_key(self, exposure, param):
+        if param == "positions":
+            return exposure.key
+        elif param == "spectrum" or param == "secondary_spectrum" or param == "secondary_position":
+            return f"{exposure.target}_{exposure.filter}"
+        else:
+            return super().get_key(exposure, param)
+    
+    def map_param(self, exposure, param):
+        if param in ["positions", "spectrum", "secondary_spectrum", "secondary_position"]:
+            return f"{param}.{exposure.get_key(param)}"
+        else:
+            return super().map_param(exposure, param)
+
+    def update_source(self, model, exposure):
+        primary_coeffs = model.get(exposure.fit.map_param(exposure, "spectrum"))
+        secondary_coeffs = model.get(exposure.fit.map_param(exposure, "secondary_spectrum"))
+
+        source = self.source.set("primary.spectrum.basis_weights", primary_coeffs)
+        source = source.set("primary.flux", source.primary.spectrum.flux)
+        source = source.set("secondary.spectrum.basis_weights", secondary_coeffs)
+        source = source.set("secondary.flux", source.secondary.spectrum.flux)
+
+
+        position = model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432)
+
+        secondary_position = model.get(exposure.fit.map_param(exposure, "secondary_position"))*dlu.arcsec2rad(0.0432)
+
+
+        separation = model.get(exposure.fit.map_param(exposure, "separation"))*dlu.arcsec2rad(0.0432)
+        position_angle = dlu.deg2rad(model.get(exposure.fit.map_param(exposure, "position_angle")))
+
+        source = source.set("secondary.position", secondary_position)
+        
+        return source
+
 
 class BaseModeller(zdx.Base):
     params: dict
