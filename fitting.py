@@ -91,7 +91,6 @@ def optimise_new(params, model, exposures, optimisers, epochs, diag=True, nbatch
 
         if diag:
             C = dlu.nandiv(1, np.abs((np.diag(F))), fill=0.)
-            print(C)
         else:
             C = np.linalg.inv(F)
         

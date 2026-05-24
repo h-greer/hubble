@@ -35,7 +35,7 @@ filter_files = {
     'F090M': get_filter("../data/HST_NICMOS1.F090M.dat"),
     'F110W': get_filter("../data/HST_NICMOS1.F110W.dat"),#[80:-150],
     'F110M': get_filter("../data/HST_NICMOS1.F110M.dat"),
-    'F160W': get_filter("../data/HST_NICMOS1.F160W.dat")[120:-200],
+    'F160W': get_filter("../data/HST_NICMOS1.F160W.dat"),
     'POL0S': get_filter("../data/HST_NICMOS1.POL0S.dat"),
     'POL240S': get_filter("../data/HST_NICMOS1.POL240S.dat"),
     'POL120S': get_filter("../data/HST_NICMOS1.POL120S.dat"),
