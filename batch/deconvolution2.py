@@ -156,7 +156,7 @@ class PointResolvedFit(ModelFit):
         return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im)
 
 # %%
-wid = 110
+wid = 100
 oversample = 2
 
 nwavels = 20#13#6
