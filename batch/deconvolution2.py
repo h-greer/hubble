@@ -350,7 +350,7 @@ orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history, C = optimise_new(opt_params, model_single, exposures_single, things, 300, nbatches=15, return_c=True)
+losses, params_history, C = optimise_new(opt_params, model_single, exposures_single, things, 300, nbatches=32, return_c=True)
 
 # %%
 len(losses)
