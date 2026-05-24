@@ -202,7 +202,6 @@ exposures_single = [
     exposure_from_file(ddir + "na2a05ttq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
     exposure_from_file(ddir + "na2a05tuq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
     exposure_from_file(ddir + "na2a05txq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-
     exposure_from_file(ddir + "na2a05tzq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
 
     exposure_from_file(ddir + "na2a05u2q_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
@@ -210,8 +209,17 @@ exposures_single = [
     exposure_from_file(ddir + "na2a05u7q_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
     exposure_from_file(ddir + "na2a05u9q_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
 
-]
+    exposure_from_file(ddir + "na2a05ucq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+    exposure_from_file(ddir + "na2a05ueq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+    exposure_from_file(ddir + "na2a05uhq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+    exposure_from_file(ddir + "na2a05ujq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
 
+    exposure_from_file(ddir + "na2a05umq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+    exposure_from_file(ddir + "na2a05uoq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+    exposure_from_file(ddir + "na2a05urq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+    exposure_from_file(ddir + "na2a05utq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+
+]
 
 # %%
 wavels_binned.shape
