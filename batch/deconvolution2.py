@@ -230,7 +230,7 @@ na2a05ufq_cal.fits
 na2a05ugq_cal.fits
 na2a05ukq_cal.fits
 na2a05ulq_cal.fits
-"""
+""".split()
 
 exposures_single = [
     exposure_from_file(ddir + f, PointResolvedFit(vects_binned, "F160W", wavels_binned, wid=wid, oversample=oversample), crop=wid) for f in files
