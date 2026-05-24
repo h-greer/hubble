@@ -90,8 +90,8 @@ def optimise_new(params, model, exposures, optimisers, epochs, diag=True, nbatch
         F, unflatten = zdx.batching.hessian(f, params, nbatches=nbatches, checkpoint=True)
 
         if diag:
-            C = dlu.nandiv(1, np.abs(np.diag(np.diag(F))), fill=0.)
-            print(np.diag(C))
+            C = dlu.nandiv(1, np.abs((np.diag(F))), fill=0.)
+            print(C)
         else:
             C = np.linalg.inv(F)
         
@@ -106,7 +106,10 @@ def optimise_new(params, model, exposures, optimisers, epochs, diag=True, nbatch
 
         # Normalise the gradients by the fisher matrix to get a natural gradient step
         G, unflatten = ravel_pytree(grads)
-        grads = unflatten(np.dot(G, C))
+        if diag:
+            grads = unflatten(G*C)
+        else:
+            grads = unflatten(np.dot(G, C))
 
         updates, state = optim.update(grads, state)
         params = optax.apply_updates(params, updates)

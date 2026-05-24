@@ -201,9 +201,9 @@ ddir = '../data/MAST_2024-09-19T06_48_02.332Z/HST/'
 exposures_single = [
     exposure_from_file(ddir + "na2a05ttq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
     exposure_from_file(ddir + "na2a05tuq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-    exposure_from_file(ddir + "na2a05tvq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+    exposure_from_file(ddir + "na2a05txq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
 
-    exposure_from_file(ddir + "na2a05twq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+    exposure_from_file(ddir + "na2a05tzq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
 
 
 ]

@@ -577,9 +577,7 @@ class PointSourceContrastFit(ModelFit):
 
         secondary_position = model.get(exposure.fit.map_param(exposure, "secondary_position"))*dlu.arcsec2rad(0.0432)
 
-
-        separation = model.get(exposure.fit.map_param(exposure, "separation"))*dlu.arcsec2rad(0.0432)
-        position_angle = dlu.deg2rad(model.get(exposure.fit.map_param(exposure, "position_angle")))
+        source = source.set("primary.position", position)
 
         source = source.set("secondary.position", secondary_position)
         
