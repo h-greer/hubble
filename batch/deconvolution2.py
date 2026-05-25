@@ -179,7 +179,7 @@ ddir = "../data/MAST_2024-09-22T03_37_01.724Z/HST/"
 # weights_downsampled = ipx.interp1d(np.linspace(0,1,nwavels), np.linspace(0,1,weights.shape[0]), weights)
 
 spectrum_data = np.load("../data/iterative_basis_binned_F160W.npz")
-spectrum_data = np.load("../data/iterative_basis_binned.npz")
+# spectrum_data = np.load("../data/iterative_basis_binned.npz")
 
 
 wavels_binned=spectrum_data["wavels_binned"]
@@ -197,47 +197,47 @@ ddir = '../data/MAST_2024-09-19T06_48_02.332Z/HST/'
 ddir = '../data/MAST_2024-09-19T06_48_02.332Z/HST/'
 
 
-exposures_single = [
-    exposure_from_file(ddir + "na2a05ttq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-    exposure_from_file(ddir + "na2a05tuq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-    exposure_from_file(ddir + "na2a05txq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-    exposure_from_file(ddir + "na2a05tzq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-
-    exposure_from_file(ddir + "na2a05u2q_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-    exposure_from_file(ddir + "na2a05u4q_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-    exposure_from_file(ddir + "na2a05u7q_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-    exposure_from_file(ddir + "na2a05u9q_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-
-    exposure_from_file(ddir + "na2a05ucq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-    exposure_from_file(ddir + "na2a05ueq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-    exposure_from_file(ddir + "na2a05uhq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-    exposure_from_file(ddir + "na2a05ujq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-
-    # exposure_from_file(ddir + "na2a05umq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-    # exposure_from_file(ddir + "na2a05uoq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-    # exposure_from_file(ddir + "na2a05urq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-    # exposure_from_file(ddir + "na2a05utq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
-
-]
-
-# files = """
-# na2a05tvq_cal.fits
-# na2a05twq_cal.fits
-# na2a05u0q_cal.fits
-# na2a05u1q_cal.fits
-# na2a05u5q_cal.fits
-# na2a05u6q_cal.fits
-# na2a05uaq_cal.fits
-# na2a05ubq_cal.fits
-# na2a05ufq_cal.fits
-# na2a05ugq_cal.fits
-# na2a05ukq_cal.fits
-# na2a05ulq_cal.fits
-# """.split()
-
 # exposures_single = [
-#     exposure_from_file(ddir + f, PointResolvedFit(vects_binned, "F160W", wavels_binned, wid=wid, oversample=oversample), crop=wid) for f in files
+#     exposure_from_file(ddir + "na2a05ttq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+#     exposure_from_file(ddir + "na2a05tuq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+#     exposure_from_file(ddir + "na2a05txq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+#     exposure_from_file(ddir + "na2a05tzq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+
+#     exposure_from_file(ddir + "na2a05u2q_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+#     exposure_from_file(ddir + "na2a05u4q_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+#     exposure_from_file(ddir + "na2a05u7q_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+#     exposure_from_file(ddir + "na2a05u9q_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+
+#     exposure_from_file(ddir + "na2a05ucq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+#     exposure_from_file(ddir + "na2a05ueq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+#     exposure_from_file(ddir + "na2a05uhq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+#     exposure_from_file(ddir + "na2a05ujq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+
+#     # exposure_from_file(ddir + "na2a05umq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+#     # exposure_from_file(ddir + "na2a05uoq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+#     # exposure_from_file(ddir + "na2a05urq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+#     # exposure_from_file(ddir + "na2a05utq_cal.fits", PointResolvedFit(vects_binned, "F110W", wavels_binned, wid=wid, oversample=oversample), crop=wid),
+
 # ]
+
+files = """
+na2a05tvq_cal.fits
+na2a05twq_cal.fits
+na2a05u0q_cal.fits
+na2a05u1q_cal.fits
+na2a05u5q_cal.fits
+na2a05u6q_cal.fits
+na2a05uaq_cal.fits
+na2a05ubq_cal.fits
+na2a05ufq_cal.fits
+na2a05ugq_cal.fits
+na2a05ukq_cal.fits
+na2a05ulq_cal.fits
+""".split()
+
+exposures_single = [
+    exposure_from_file(ddir + f, PointResolvedFit(vects_binned, "F160W", wavels_binned, wid=wid, oversample=oversample), crop=wid) for f in files
+]
 
 # %%
 wavels_binned.shape
@@ -289,7 +289,7 @@ params = {
 
 for idx, exp in enumerate(exposures_single):
     params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([0.,0.])
-    params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set((np.nansum(exp.data)/nwavels))#*0.6
+    params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set(-(np.nansum(exp.data)/nwavels))#*0.6
     params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(n_zernikes)
     params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([6.,6.])
     params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = -45.
@@ -390,7 +390,7 @@ plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single,
 _, flat_fn = jax.flatten_util.ravel_pytree(params_history[-1])
 
 # %%
-flat, _ = jax.flatten_util.ravel_pytree(dict(sorted((flat_fn(C) | {"resolved": {"N458_F110W": np.ones(wid**2 * oversample**2)}}).items())))
+flat, _ = jax.flatten_util.ravel_pytree(dict(sorted((flat_fn(C) | {"resolved": {"N458_F160W": np.ones(wid**2 * oversample**2)}}).items())))
 
 # %%
 C_new = flat#np.diag(flat)#np.diag(np.concat((np.diag(C), np.ones(wid**2 * oversample**2))))
@@ -422,12 +422,12 @@ opt_params
 losses, params_history_resolved = optimise_new(opt_params, model_single, exposures_single, things_all, 300, nbatches=15, use_c=C_new)
 
 # %%
-inten = 10**params_history_resolved[-1]["resolved"]["N458_F110W"]
+inten = 10**params_history_resolved[-1]["resolved"]["N458_F160W"]
 plt.figure(figsize=(10,10))
 plt.imshow((inten-np.min(inten)))
 plt.colorbar()
 plt.savefig("deconvolution.png")
 
-np.save("deconvolved_f110w.npy", inten)
+np.save("deconvolved_f160w.npy", inten)
 
 # %%
