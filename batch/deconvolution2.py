@@ -428,4 +428,6 @@ plt.imshow((inten-np.min(inten)))
 plt.colorbar()
 plt.savefig("deconvolution.png")
 
+np.save("deconvolved_f110w.npy", inten)
+
 # %%
