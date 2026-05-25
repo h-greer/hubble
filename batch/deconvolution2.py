@@ -151,7 +151,7 @@ class PointResolvedFit(ModelFit):
 
         if "resolved" in model.params.keys():
             dist = self.get_distribution(model, exposure)
-            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + 0.05* L1_loss(dist) +  0.2*TV_loss(dist)
+            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + 0.05* L1_loss(dist) +  0.1*TV_loss(dist)
         
         return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im)
 
