@@ -286,7 +286,7 @@ params = {
 
 for idx, exp in enumerate(exposures_single):
     params["positions"][exp.fit.get_key(exp, "positions")] = np.asarray([0.,0.])
-    params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set((np.nansum(exp.data)/nwavels))#*0.6
+    params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set(-(np.nansum(exp.data)/nwavels))#*0.6
     params["aberrations"][exp.fit.get_key(exp, "aberrations")] = np.zeros(n_zernikes)
     params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([6.,6.])
     params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = -45.
