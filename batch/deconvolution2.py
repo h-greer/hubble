@@ -419,7 +419,7 @@ opt_params
 losses, params_history_resolved = optimise_new(opt_params, model_single, exposures_single, things_all, 300, nbatches=15, use_c=C_new)
 
 # %%
-inten = 10**params_history_resolved[-1]["resolved"]["N458_F110W"]
+inten = 10**params_history_resolved[-1]["resolved"]["N458_F160W"]
 plt.figure(figsize=(10,10))
 plt.imshow((inten-np.min(inten)))
 plt.colorbar()
