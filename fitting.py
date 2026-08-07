@@ -81,6 +81,51 @@ def optimise_no_norm(params, model, exposures, optimisers, epochs):
     return losses, params_history
 
 
+def optimise_new_resolved(params, model, exposures, optimisers, epochs, diag=True, nbatches=1, use_c=False, return_c=False):
+
+    f = lambda params: loss_fn(ModelParams(params), exposures, model)
+
+    for k in params:
+        print(k)
+
+    F, unflatten = zdx.batching.hessian(f, {k:params[k] for k in params if k != "resolved"}, nbatches=nbatches, checkpoint=True)
+
+    print(F.shape)
+
+    cs = unflatten(dlu.nandiv(1, np.abs((np.diag(F))), fill=0.)) | {"resolved": jax.tree.map(np.ones_like,params["resolved"])}
+
+    C, _ = jax.flatten_util.ravel_pytree(cs)
+        
+    optim, state = opt.map_optimisers(params, optimisers)
+
+    loss_grad_fn = eqx.filter_jit(eqx.filter_value_and_grad(lambda params, exposures, model: loss_fn(ModelParams(params), exposures, model)))
+
+    pbar = tqdm(range(epochs))
+    losses, params_history = [], []
+    for step in pbar:
+        loss, grads = loss_grad_fn(params, exposures, model)
+
+        # Normalise the gradients by the fisher matrix to get a natural gradient step
+        G, unflatten = ravel_pytree(grads)
+        if diag:
+            grads = unflatten(G*C)
+        else:
+            grads = unflatten(np.dot(G, C))
+
+        updates, state = optim.update(grads, state)
+        params = optax.apply_updates(params, updates)
+        pbar.set_postfix(log_loss=f"{(loss):.4f}")
+        losses.append(loss)
+        params_history.append(params)
+    losses = np.array(losses)
+
+    if return_c:
+        return losses, params_history, C
+
+    return losses, params_history
+
+
+
 def optimise_new(params, model, exposures, optimisers, epochs, diag=True, nbatches=1, use_c=False, return_c=False):
 
     if use_c is not False:

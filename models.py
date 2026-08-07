@@ -148,6 +148,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
     exptime = float(hdr['EXPTIME'])
     gain = float(hdr['ADCGAIN'])
+    print(exptime, gain)
 
     mjd = hdr['EXPSTART']
 
@@ -155,16 +156,16 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
     if crop:
         w = WCS(image_hdr)
-        y,x = numpy.unravel_index(numpy.nanargmax(data),data.shape)
-        print(x,y)
-        centre = SkyCoord(w.pixel_to_world(x,y), unit='deg')
+        centre = SkyCoord(w.pixel_to_world(256-181,256-44), unit='deg')
         data = Cutout2D(data, centre, crop, wcs=w).data
         err = Cutout2D(err, centre, crop, wcs=w).data
         info = Cutout2D(info, centre, crop, wcs=w).data
 
     bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32))
+    # bad = np.asarray((err==0.0) | (info>0.))
+
     if extra_bad is not None:
-        bad = bad | tf(extra_bad)
+        bad = bad | extra_bad
 
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
@@ -184,132 +185,70 @@ class ModelFit(zdx.Base):
 
     def get_key(self, exposure, param):
         match param:            
-            case "aberrations":
-                #return "global"
+            case "primary_opd" | "primary_tilt" | "cold_mask_opd" | "cold_mask_tilt":
                 return exposure.key
-            case "breathing":
-                return exposure.key
-            case "cold_mask_shift":
-                return "global"#exposure.key#"global"
-                #return str(round(exposure.mjd))
-            case "cold_mask_rot":
-                return "global"#exposure.key#"global"
-            case "cold_mask_scale":
-                return "global"#return str(round(exposure.mjd))
-            case "cold_mask_shear":
-                return "global"#return str(round(exposure.mjd))
-            case "primary_rot":
-                return "global"#return str(round(exposure.mjd))
-            case "primary_scale":
-                return "global"#return str(round(exposure.mjd))
-            case "primary_shear":
-                return "global"#return str(round(exposure.mjd))
-            case "primary_distortion" | "cold_mask_distortion":
-                return "global"#return "global"
-            case "defocus":
-                return exposure.key
+            case "cold_mask_shift" | "cold_mask_rot" | "cold_mask_shear" | "cold_mask_scale":
+                return "global"
             case "bias":
-                return exposure.key
-            case "jitter":
-                return exposure.key
-            case "despace":
-                return exposure.key
-            case "quadrature":
                 return exposure.key
             case _: raise ValueError(f"Parameter {param} has no key")
     
     def map_param(self, exposure, param):
-        if param in ["aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "bias", "jitter", "primary_distortion", "cold_mask_distortion", "defocus", "despace", "quadrature"]:
+        if param in ["primary_opd", "cold_mask_opd", "primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_rot", "cold_mask_shear", "cold_mask_scale", "bias"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
     def update_optics(self, model, exposure):
         optics = model.optics
-        if "aberrations" in model.params.keys():
-            coefficients = model.get(self.map_param(exposure, "aberrations"))*1e-9
-            optics = optics.set("AberratedAperture.coefficients", coefficients)
+        if "primary_opd" in model.params.keys():
+            coefficients = model.get(self.map_param(exposure, "primary_opd"))*1e-9
+            coefficients = coefficients.at[0,0].set(0.)
+            optics = optics.set("primary_opd.coefficients", coefficients)
+        
+        if "primary_tilt" in model.params.keys():
+            angles = dlu.arcsec2rad(model.get(self.map_param(exposure, "primary_tilt")))
+            optics = optics.set("primary_tilt.angles", angles)
+
+        if "cold_mask_tilt" in model.params.keys():
+            angles = dlu.arcsec2rad(model.get(self.map_param(exposure, "cold_mask_tilt")))
+            optics = optics.set("cold_mask_tilt.angles", angles)
+        
+        if "cold_mask_opd" in model.params.keys():
+            coefficients = model.get(self.map_param(exposure, "cold_mask_opd"))*1e-9
+            optics = optics.set("cold_mask_opd.coefficients", coefficients)
         
         if "cold_mask_shift" in model.params.keys():
             translation = model.get(self.map_param(exposure, "cold_mask_shift"))*1e-2
             optics = optics.set("cold_mask.transformation.translation", translation)
+            optics = optics.set("cold_mask_opd.aperture.transformation.translation", translation)
+        
+        if "cold_mask_shear" in model.params.keys():
+            translation = model.get(self.map_param(exposure, "cold_mask_shear"))
+            optics = optics.set("cold_mask.transformation.shear", translation)
+            optics = optics.set("cold_mask_opd.aperture.transformation.shear", translation)
 
         if "cold_mask_scale" in model.params.keys():
-            compression = model.get(self.map_param(exposure, "cold_mask_scale"))
-            optics = optics.set("cold_mask.transformation.compression", compression)
-
+            translation = model.get(self.map_param(exposure, "cold_mask_scale"))
+            optics = optics.set("cold_mask.transformation.compression", translation)
+            optics = optics.set("cold_mask_opd.aperture.transformation.compression", translation)
+        
         if "cold_mask_rot" in model.params.keys():
-            rotation = dlu.deg2rad(model.get(self.map_param(exposure, "cold_mask_rot")))
-            optics = optics.set("cold_mask.transformation.rotation", rotation)
+            translation = dlu.deg2rad(model.get(self.map_param(exposure, "cold_mask_rot")))+np.pi/4
+            optics = optics.set("cold_mask.transformation.rotation", translation)
+            optics = optics.set("cold_mask_opd.aperture.transformation.rotation", translation)
 
-        if "cold_mask_shear" in model.params.keys():
-            rotation = dlu.deg2rad(model.get(self.map_param(exposure, "cold_mask_shear")))
-            optics = optics.set("cold_mask.transformation.shear", rotation)
+        if "occulter_radius" in model.params.keys():
+            radius = model.get(self.map_param(exposure, "occulter_radius"))*dlu.arcsec2rad(0.3)*24*2.4
+            optics = optics.set("occulter.layers.occulter.r", radius)
         
-        if "outer_radius" in model.params.keys():
-            radius = model.get(self.map_param(exposure, "outer_radius"))
-            optics = optics.set("cold_mask.outer.radius", radius)
-        
-        if "secondary_radius" in model.params.keys():
-            radius = model.get(self.map_param(exposure, "secondary_radius"))
-            optics = optics.set("cold_mask.secondary.radius", radius)
-        
-        if "spider_width" in model.params.keys():
-            radius = model.get(self.map_param(exposure, "spider_width"))
-            optics = optics.set("cold_mask.spider.width", radius)
-
-        if "primary_scale" in model.params.keys():
-            compression = model.get(self.map_param(exposure, "primary_scale"))
-            optics = optics.set("main_aperture.transformation.compression", compression)
-            optics = optics.set("AberratedAperture.aperture.transformation.compression", compression)
-
-        if "primary_rot" in model.params.keys():
-            rotation = dlu.deg2rad(model.get(self.map_param(exposure, "primary_rot")))
-            optics = optics.set("main_aperture.transformation.rotation", rotation)
-            optics = optics.set("AberratedAperture.aperture.transformation.rotation", rotation)
-
-        if "primary_shear" in model.params.keys():
-            rotation = dlu.deg2rad(model.get(self.map_param(exposure, "primary_shear")))
-            optics = optics.set("main_aperture.transformation.shear", rotation)
-            optics = optics.set("AberratedAperture.aperture.transformation.shear", rotation)
-        
-        if "rot" in model.params.keys():
-            rot = dlu.deg2rad(model.get(self.map_param(exposure, "rot")))
-            optics = optics.set("CompoundAperture.transformation.rotation", rot)
-        if "scale" in model.params.keys():
-            scale = model.get(self.map_param(exposure, "scale"))
-            optics = optics.set("psf_pixel_scale", scale)
-        if "softening" in model.params.keys():
-            softening = model.get(self.map_param(exposure, "softening"))
-            optics = optics.set("main_aperture.softening", softening)
-            optics = optics.set("cold_mask.softening", softening)
-            optics = optics.set("AberratedAperture.aperture.softness", softening)
-        if "displacement" in model.params.keys():
-            disp = model.get(self.map_param(exposure, "displacement"))
-            optics = optics.set("displacement", disp)
-
-        if "defocus" in model.params.keys():
-            disp = model.get(self.map_param(exposure, "defocus"))
-            optics = optics.set("defocus", disp*1e-2)
-        
-        if "despace" in model.params.keys():
-            disp = model.get(self.map_param(exposure, "despace"))
-            optics = optics.set("despace", disp*1e-6)
+        if "occulter_coeffs" in model.params.keys():
+            coeffs = model.get(self.map_param(exposure, "occulter_coeffs"))*dlu.arcsec2rad(0.3)*24*2.4
+            optics = optics.set("occulter.layers.occulter.cc", coeffs[::2])
+            optics = optics.set("occulter.layers.occulter.ss", coeffs[1::2])
         
         if "fnumber" in model.params.keys():
-            fn = model.get(self.map_param(exposure, "fnumber"))
-            optics = optics.set("fnumber", fn)
-
-        if "mag" in model.params.keys():
-            fn = model.get(self.map_param(exposure, "mag"))
-            optics = optics.set("mag", fn)
-
-        if "primary_distortion" in model.params.keys():
-            dist = model.get(self.map_param(exposure, "primary_distortion"))
-            optics = optics.set("main_aperture.transformation.distortion", dist)
-
-        if "cold_mask_distortion" in model.params.keys():
-            dist = model.get(self.map_param(exposure, "cold_mask_distortion"))
-            optics = optics.set("cold_mask.transformation.distortion", dist)        
+            fnumber = model.get(self.map_param(exposure, "fnumber"))
+            optics = optics.set("prop1.focal_length", fnumber*2.4)
 
         return optics
 
@@ -397,7 +336,7 @@ class SinglePointFit(ModelFit):
 
         source = self.source.set("spectrum.basis_weights", spectrum_coeffs)
         source = source.set("flux", source.spectrum.flux)
-        source = source.set("position", model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
+        source = source.set("position", np.zeros(2))#model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
         
         return source    
 

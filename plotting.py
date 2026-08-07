@@ -30,9 +30,8 @@ def plot_params(models, groups, xw = 4, save=False):
     fig, axs = plt.subplots(xw,yw,figsize=(xw*10,yw*8), squeeze=False)
     for i, param in enumerate(groups):
         sp = axs[i%xw, i//xw]
-        if param in ["fluxes", "flux", "contrast", "positions", "aberrations", 
-                    "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear",
-                    "primary_rot","primary_scale", "primary_shear", "breathing", "slope", "spectrum", "primary_spectrum", "secondary_spectrum", "bias", "primary_distortion", "cold_mask_distortion", "defocus", "despace", "resolved", "jitter", "quadrature"]:
+        # print(models[0].get(param))
+        if param in ["spectrum", "primary_opd", "cold_mask_opd","primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_shear", "cold_mask_scale", "cold_mask_rot", "bias", "resolved"]:
 
             for j in range(len(list(models[-1].get(param).values()))):
                 vals = np.asarray([list(x.get(param).values())[j].flatten() for x in models]).T
@@ -54,7 +53,7 @@ def plot_params(models, groups, xw = 4, save=False):
 def plot_comparison(model, params, exposures, quadrature=False, save=False, graticule=False):
     for f, exp in enumerate(exposures):
 
-        fig, axs = plt.subplots(1,5, figsize=(50,8))
+        fig, axs = plt.subplots(1,6, figsize=(60,8))
 
 
         cmap = matplotlib.colormaps['inferno']
@@ -101,14 +100,25 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
 
         optics = exp.fit.update_optics(model, exp)
 
-        support = optics.transmission(coords,2.4/512)
+        support = optics.primary.transmission(coords,2.4/512)
         support_mask = support.at[support < .5].set(np.nan)
 
-        opd = optics.AberratedAperture.eval_basis(coords)*1e9
+        # opd = optics.primary_opd.eval_basis(coords)*1e9
+        opd = optics.primary_opd.eval_basis()*1e9
         olim = np.nanmax(np.abs(opd*support_mask))
         apt =axs[2].imshow(support_mask*opd,cmap=cmap,vmin=-olim, vmax=olim)
         plt.colorbar(apt, ax=axs[2]).set_label("OPD (nm)")
-        #axs[4].imshow(telescope.detector.pixel_response.pixel_response)
+
+
+        support = optics.cold_mask.transmission(coords,2.4/512)
+        support_mask = support.at[support < .5].set(np.nan)
+
+        opd = optics.cold_mask_opd.eval_basis(coords)*1e9
+        olim = np.nanmax(np.abs(opd*support_mask))
+        apt =axs[3].imshow(support_mask*opd,cmap=cmap,vmin=-olim, vmax=olim)
+        plt.colorbar(apt, ax=axs[3]).set_label("OPD (nm)")
+
+
         if quadrature:
             resid = (exp.data - fit)/(exp.err * 10**model.get(exp.fit.map_param(exp, "quadrature")))
         else:
@@ -116,20 +126,20 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
 
         print(np.nanstd(resid))
         rlim = np.nanmax(np.abs(resid))
-        residual=axs[3].imshow(resid, cmap='bwr',vmin=-rlim, vmax=rlim)
-        plt.colorbar(residual,ax=axs[3])
+        residual=axs[4].imshow(resid, cmap='bwr',vmin=-rlim, vmax=rlim)
+        plt.colorbar(residual,ax=axs[4])
 
         if graticule:
-            axs[3].axvline((wid-1)/2 + params.get(exp.map_param("positions"))[0], color='k',linestyle='--')
-            axs[3].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
+            axs[4].axvline((wid-1)/2 + params.get(exp.map_param("positions"))[0], color='k',linestyle='--')
+            axs[4].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
 
         x = np.nanmax(np.abs(resid))
         xs = np.linspace(-x, x, 200)
         ys = jsp.stats.norm.pdf(xs, scale=np.nanstd(resid))#/np.sqrt(np.nanstd(resid))
 
-        axs[4].set_title(fr"Noise normalised residual $\sigma ={np.nanstd(resid):.3}$")
-        axs[4].hist(resid.flatten(), bins=50, density=True)
-        axs[4].plot(xs, ys, c='k')
+        axs[5].set_title(fr"Noise normalised residual $\sigma ={np.nanstd(resid):.3}$")
+        axs[5].hist(resid.flatten(), bins=50, density=True)
+        axs[5].plot(xs, ys, c='k')
         #axs[4].set_xlabel("z-score")
         #axs[4].set_ylabel("Counts")
 
@@ -139,8 +149,9 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
 
         axs[0].set_title("Measured PSF")
         axs[1].set_title("Recovered PSF")
-        axs[2].set_title("Recovered Aperture")
-        axs[3].set_title("Residual z-score")
+        axs[2].set_title("Recovered Pupil")
+        axs[3].set_title("Recovered Cold Mask")
+        axs[4].set_title("Residual z-score")
         #axs[4].set_title("Log Likelihood Map")
 
         for i in range(4):

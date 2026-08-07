@@ -39,6 +39,10 @@ filter_files = {
     'POL0S': get_filter("../data/HST_NICMOS1.POL0S.dat"),
     'POL240S': get_filter("../data/HST_NICMOS1.POL240S.dat"),
     'POL120S': get_filter("../data/HST_NICMOS1.POL120S.dat"),
+
+    'F215N': get_filter("../data/HST_NICMOS2.F215N.dat"),
+    'F171M': get_filter("../data/HST_NICMOS2.F171M.dat"),
+    'F207M': get_filter("../data/HST_NICMOS2.F207M.dat"),
 }
 
 def filter_integrate(wl_array, throughput_array, nwavels, norm=False):
