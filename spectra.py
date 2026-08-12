@@ -20,50 +20,97 @@ def nearest_interpolate(x, xp, fp):
     locs = np.argmin(np.abs(dists),axis=0)
     return fp[locs]    
 
+
+
+# class CombinedBasisSpectrum(CombinedSpectrum):
+#     basis_vects: Array
+#     proj: Array
+#     def __init__(self, wavels, filt_weights, basis_weights, basis, proj=None):
+#         self.basis_vects = np.asarray(basis)
+#         super().__init__(wavels, filt_weights, basis_weights)
+#         if proj is None:
+#             self.proj = np.eye(basis_weights.shape[0])
+#         else:
+#             self.proj = proj
+    
+#     def spec_weights(self):
+#         #return 10**np.sum(self.basis_vects*np.dot(self.proj, self.basis_weights), axis=1)
+#         #return 10**np.sum(self.basis_vects*self.basis_weights, axis=1)
+#         return np.maximum(np.sum(self.basis_vects*self.basis_weights, axis=1), 1e-8)
+
+
+# class CombinedSpectrum(SimpleSpectrum):
+#     filt_weights: Array
+#     basis_weights: Array
+
+#     def __init__(self, wavels, filt_weights, basis_weights):
+#         super().__init__(wavels)
+#         self.filt_weights = np.asarray(filt_weights, float)
+#         #self.wavelengths = np.asarray(wavels, dtype=float)
+#         self.basis_weights = np.asarray(basis_weights, dtype=float)
+
+#     def spec_weights(self):
+#         pass
+
+#     @property
+#     def weights(self):
+#         weights = self.filt_weights*self.spec_weights()
+#         return weights/weights.sum()
+
+#     @property
+#     def flux(self):
+#         return np.sum(self.spec_weights())
+    
+#     def proper_flux(self):
+#         return np.sum(self.spec_weights()*self.filt_weights)
+
+#     def normalise(self):
+#         return self
+
+eps = 1e-5
 class CombinedSpectrum(SimpleSpectrum):
+    wavelengths: Array
     filt_weights: Array
     basis_weights: Array
 
     def __init__(self, wavels, filt_weights, basis_weights):
-        super().__init__(wavels)
-        self.filt_weights = np.asarray(filt_weights, float)
-        #self.wavelengths = np.asarray(wavels, dtype=float)
+        self.wavelengths = np.asarray(wavels, dtype=float)
+        self.filt_weights = np.asarray(filt_weights, dtype=float)
         self.basis_weights = np.asarray(basis_weights, dtype=float)
-
-    def spec_weights(self):
-        pass
-
-    @property
-    def weights(self):
-        weights = self.filt_weights*self.spec_weights()
-        return weights/weights.sum()
 
     @property
     def flux(self):
-        return np.sum(self.spec_weights())
-    
-    def proper_flux(self):
-        return np.sum(self.spec_weights()*self.filt_weights)
+        spec_w = self.spec_weights()
+        detected_w = self.filt_weights * spec_w
+
+        return detected_w.sum()
+
+    @property
+    def weights(self):
+        spec_w = self.spec_weights()
+        detected_w = self.filt_weights * spec_w
+
+        flux = detected_w.sum()
+        weights = detected_w / self.flux
+
+        return weights
+
+    def spec_weights(self):
+        raise NotImplementedError
 
     def normalise(self):
         return self
 
+
 class CombinedBasisSpectrum(CombinedSpectrum):
     basis_vects: Array
-    proj: Array
-    def __init__(self, wavels, filt_weights, basis_weights, basis, proj=None):
-        self.basis_vects = np.asarray(basis)
-        super().__init__(wavels, filt_weights, basis_weights)
-        if proj is None:
-            self.proj = np.eye(basis_weights.shape[0])
-        else:
-            self.proj = proj
-    
-    def spec_weights(self):
-        #return 10**np.sum(self.basis_vects*np.dot(self.proj, self.basis_weights), axis=1)
-        #return 10**np.sum(self.basis_vects*self.basis_weights, axis=1)
-        return np.maximum(np.sum(self.basis_vects*self.basis_weights, axis=1), 1e-8)
 
+    def __init__(self, wavels, filt_weights, basis_weights, basis):
+        self.basis_vects = np.asarray(basis, dtype=float)
+        super().__init__(wavels, filt_weights, basis_weights)
+
+    def spec_weights(self):
+        return np.maximum(np.sum(self.basis_vects * self.basis_weights, axis=1), eps)
 
 
 class PreCombinedBasisSpectrum(CombinedSpectrum):

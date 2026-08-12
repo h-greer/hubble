@@ -172,3 +172,4 @@ data/MAST_*.fits
 *.png
 batch/*/*
 data/MAST_*/*
+*.pdf
