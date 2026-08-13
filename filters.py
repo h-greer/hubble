@@ -1,21 +1,21 @@
 import jax.numpy as np
 import jax.scipy as jsp
 
-from astropy.io import fits
-from astropy.coordinates import SkyCoord
-from astropy.wcs import WCS
-#from astrocut import fits_cut
-from astropy.nddata import Cutout2D
 import numpy
 import pandas as pd
 
+"""
+utilities for reading in and downsampling filter transmission files
+"""
+
+
 def get_filter(file):
-    flt = np.asarray(pd.read_csv(file, sep=' '))#[::20,:]
+    flt = np.asarray(pd.read_csv(file, sep=' '))
 
     wv = flt[:,0]
     bp = flt[:,1]
 
-    ebp = bp#/(wv/1e4)
+    ebp = bp
 
     nebp = ebp/np.sum(ebp)*(np.max(wv)-np.min(wv))*0.01
     final = flt.at[:,1].set(nebp)
@@ -42,12 +42,6 @@ filter_files = {
 }
 
 def filter_integrate(wl_array, throughput_array, nwavels, norm=False):
-    
-
-    # filter_path = os.path.join()
-    #file_path = pkg.resource_filename(__name__, f"/data/filters/{filt}.dat")
-    #wl_array, throughput_array = np.array(onp.loadtxt(file_path, unpack=True))
-
     edges = np.linspace(wl_array.min(), wl_array.max(), nwavels + 1)
     wavels = np.linspace(wl_array.min(), wl_array.max(), 2 * nwavels + 1)[1::2]
 

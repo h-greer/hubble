@@ -14,28 +14,36 @@ import equinox as eqx
 
 from abc import abstractmethod
 
+from astropy.io import fits
+from astropy.coordinates import SkyCoord
+from astropy.wcs import WCS
+from astropy.nddata import Cutout2D
+
+
 from apertures import *
 from detectors import *
 from spectra import *
 from filters import *
 from stats import gauss_log_likelihood
-#from vis_models import LogVisModel
 
+"""
+Models
+"""
 
 class Exposure(zdx.Base):
     filename: str = eqx.field(static=True)
     target: str = eqx.field(static=True)
     filter: str = eqx.field(static=True)
-    mjd: str = eqx.field(static=True)
-    exptime: str = eqx.field(static=True)
+    mjd: Array
+    exptime: Array
     wcs: object = eqx.field(static=True)
-    pam: Array#object = eqx.field(static=True)
+    pam: Array
     data: Array
     err: Array
     bad: Array
 
 
-    fit: object = eqx.field(static=True)
+    fit: object
 
     def __init__(self, filename, name, filter, data, err, bad, fit, mjd, exptime, wcs, pam):
         """
@@ -66,6 +74,9 @@ class Exposure(zdx.Base):
         return self.filename
 
 class BlankExposure(Exposure):
+    """
+    Dummy exposure for injection-recovery
+    """
     def __init__(self, name, filter, fit):
         self.filter = filter
         self.filename = f"{name}"
@@ -82,6 +93,9 @@ class BlankExposure(Exposure):
 
 
 class InjectedExposure(Exposure):
+    """
+    Injected exposure - generates data from the model and fit and spoofs other parameters
+    """
     def __init__(self, name, filter, fit, model, t_exp, n_exp, read_noise=10.):
         self.filter = filter
         self.filename = f"{name}"
@@ -108,6 +122,9 @@ class InjectedExposure(Exposure):
         self.pam = 0.
 
 class LoadedExposure(Exposure):
+    """
+    Builds exposure using arbitrary provided data
+    """
     def __init__(self, name, filter, fit, data, err, bad):
         self.filter = filter
         self.filename = f"{name}"
@@ -123,36 +140,39 @@ class LoadedExposure(Exposure):
         self.pam = 0.
 
 def exposure_from_file(fname, fit, extra_bad=None, crop=None):
+    """
+    builds exposure from provided file and fit object
+    """
 
     hdr = fits.getheader(fname, ext=0)
     image_hdr = fits.getheader(fname, ext=1)
 
+    # load data etc from file
     data = fits.getdata(fname, ext=1)
     err = fits.getdata(fname, ext=2)
     info = fits.getdata(fname, ext=3)
 
-    detector_mask = np.full((256, 256), False, dtype=bool).at[127:130, :].set(True)#.at[:, 127:130].set(True)
+    # mask out bad pixels which appear along the detector chip boundary
+    detector_mask = np.full((256, 256), False, dtype=bool).at[127:130, :].set(True)
 
     bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32) | detector_mask)
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
 
+    # retrieve metadata
     wcs = WCS(image_hdr)
-
-
     pam = hdr['NPFOCUSP']
-
     filename = hdr['ROOTNAME']
     name = hdr['TARGNAME']
     filter = hdr['FILTER']
-
     exptime = float(hdr['EXPTIME'])
     gain = float(hdr['ADCGAIN'])
-
     mjd = hdr['EXPSTART']
 
+    # print pipeline version - pipelines after 4.2 don't include photon noise
     print(hdr["CAL_VER"])
 
+    # crop image and adjust WCS accordingly
     if crop:
         w = WCS(image_hdr)
         y,x = numpy.unravel_index(numpy.nanargmax(data),data.shape)
@@ -160,29 +180,50 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
         centre = SkyCoord(w.pixel_to_world(x,y), unit='deg')
         data = Cutout2D(data, centre, crop, wcs=w).data
         err = Cutout2D(err, centre, crop, wcs=w).data
-        info = Cutout2D(info, centre, crop, wcs=w).data
+        bad = Cutout2D(bad, centre, crop, wcs=w).data
 
-    bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32))
+    # add in extra bad pixels
     if extra_bad is not None:
-        bad = bad | tf(extra_bad)
+        bad = bad | extra_bad
 
+    # nan out bad pixels in data and error
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
 
+    # add poisson noise to error
     err_with_poisson = np.sqrt(data/(gain*exptime) + err**2)
-
     bad_with_poisson = np.isnan(err_with_poisson)
 
     return Exposure(filename, name, filter, data, err_with_poisson, bad_with_poisson, fit, mjd, exptime, wcs, pam)
 
 class ModelFit(zdx.Base):
-    source: dl.Telescope
+    """
+    Model fitting object.  Controls how parameters are (potentially hierarchically) 
+    applied to the optical model and calculates the log-likelihood.  
+    """
+
+    source: object
 
     @abstractmethod
     def update_source(self, model, exposure):
+        """
+        Update source parameters
+        """
         pass
 
     def get_key(self, exposure, param):
+        """
+        determines key for lookup in the model parameters.  allows for hierarchical
+        parameter estimation - some parameters can be shared between exposures while
+        others can be fitted independently.  
+
+        possible keys include:
+            exposure.key - a unique key for each exposure, permitting independent fitting
+            "global" - shared between all exposures (usually something that should be refactored)
+            str(round(exposure.mjd)) - all exposures on same day share the same key
+            exposure.target - shared for all observations of the same target
+            exposure.filter - shared for all observations of the same filter
+        """
         match param:            
             case "aberrations":
                 #return "global"
@@ -193,19 +234,19 @@ class ModelFit(zdx.Base):
                 return "global"#exposure.key#"global"
                 #return str(round(exposure.mjd))
             case "cold_mask_rot":
-                return "global"#exposure.key#"global"
+                return "global"
             case "cold_mask_scale":
-                return "global"#return str(round(exposure.mjd))
+                return "global"
             case "cold_mask_shear":
-                return "global"#return str(round(exposure.mjd))
+                return "global"
             case "primary_rot":
-                return "global"#return str(round(exposure.mjd))
+                return "global"
             case "primary_scale":
-                return "global"#return str(round(exposure.mjd))
+                return "global"
             case "primary_shear":
-                return "global"#return str(round(exposure.mjd))
+                return "global"
             case "primary_distortion" | "cold_mask_distortion":
-                return "global"#return "global"
+                return "global"
             case "defocus":
                 return exposure.key
             case "bias":
@@ -219,11 +260,19 @@ class ModelFit(zdx.Base):
             case _: raise ValueError(f"Parameter {param} has no key")
     
     def map_param(self, exposure, param):
+        """
+        determines full location of model parameter. global parameters are simply "param"
+        while other parameters are "param.key"
+        """
         if param in ["aberrations", "cold_mask_shift", "cold_mask_rot", "cold_mask_scale", "cold_mask_shear", "primary_rot", "primary_scale", "primary_shear", "bias", "jitter", "primary_distortion", "cold_mask_distortion", "defocus", "despace", "quadrature"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
     def update_optics(self, model, exposure):
+        """
+        Applies parameters to the optical model, scaling as necessary
+        """
+
         optics = model.optics
         if "aberrations" in model.params.keys():
             coefficients = model.get(self.map_param(exposure, "aberrations"))*1e-9
@@ -314,6 +363,9 @@ class ModelFit(zdx.Base):
         return optics
 
     def update_detector(self, model, exposure):
+        """
+        applies relevant parameters to the detector model
+        """
         detector = model.detector
 
         if "bias" in model.params.keys():
@@ -325,6 +377,9 @@ class ModelFit(zdx.Base):
         return detector
 
     def __call__(self, model, exposure):
+        """
+        Forward models an exposure from the provided model
+        """
         source = self.update_source(model, exposure)
         optics = self.update_optics(model, exposure)
         detector = self.update_detector(model, exposure)
@@ -338,6 +393,9 @@ class ModelFit(zdx.Base):
         return detector.model(psf_obj, return_psf=False)
     
     def loglike(self, model, exposure, per_pix=False, return_im=False):
+        """
+        computes the log-likelihood of an exposure given the specified model
+        """
         psf = self(model, exposure)
 
         data = exposure.data
@@ -345,10 +403,10 @@ class ModelFit(zdx.Base):
         bad = exposure.bad
         err = np.where(bad, 1., err)
 
-        # add excess noise in quadrature
+        # add excess noise multiplicatively
         if "quadrature" in model.params.keys():
             quad_error = 10**model.get(self.map_param(exposure, "quadrature"))
-            err = err*quad_error#np.sqrt(err**2 + quad_error**2 + 1e-10)        
+            err = err*quad_error
 
         posterior_im = gauss_log_likelihood(psf, (data, err, bad))
         if return_im:
@@ -358,11 +416,12 @@ class ModelFit(zdx.Base):
             return np.nanmean(posterior_im)
         return np.nansum(posterior_im)
         
-        
+# base ModelFit only handles the instrument state, its subclasses are responsible for the source parameters        
 
 class SinglePointFit(ModelFit):
-    #nwavels: int = eqx.field(static=True)
-    #spectrum: CombinedSpectrum
+    """
+    Model for a single point source, potentially with a spectrum or time-varying intensity
+    """
     time_series: bool = eqx.field(static=True)
 
     def __init__(self, spectrum_basis, filter, time_series=False, precombined=False, wavels=None):
@@ -375,6 +434,9 @@ class SinglePointFit(ModelFit):
         self.time_series=time_series
     
     def get_key(self, exposure, param):
+        """
+        source-specific keys
+        """
         if param == "positions":
             return exposure.key
         elif param == "spectrum" or param == "flux":
@@ -386,12 +448,18 @@ class SinglePointFit(ModelFit):
             return super().get_key(exposure, param)
     
     def map_param(self, exposure, param):
+        """
+        source-specific parameter mapping
+        """
         if param in ["positions", "spectrum"]:
             return f"{param}.{exposure.get_key(param)}"
         else:
             return super().map_param(exposure, param)
 
     def update_source(self, model, exposure):
+        """
+        Apply model to the source
+        """
         
         spectrum_coeffs = model.get(exposure.fit.map_param(exposure, "spectrum"))
 
@@ -403,51 +471,10 @@ class SinglePointFit(ModelFit):
 
 
 
-# class SpectrumVisFit(ModelFit):
-#     vis_model: LogVisModel
-#     def __init__(self, spectrum, nwavels, vis_model):
-#         super().__init__(spectrum, nwavels)
-#         self.vis_model = vis_model
-
-#     def get_key(self, exposure, param):
-#         if param == "phases":
-#             return exposure.key
-#         elif param == "amplitudes":
-#             return exposure.key
-#         else:
-#             return super().get_key(exposure, param)
-    
-#     def map_param(self, exposure, param):
-#         if param == "phases":
-#             return f"{param}.{exposure.get_key(param)}"
-#         elif param == "amplitudes":
-#             return f"{param}.{exposure.get_key(param)}"
-#         else:
-#             return super().map_param(exposure, param)
-
-
-#     def __call__(self, model, exposure):
-
-#         source = self.update_source(model, exposure)
-#         optics = self.update_optics(model, exposure)
-#         detector = self.update_detector(model, exposure)
-
-#         wfs = optics.model(source, return_wf=True)
-
-#         phases = model.get(exposure.fit.map_param(exposure, "phases"))
-#         amplitudes = model.get(exposure.fit.map_param(exposure, "amplitudes"))
-
-#         psfs = self.vis_model.model_vis(wfs, amplitudes, phases, exposure.filter)
-
-#         psf = psfs.data.sum(tuple(range(psfs.ndim)))
-#         pixel_scale = psfs.pixel_scale.mean()
-
-#         psf_obj = dl.PSF(psf, pixel_scale)
-        
-#         return detector.model(psf_obj, return_psf=False)
-
-
 class BreathingFit(ModelFit):
+    """
+    Model for long exposure with linear breathing
+    """
     ns: int = eqx.field(static=True)
     def __init__(self, ns):
         self.source = dl.PointSource(wavelengths=[1])
@@ -490,12 +517,18 @@ class BreathingFit(ModelFit):
         return detector.model(psf_obj, return_psf=False)
     
 class BreathingSinglePointFit(SinglePointFit, BreathingFit):
+    """
+    Single point fit but with breathing
+    """
     def __init__(self, spectrum, nwavels, ns):
         SinglePointFit.__init__(self, spectrum, nwavels)
         BreathingFit.__init__(self, ns)
 
 
 class BinaryFit(ModelFit):
+    """
+    Binary fit, allowing each component to have distinct spectra
+    """
     def __init__(self, spectrum_basis, filter):
         nwavels, nbasis = spectrum_basis.shape
         wv, inten = calc_throughput(filter, nwavels)
@@ -519,6 +552,10 @@ class BinaryFit(ModelFit):
             return super().map_param(exposure, param)
 
     def update_source(self, model, exposure):
+        """
+        Apply model to the source.  Note this largely replicates the machinery of a
+        dLux BinarySource, but is more general in providing arbitrary spectra
+        """
         primary_coeffs = model.get(exposure.fit.map_param(exposure, "primary_spectrum"))
         secondary_coeffs = model.get(exposure.fit.map_param(exposure, "secondary_spectrum"))
 
@@ -541,6 +578,9 @@ class BinaryFit(ModelFit):
         return source
 
 class PointSourceContrastFit(ModelFit):
+    """
+    Basically another binary source with a different parameterisation
+    """
     def __init__(self, spectrum_basis, filter):
         nwavels, nbasis = spectrum_basis.shape
         wv, inten = calc_throughput(filter, nwavels)
@@ -610,6 +650,12 @@ class BaseModeller(zdx.Base):
         return values
 
 class NICMOSModel(BaseModeller):
+    """
+    Wrapper that holds all the relevant objects for the NICMOS model
+
+    maybe not necessary anymore?
+    """
+
     filters: dict
     optics: NICMOSOptics
     detector: NICMOSDetector
@@ -631,7 +677,9 @@ class NICMOSModel(BaseModeller):
 
 
 class ModelParams(BaseModeller):
-
+    """
+    Class to hold the model parameters dictionary
+    """
     def __getitem__(self, key):
         return self.params[key]
 

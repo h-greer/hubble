@@ -15,10 +15,13 @@ from detectors import *
 from spectra import *
 from models import *
 from stats import *
-from fisher import *
 
 from matplotlib import pyplot as plt
 import matplotlib
+
+"""
+Plotting utilities.  Abandon hope all ye who enter here
+"""
 
 
 def plot_params(models, groups, xw = 4, save=False):
