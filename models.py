@@ -33,11 +33,12 @@ class Exposure(zdx.Base):
     data: Array
     err: Array
     bad: Array
+    orient: Array
 
 
     fit: object = eqx.field(static=True)
 
-    def __init__(self, filename, name, filter, data, err, bad, fit, mjd, exptime, wcs, pam):
+    def __init__(self, filename, name, filter, data, err, bad, fit, mjd, exptime, wcs, pam, orient):
         """
         Initialise exposure
         """
@@ -54,6 +55,7 @@ class Exposure(zdx.Base):
         self.exptime = exptime
         self.wcs = wcs
         self.pam = pam
+        self.orient = orient
     
     def get_key(self, param):
         return self.fit.get_key(self, param)
@@ -148,11 +150,14 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
     exptime = float(hdr['EXPTIME'])
     gain = float(hdr['ADCGAIN'])
+    orient = float(hdr["ORIENTAT"])
     print(exptime, gain)
 
     mjd = hdr['EXPSTART']
 
     print(hdr["CAL_VER"])
+
+    print(hdr["ORIENTAT"])
 
     if crop:
         w = WCS(image_hdr)
@@ -174,7 +179,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
     bad_with_poisson = np.isnan(err_with_poisson)
 
-    return Exposure(filename, name, filter, data, err_with_poisson, bad_with_poisson, fit, mjd, exptime, wcs, pam)
+    return Exposure(filename, name, filter, data, err_with_poisson, bad_with_poisson, fit, mjd, exptime, wcs, pam, orient)
 
 class ModelFit(zdx.Base):
     source: dl.Telescope
@@ -184,9 +189,11 @@ class ModelFit(zdx.Base):
         pass
 
     def get_key(self, exposure, param):
-        match param:            
-            case "primary_opd" | "primary_tilt" | "cold_mask_opd" | "cold_mask_tilt":
-                return exposure.key
+        match param:
+            case "primary_low" | "primary_tilt":
+                return exposure.key            
+            case "primary_opd" | "cold_mask_opd" | "cold_mask_tilt":
+                return "global"
             case "cold_mask_shift" | "cold_mask_rot" | "cold_mask_shear" | "cold_mask_scale":
                 return "global"
             case "bias":
@@ -194,7 +201,7 @@ class ModelFit(zdx.Base):
             case _: raise ValueError(f"Parameter {param} has no key")
     
     def map_param(self, exposure, param):
-        if param in ["primary_opd", "cold_mask_opd", "primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_rot", "cold_mask_shear", "cold_mask_scale", "bias"]:
+        if param in ["primary_opd", "primary_low", "cold_mask_opd", "primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_rot", "cold_mask_shear", "cold_mask_scale", "bias"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
@@ -204,6 +211,10 @@ class ModelFit(zdx.Base):
             coefficients = model.get(self.map_param(exposure, "primary_opd"))*1e-9
             coefficients = coefficients.at[0,0].set(0.)
             optics = optics.set("primary_opd.coefficients", coefficients)
+        
+        if "primary_low" in model.params.keys():
+            coefficients = model.get(self.map_param(exposure, "primary_low"))*1e-9
+            optics = optics.set("primary_low.coefficients", coefficients)
         
         if "primary_tilt" in model.params.keys():
             angles = dlu.arcsec2rad(model.get(self.map_param(exposure, "primary_tilt")))

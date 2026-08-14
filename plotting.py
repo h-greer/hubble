@@ -15,7 +15,6 @@ from detectors import *
 from spectra import *
 from models import *
 from stats import *
-from fisher import *
 
 from matplotlib import pyplot as plt
 import matplotlib
@@ -31,7 +30,7 @@ def plot_params(models, groups, xw = 4, save=False):
     for i, param in enumerate(groups):
         sp = axs[i%xw, i//xw]
         # print(models[0].get(param))
-        if param in ["spectrum", "primary_opd", "cold_mask_opd","primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_shear", "cold_mask_scale", "cold_mask_rot", "bias", "resolved"]:
+        if param in ["primary_low", "spectrum", "primary_opd", "cold_mask_opd","primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_shear", "cold_mask_scale", "cold_mask_rot", "bias", "resolved"]:
 
             for j in range(len(list(models[-1].get(param).values()))):
                 vals = np.asarray([list(x.get(param).values())[j].flatten() for x in models]).T

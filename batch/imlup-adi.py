@@ -95,27 +95,26 @@ class CursedResolvedSource(dl.sources.Source):
     distribution: Array
     position: Array
     pitch: float
+    roll: Array
 
-    def __init__(self, distribution, pitch, position=np.zeros(2), **kwargs):
+    def __init__(self, distribution, pitch, position=np.zeros(2), roll=0., **kwargs):
         self.distribution = distribution
         self.pitch = float(pitch)
         self.position = position
+        self.roll = roll
         super().__init__(**kwargs)
     
     def normalise(self):
         return self
     
     def model(self, optics, return_wf=False, return_psf=False):
-        coords = dlu.nd_coords(self.distribution.shape, self.pitch, self.position)
+        R, TH = dlu.pixel_coords(self.distribution.shape[0], pixel_scale=self.pitch, polar=True)
+        coords = dlu.polar2cart(np.array([R, TH+self.roll]))
+        # coords = dlu.nd_coords(self.distribution.shape, self.pitch, self.position)
         xs = coords[0].flatten()
         ys = coords[1].flatten()
         ds = self.distribution.flatten()
-        # conv_psf = np.sum(
-        #     jax.vmap(
-        #         lambda xs, ys, ds: ds*optics.propagate(self.wavelengths, np.array([xs, ys]), self.weights)
-        #     )(xs, ys, ds), 
-        #     axis=0
-        # )
+
 
         conv_psf = np.sum(
             jax.lax.map(
@@ -125,16 +124,6 @@ class CursedResolvedSource(dl.sources.Source):
             ), 
             axis=0
         )
-
-
-
-
-
-        # print(self.wavelengths)
-
-        # conv_psf = jax.vmap(lambda xs, ys, ds: ds*optics.propagate(self.wavelengths, np.array([xs, ys]), self.weights))(xs, ys, ds)
-        
-        # print(conv_psf.shape)
 
         wf = optics.propagate(self.wavelengths, np.array([xs.mean(), ys.mean()]), self.weights, return_wf=True)
         if return_psf:
@@ -156,7 +145,7 @@ class PointResolvedFit(ModelFit):
                 wavelengths=wvr,
                 spectrum=dl.Spectrum(wvr, intenr), 
                 distribution=np.ones((wid, wid)),
-                pitch=(1.6e-6/2.4)/2,
+                pitch=dlu.arcsec2rad(0.0432*1)
             )),
             ("point", dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))),
         ])
@@ -191,6 +180,7 @@ class PointResolvedFit(ModelFit):
         distribution = self.get_distribution(model, exposure)
 
         source = source.set("resolved.distribution",  distribution)
+        source = source.set("resolved.roll", -np.deg2rad(exposure.orient))
         
         return source
 
@@ -199,7 +189,7 @@ class PointResolvedFit(ModelFit):
 
         if "resolved" in model.params.keys():
             dist = self.get_distribution(model, exposure)
-            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + 1.*L2_loss(dist) + 0.1*TSV_loss(dist)#+ 1.* L2_loss(dist) + 1.* ME_loss(dist) +  2*TSV_loss(dist)
+            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + 1.* L1_loss(dist) +  0.05*TV_loss(dist)
         
         return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im)
 
@@ -210,40 +200,44 @@ oversample = 4
 nwavels = 20
 npoly=3
 
-n_modes = 14
+n_modes = 5
+n_zernikes = 10
 
-resolved_wid = 80
+resolved_wid = 40
 
-optics = NICMOSCoronagraph(512, wid, oversample, n_modes=n_modes)
+optics = NICMOSCoronagraph(512, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes)
 
 detector = NICMOSDetector(oversample, wid)
 
 spectrum_basis = np.ones((nwavels, npoly))
 
-
 ddir = '../data/data/'
 
 
 vects = np.load("../data/iterative_spectrum_basis_F160W.npy")[:,:npoly]
-
 assert vects.shape == (nwavels, npoly)
-
-
 spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 
-extra_bad = np.full((wid,wid), False).at[20:30, 0:10].set(True)
 
 
 
 exposures_single = [
     exposure_from_file(ddir + 'n8zu11epq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
+    exposure_from_file(ddir + 'n8zu12exq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
 ]
 
+
+# %%
+plt.imshow(exposures_single[0].data**0.125)
+
+# %%
+exposures_single[0].target
 
 # %%
 params = {
     "spectrum": {},
     "primary_opd": {},
+    "primary_low": {},
     "primary_tilt": {},
     "cold_mask_opd": {},
     "cold_mask_tilt": {},
@@ -263,9 +257,10 @@ for idx, exp in enumerate(exposures_single):
     params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set((np.nansum(exp.data)/nwavels)*6)
 
     params["primary_tilt"][exp.fit.get_key(exp, "primary_tilt")] = np.array([0.00, 0.])
-    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = np.array([-0.3, -0.15])
+    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = np.array([-0.3, -0.1])
 
     params["primary_opd"][exp.fit.get_key(exp, "primary_opd")] = np.zeros((n_modes, n_modes))
+    params["primary_low"][exp.fit.get_key(exp, "primary_low")] = np.zeros((n_zernikes))
     params["cold_mask_opd"][exp.fit.get_key(exp, "cold_mask_opd")] = np.array([-160.])
 
     params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-13.,-7.])
@@ -275,7 +270,7 @@ for idx, exp in enumerate(exposures_single):
 
     params["bias"][exp.fit.get_key(exp, "bias")] = 0.
 
-    params["resolved"][exp.fit.get_key(exp, "resolved")] = np.zeros((resolved_wid,resolved_wid))+0.
+    params["resolved"][exp.fit.get_key(exp, "resolved")] = np.zeros((resolved_wid,resolved_wid))#+3#.at[:3, :3].set(3.)-2
     
 
 
@@ -289,7 +284,7 @@ model_single = set_array(NICMOSModel(exposures_single, params, optics, detector)
 params = ModelParams(params)
 
 # %%
-# plot_comparison(model_single, params, exposures_single)
+plot_comparison(model_single, params, exposures_single)
 
 # %%
 def sgd(lr, delay, momentum=0.5):
@@ -301,31 +296,54 @@ def adam(lr, delay):
 
 g = 5e-2
 
-things = {
-    "spectrum": sgd(g*4., 20),
-    # "cold_mask_shift": sgd(g*3, 100),
+"""
+    "spectrum": sgd(g*3, 0),
+    "cold_mask_shift": sgd(g*20, 40),
     
-    "bias": sgd(g*6, 30),
-    "primary_opd": sgd(g*1., 100),
+    "bias": sgd(g*3, 20),
+    "primary_opd": sgd(g*0.1, 10),
     # "primary_opd": adam(0.1, 10),
 
-    "cold_mask_opd": sgd(g*5, 20),
+    "cold_mask_opd": sgd(g*3, 10),
 
+    "primary_tilt": sgd(g*1, 10),
+    "cold_mask_tilt": sgd(g*1, 10),
+    #"jitter": opt(g*1, 120),
+
+
+    "cold_mask_shear": sgd(g*2, 200),
+    "cold_mask_rot": sgd(g*3, 200),
+    "cold_mask_scale": sgd(g*15, 200),
+
+    # "quadrature": sgd(g*20, 400)
+
+    "occulter_radius": sgd(g*10, 200),
+    "fnumber": sgd(g*0.05, 220),
+
+    "occulter_coeffs": sgd(g*20, 300),
+"""
+
+things = {
+    "spectrum": sgd(g*3, 0),
+    "primary_opd": sgd(g*3, 20),
+    "primary_low": sgd(g*3, 10),
     "primary_tilt": sgd(g*1., 10),
-    "cold_mask_tilt": sgd(g*1, 0),
-    # #"jitter": opt(g*1, 120),
+    "cold_mask_tilt": sgd(g*1, 10),
+    "cold_mask_opd": sgd(g*1, 10),
 
+    "bias": sgd(g*3, 50),
+    "cold_mask_shift": sgd(g*20, 60),
 
     # # "cold_mask_shear": sgd(g*2, 200),
-    # "cold_mask_rot": sgd(g*10, 200),
-    # "cold_mask_scale": sgd(g*20, 200),
+    # # "cold_mask_rot": sgd(g*3, 200),
+    # # "cold_mask_scale": sgd(g*15, 200),
 
-    # # "quadrature": sgd(g*20, 400)
+    # # # "quadrature": sgd(g*20, 400)
 
-    # "occulter_radius": sgd(g*1, 200),
-    "fnumber": sgd(g*0.1, 220),
+    # # "occulter_radius": sgd(g*10, 200),
+    # # "fnumber": sgd(g*0.05, 220),
 
-    "resolved": adam(3e-2, 50)
+    "resolved": adam(3e-2, 100)
 }
 
 things_start = {
@@ -349,7 +367,7 @@ orig_params = params.params #| params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new_resolved(opt_params, model_single, exposures_single, things, 500, nbatches=9)
+losses, params_history = optimise_new_resolved(opt_params, model_single, exposures_single, things, 200, nbatches=10)
 
 # %%
 plt.plot(losses[:])
@@ -358,34 +376,27 @@ plt.plot(losses[:])
 losses[-1]
 
 # %%
-plot_params(params_history, groups, xw = 3, save="sz82-params")
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="sz82-comparison")
+plot_params(params_history, groups, xw = 3, save="imlup-params")
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="imlup-comparison")
 
 # %%
 params_history[-1]
 
 # %%
+plt.imshow(10**np.flip(params_history[-1]["resolved"]["SZ-82_F160W"]))  
+plt.colorbar()
+
 plt.figure(figsize=(10,10))
 plt.imshow(10**np.flip(params_history[-1]["resolved"]["SZ-82_F160W"]))
-plt.savefig("sz82.png")
+plt.savefig("imlup.png")
 
 plt.figure(figsize=(10,10))
 plt.imshow(np.flip(params_history[-1]["resolved"]["SZ-82_F160W"]))
-plt.savefig("sz82-log.png")
+plt.savefig("imlup-log.png")
 
 
-# # %%
-# model = ModelParams(params_history[-1]).inject(model_single)
-# fit = exp.fit(model, exposures_single[0])
-# exp = exposures_single_no_bad[0]
 
-# # %%
-# resid = (exp.data - fit)/exp.err
-# rlim = np.nanmax(np.abs(resid))
-# plt.imshow(resid, cmap="bwr", vmin=-rlim, vmax=rlim)
-# plt.colorbar()
-
-# # %%
+# %%
 
 
 

@@ -239,7 +239,7 @@ class SoummerFastObstruction(dl.OpticalLayer):
 
 
 class NICMOSCoronagraph(dl.LayeredOpticalSystem):
-    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12):
+    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1.):
         diameter = 2.4
         layers = [
             ("primary",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4), softening=2)),
@@ -248,11 +248,11 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
 
             ("primary_opd", dl.FourierBasis(wf_npixels, n_modes=n_modes)),
 
-            # ("primary_opd", dl.AberratedAperture(
-            #         dl.layers.CircularAperture(1.2),
-            #         noll_inds=np.arange(4,4+n_zernikes),
-            #         coefficients = np.zeros(n_zernikes),
-            #     )),
+            ("primary_low", dl.AberratedAperture(
+                    dl.layers.CircularAperture(1.2),
+                    noll_inds=np.arange(4,4+n_zernikes),
+                    coefficients = np.zeros(n_zernikes),
+                )),
 
             # ("prop1", dl.MFT(128, pixel_scale=dlu.arcsec2rad(0.01))),
             # ("occulter", CLIMBOcculter(dlu.arcsec2rad(0.3), np.zeros(1), np.zeros(1))),
