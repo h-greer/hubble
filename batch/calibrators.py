@@ -44,6 +44,7 @@ from spectra import *
 
 import jax.tree_util as jtu
 import interpax as ipx
+from glob import glob
 
 def set_array(pytree):
     dtype = np.float64 if jax.config.x64_enabled else np.float32
@@ -52,7 +53,7 @@ def set_array(pytree):
     return eqx.combine(floats, other)
 
 ddir = '../data/NICMOS-LAPL-DD2/LAPL_DATA_DD2/comtemp_flats-DD2/'
-fnames = glob(ddir+"*.fits")
+fnames = glob(ddir+"*_o_clc_calf.fits")
 fnames.sort()
 
 targinfo = []
@@ -105,7 +106,8 @@ objs = [
     "G238-44",
 ]
 
-target = objs[int(sys.argv[1])]
+index = int(sys.argv[1])
+target = objs[index]
 
 files = [x[0] for x in targinfo if x[1]==target and x[2]=="F160W"]
 
@@ -116,7 +118,7 @@ oversample = 4
 nwavels = 20
 npoly=4
 
-n_modes = 30
+n_modes = 20
 n_zernikes = 50
 
 resolved_wid = 1
@@ -136,7 +138,7 @@ spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 
 
 exposures_single = [
-    exposure_from_file(ddir + f, SinglePointFit(spectrum_basis, "F160W"), crop=wid) for f in files
+    exposure_from_file(f, SinglePointFit(spectrum_basis, "F160W"), crop=wid) for f in files[:2]
 ]
 
 
@@ -166,7 +168,7 @@ params = {
 
 
 for idx, exp in enumerate(exposures_single):
-    params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set((np.nansum(exp.data)/nwavels)*6)
+    params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set((np.nansum(exp.data)/nwavels)*6/exp.exptime)
 
     params["primary_tilt"][exp.fit.get_key(exp, "primary_tilt")] = np.array([0.00, 0.])
     params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = np.array([-0.3, -0.1])
@@ -229,14 +231,14 @@ g = 5e-2
 
 things = {
     "spectrum": sgd(g*3, 0),
-    "primary_opd": sgd(g*3, 20),
-    "primary_low": sgd(g*3, 10),
+    "primary_opd": sgd(g*1, 40),
+    "primary_low": sgd(g*0.5, 20),
     "primary_tilt": sgd(g*1., 10),
     "cold_mask_tilt": sgd(g*1, 10),
     "cold_mask_opd": sgd(g*1, 10),
 
     "bias": sgd(g*3, 50),
-    "cold_mask_shift": sgd(g*20, 60),
+    "cold_mask_shift": sgd(g*20, 80),
 }
 
 things_start = {
@@ -260,19 +262,22 @@ orig_params = params.params #| params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 500, nbatches=20)
+losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 100, nbatches=50)
 
 # %%
+plt.figure(figsize=(10,10))
 plt.plot(losses[:])
+plt.savefig(f"calibrators/losses-{index}.png")
 
 # %%
 losses[-1]
 
 # %%
-plot_params(params_history, groups, xw = 3)
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False)
+plot_params(params_history, groups, xw = 3, save=f"calibrators/params-{index}")
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save=f"calibrators/comparison-{index}")
 
 # %%
 params_history[-1]
 
 
+np.save(f"calibrators/params-{target}-{index}", params_history[-1])

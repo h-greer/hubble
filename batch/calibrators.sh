@@ -1,12 +1,12 @@
 #!/bin/bash --login
 #SBATCH --job-name=calibrators
-#SBATCH --array=0-1
+#SBATCH --array=0-4
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=00:30:00
-#SBATCH --mem-per-cpu=2000M
+#SBATCH --mem-per-cpu=8000M
 #SBATCH -o calibrators/%a.out
 
 

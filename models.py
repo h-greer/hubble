@@ -81,6 +81,7 @@ class BlankExposure(Exposure):
         self.bad = 0.
         self.exptime = 0.
         self.pam = 0.
+        self.orient=0.
 
 
 class InjectedExposure(Exposure):
@@ -108,6 +109,7 @@ class InjectedExposure(Exposure):
 
         self.exptime = t_exp
         self.pam = 0.
+        self.orient = 0.
 
 class LoadedExposure(Exposure):
     def __init__(self, name, filter, fit, data, err, bad):
@@ -123,6 +125,7 @@ class LoadedExposure(Exposure):
         self.bad = bad
         self.exptime = 0.
         self.pam = 0.
+        self.orient = 0.
 
 def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
@@ -346,7 +349,7 @@ class SinglePointFit(ModelFit):
         spectrum_coeffs = model.get(exposure.fit.map_param(exposure, "spectrum"))
 
         source = self.source.set("spectrum.basis_weights", spectrum_coeffs)
-        source = source.set("flux", source.spectrum.flux)
+        source = source.set("flux", source.spectrum.flux*exposure.exptime)
         source = source.set("position", np.zeros(2))#model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
         
         return source    
