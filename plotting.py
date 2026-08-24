@@ -103,7 +103,7 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
         support_mask = support.at[support < .5].set(np.nan)
 
         # opd = optics.primary_opd.eval_basis(coords)*1e9
-        opd = optics.primary_opd.eval_basis()*1e9
+        opd = (optics.primary_opd.eval_basis() + optics.primary_low.eval_basis(coords))*1e9
         olim = np.nanmax(np.abs(opd*support_mask))
         apt =axs[2].imshow(support_mask*opd,cmap=cmap,vmin=-olim, vmax=olim)
         plt.colorbar(apt, ax=axs[2]).set_label("OPD (nm)")

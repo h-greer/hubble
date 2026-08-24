@@ -31,6 +31,32 @@ def loss_fn(params, exposures, model):
     mdl = params.inject(model)
     return np.nansum(np.asarray([posterior(mdl,exposure) for exposure in exposures]))
 
+import hashlib
+import pickle
+
+def hash_arbitrary_object(obj):
+    # Serialize the object to stable bytes
+    serialized_obj = pickle.dumps(obj)
+    
+    # Generate a SHA-256 hash string
+    return hashlib.sha256(serialized_obj).hexdigest()
+
+
+def cache_lrs(params, C, cache="cache/lrs"):
+    hashname = hash_arbitrary_object(params)
+
+    if not os.path.exists(cache):
+        os.makedirs(cache)
+
+    save_path = f"{cache}/{hashname}/"
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+
+    # Path to the file
+    file_path = os.path.join(save_path, f"{param}.npy")
+
+    
+
 def optimise_optimistix(params, model, exposures, project=True, diag=False, nbatches=None):
     if not nbatches:
         nbatches=len(exposures)*5
@@ -61,25 +87,6 @@ def optimise_optimistix(params, model, exposures, project=True, diag=False, nbat
     solver = optx.BestSoFarMinimiser(optx.LBFGS(rtol=1e-6, atol=1e-6))
     sol = optx.minimise(projected_loss_fn, solver, X, args, max_steps=1024, throw=False)
     return project_fn(sol.value)
-
-def optimise_no_norm(params, model, exposures, optimisers, epochs):
-    optim, state = opt.map_optimisers(params, optimisers)
-
-    loss_grad_fn = eqx.filter_jit(eqx.filter_value_and_grad(lambda params, exposures, model: loss_fn(ModelParams(params), exposures, model)))
-
-    pbar = tqdm(range(epochs))
-    losses, params_history = [], []
-    for step in pbar:
-        loss, grads = loss_grad_fn(params, exposures, model)
-
-        updates, state = optim.update(grads, state)
-        params = optax.apply_updates(params, updates)
-        pbar.set_postfix(log_loss=f"{np.log10(loss):.4f}")
-        losses.append(loss)
-        params_history.append(params)
-    losses = np.array(losses)
-
-    return losses, params_history
 
 
 def optimise_new_resolved(params, model, exposures, optimisers, epochs, diag=True, nbatches=1, use_c=False, return_c=False):

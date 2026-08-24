@@ -43,6 +43,7 @@ filter_files = {
     'F215N': get_filter("../data/HST_NICMOS2.F215N.dat"),
     'F171M': get_filter("../data/HST_NICMOS2.F171M.dat"),
     'F207M': get_filter("../data/HST_NICMOS2.F207M.dat"),
+    'F180M': get_filter("../data/HST_NICMOS2.F180M.dat"),
 }
 
 def filter_integrate(wl_array, throughput_array, nwavels, norm=False):
