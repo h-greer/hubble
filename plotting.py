@@ -64,14 +64,14 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
 
         model = params.inject(model)
 
-        coords = dlu.pixel_coords(512, 2.4)
-        cropped_frame = exp.data**0.125
+        coords = dlu.pixel_coords(512, model.optics.diameter)
+        cropped_frame = exp.data**0.25
 
         fit = exp.fit(model, exp)
 
         wid = fit.shape[0]
 
-        telescope_frame = fit**0.125
+        telescope_frame = fit**0.25
 
         vm = max(np.nanmax(cropped_frame),np.nanmax(telescope_frame))
         cd=axs[0].imshow(cropped_frame, vmin=0,vmax=vm,cmap=cmap)

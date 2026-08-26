@@ -349,7 +349,7 @@ class SinglePointFit(ModelFit):
         spectrum_coeffs = model.get(exposure.fit.map_param(exposure, "spectrum"))
 
         source = self.source.set("spectrum.basis_weights", spectrum_coeffs)
-        source = source.set("flux", source.spectrum.flux*exposure.exptime)
+        source = source.set("flux", source.spectrum.flux)
         source = source.set("position", np.zeros(2))#model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432))
         
         return source    
