@@ -49,7 +49,7 @@ def plot_params(models, groups, xw = 4, save=False):
         fig.savefig(f"{save}.png")
 
 
-def plot_comparison(model, params, exposures, quadrature=False, save=False, graticule=False):
+def plot_comparison(model, params, exposures, quadrature=False, save=False, graticule=False, percentile=100):
     for f, exp in enumerate(exposures):
 
         fig, axs = plt.subplots(1,6, figsize=(60,8))
@@ -124,7 +124,10 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
             resid = (exp.data - fit)/exp.err
 
         print(np.nanstd(resid))
-        rlim = np.nanmax(np.abs(resid))
+        if percentile < 100:
+            rlim = np.nanpercentile(np.abs(resid), percentile)
+        else:
+            rlim = np.nanmax(np.abs(resid))
         residual=axs[4].imshow(resid, cmap='bwr',vmin=-rlim, vmax=rlim)
         plt.colorbar(residual,ax=axs[4])
 

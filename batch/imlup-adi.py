@@ -236,6 +236,7 @@ params = {
     "cold_mask_tilt": {},
     "cold_mask_shift": {},
     "cold_mask_rot": {},
+    "primary_rot": {},
     "cold_mask_shear": {},
     "cold_mask_scale": {},
 
@@ -267,6 +268,7 @@ for idx, exp in enumerate(exposures_single):
 
     params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.array([13.12248021,  8.57885088])
     params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = 0.#-90.
+    params["primary_rot"][exp.fit.get_key(exp, "primary_rot")] = 0.##-90.
     params["cold_mask_scale"][exp.fit.get_key(exp, "cold_mask_scale")] = np.asarray([1.,1.])
     params["cold_mask_shear"][exp.fit.get_key(exp, "cold_mask_shear")] = np.asarray([0.,0.])
 
@@ -418,7 +420,7 @@ losses[-1]
 
 # %%
 plot_params(params_history, groups, xw = 3, save="imlup-params")
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="imlup-comparison")
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="imlup-comparison", percentile=99)
 
 # %%
 params_history[-1]
