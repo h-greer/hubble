@@ -197,14 +197,14 @@ class ModelFit(zdx.Base):
                 return exposure.key            
             case "primary_opd" | "cold_mask_opd" | "cold_mask_tilt":
                 return "global"
-            case "cold_mask_shift" | "cold_mask_rot" | "cold_mask_shear" | "cold_mask_scale":
+            case "cold_mask_shift" | "cold_mask_rot" | "cold_mask_shear" | "cold_mask_scale" | "primary_rot":
                 return "global"
             case "bias":
                 return exposure.key
             case _: raise ValueError(f"Parameter {param} has no key")
     
     def map_param(self, exposure, param):
-        if param in ["primary_opd", "primary_low", "cold_mask_opd", "primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_rot", "cold_mask_shear", "cold_mask_scale", "bias"]:
+        if param in ["primary_opd", "primary_low", "cold_mask_opd", "primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_rot", "primary_rot", "cold_mask_shear", "cold_mask_scale", "bias"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
@@ -250,6 +250,10 @@ class ModelFit(zdx.Base):
             translation = dlu.deg2rad(model.get(self.map_param(exposure, "cold_mask_rot")))+np.pi/4
             optics = optics.set("cold_mask.transformation.rotation", translation)
             optics = optics.set("cold_mask_opd.aperture.transformation.rotation", translation)
+
+        if "primary_rot" in model.params.keys():
+            translation = dlu.deg2rad(model.get(self.map_param(exposure, "primary_rot")))+np.pi/4
+            optics = optics.set("primary.transformation.rotation", translation)
 
         if "occulter_radius" in model.params.keys():
             radius = model.get(self.map_param(exposure, "occulter_radius"))*dlu.arcsec2rad(0.3)*24*2.4

@@ -197,11 +197,11 @@ class PointResolvedFit(ModelFit):
 wid = 80
 oversample = 4
 
-nwavels = 30
+nwavels = 20
 npoly=3
 
 n_modes = 40
-n_zernikes = 10
+n_zernikes = 30
 
 resolved_wid = 60#*2
 
@@ -353,19 +353,21 @@ g = 5e-2
 # }
 
 things = {
-    "primary_opd": sgd(g*3, 0),
+    "primary_opd": sgd(g*0.1, 30),
     "spectrum": sgd(g*3, 0),
     "primary_tilt": sgd(g*3, 0),
     "cold_mask_tilt": sgd(g*1, 0),
     "cold_mask_opd": sgd(g*1, 0),
 
-    "bias": sgd(g*3, 50),
+    "bias": sgd(g*3, 0),
     "cold_mask_shift": sgd(g*1, 0),
-    "primary_low": sgd(g*3, 0),
+    "cold_mask_rot": sgd(g*1, 0),
+    "primary_rot": sgd(g*1, 0),
+    "primary_low": sgd(g*1, 0),
     "occulter_radius": sgd(g*3., 0),
-    "fnumber": sgd(g*2., 0),
+    # "fnumber": sgd(g*2., 0),
 
-    "resolved": adam(3e-2, 50)
+    "resolved": adam(3e-2, 60)
 }
 
 things_start = {
@@ -376,6 +378,8 @@ things_start = {
 
     "bias": sgd(g*3, 50),
     "cold_mask_shift": sgd(g*1, 70),
+    "cold_mask_rot": sgd(g*10, 70),
+    "primary_rot": sgd(g*10, 70),
     "primary_low": sgd(g*3, 90),
     "occulter_radius": sgd(g*0.3, 130),
     "occulter_coeffs": sgd(g*2, 200),
@@ -395,8 +399,9 @@ losses, params_history = optimise_new(opt_params, model_single, exposures_single
 plt.plot(losses[:])
 
 # %%
-plot_params(params_history, list(things_start.keys()), xw = 3)
-plot_comparison(model_single, ModelParams(params_history[95]), exposures_single, quadrature=False)
+plot_params(params_history, list(things_start.keys()), xw = 3, save="imlup-intermediate-params")
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="imlup-intermediate-comparison")
+
 
 # %%
 orig_params = params.params | params_history[-1]
