@@ -211,7 +211,7 @@ detector = NICMOSDetector(oversample, wid)
 
 spectrum_basis = np.ones((nwavels, npoly))
 
-ddir = '../data/data/'
+ddir = '../data/NICMOS-LAPL-DD2/LAPL_DATA_DD2/comtemp_flats-DD2/'
 
 
 vects = np.load("../data/iterative_spectrum_basis_F160W.npy")[:,:npoly]
@@ -222,10 +222,8 @@ spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 
 
 exposures_single = [
-    exposure_from_file(ddir + 'n8zu11epq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
-    # exposure_from_file(ddir + 'n8zu11eqq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
-    exposure_from_file(ddir + 'n8zu12exq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
-    # exposure_from_file(ddir + 'n8zu12eyq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
+    exposure_from_file(ddir + 'n93m23lmq_o_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
+    exposure_from_file(ddir + 'n93m24lsq_o_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
 ]
 params = {
     "spectrum": {},
@@ -382,7 +380,7 @@ things_start = {
     "cold_mask_shift": sgd(g*1, 70),
     "cold_mask_rot": sgd(g*10, 70),
     "primary_rot": sgd(g*10, 70),
-    "primary_low": sgd(g*3, 90),
+    "primary_low": sgd(g*0.1, 90),
     "occulter_radius": sgd(g*0.3, 130),
     "occulter_coeffs": sgd(g*2, 200),
     # "fnumber": sgd(g*2., 150),
@@ -401,8 +399,8 @@ losses, params_history = optimise_new(opt_params, model_single, exposures_single
 plt.plot(losses[:])
 
 # %%
-plot_params(params_history, list(things_start.keys()), xw = 3, save="imlup-intermediate-params")
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="imlup-intermediate-comparison")
+plot_params(params_history, list(things_start.keys()), xw = 3, save="aumic-intermediate-params")
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="aumic-intermediate-comparison")
 
 
 # %%
@@ -419,23 +417,23 @@ plt.plot(losses[:])
 losses[-1]
 
 # %%
-plot_params(params_history, groups, xw = 3, save="imlup-params")
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="imlup-comparison", percentile=99)
+plot_params(params_history, groups, xw = 3, save="aumic-params")
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="aumic-comparison", percentile=99)
 
 # %%
 params_history[-1]
 
 # %%
-plt.imshow(10**(params_history[-1]["resolved"]["SZ-82_F160W"]))  
+plt.imshow(10**(params_history[-1]["resolved"]["GJ803_F160W"]))  
 plt.colorbar()
 
 plt.figure(figsize=(10,10))
-plt.imshow(10**(params_history[-1]["resolved"]["SZ-82_F160W"]))
-plt.savefig("imlup.png")
+plt.imshow(10**(params_history[-1]["resolved"]["GJ803_F160W"]))
+plt.savefig("aumic.png")
 
 plt.figure(figsize=(10,10))
-plt.imshow((params_history[-1]["resolved"]["SZ-82_F160W"]))
-plt.savefig("imlup-log.png")
+plt.imshow((params_history[-1]["resolved"]["GJ803_F160W"]))
+plt.savefig("aumic-log.png")
 
 
 

@@ -49,10 +49,10 @@ def plot_params(models, groups, xw = 4, save=False):
         fig.savefig(f"{save}.png")
 
 
-def plot_comparison(model, params, exposures, quadrature=False, save=False, graticule=False, percentile=100):
+def plot_comparison(model, params, exposures, quadrature=False, save=False, graticule=False, percentile=100, wf_size=512):
     for f, exp in enumerate(exposures):
 
-        fig, axs = plt.subplots(1,6, figsize=(60,8))
+        fig, axs = plt.subplots(2,3, figsize=(30,20), layout='compressed')
 
 
         cmap = matplotlib.colormaps['inferno']
@@ -64,7 +64,7 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
 
         model = params.inject(model)
 
-        coords = dlu.pixel_coords(512, model.optics.diameter)
+        coords = dlu.pixel_coords(wf_size, model.optics.diameter)
         cropped_frame = exp.data**0.25
 
         fit = exp.fit(model, exp)
@@ -74,19 +74,19 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
         telescope_frame = fit**0.25
 
         vm = max(np.nanmax(cropped_frame),np.nanmax(telescope_frame))
-        cd=axs[0].imshow(cropped_frame, vmin=0,vmax=vm,cmap=cmap)
-        plt.colorbar(cd,ax=axs[0])
+        cd=axs[0, 0].imshow(cropped_frame, vmin=0,vmax=vm,cmap=cmap)
+        plt.colorbar(cd,ax=axs[0,0])
 
         if graticule:
-            axs[0].axvline((wid-1)/2 + params.get(exp.map_param("positions"))[0], color='k',linestyle='--')
-            axs[0].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
+            axs[0, 0].axvline((wid-1)/2 + params.get(exp.map_param("positions"))[0], color='k',linestyle='--')
+            axs[0, 0].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
 
-        tl=axs[1].imshow(telescope_frame, vmin=0, vmax=vm,cmap=cmap)
-        plt.colorbar(tl,ax=axs[1])
+        tl=axs[1, 0].imshow(telescope_frame, vmin=0, vmax=vm,cmap=cmap)
+        plt.colorbar(tl,ax=axs[1,0])
 
         if graticule:
-            axs[1].axvline((wid-1)/2 + params.get(exp.map_param("positions"))[0], color='k',linestyle='--')
-            axs[1].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
+            axs[1, 0].axvline((wid-1)/2 + params.get(exp.map_param("positions"))[0], color='k',linestyle='--')
+            axs[1, 0].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
 
         #axs[2].imshow(cropped_err)
         cmap = matplotlib.colormaps['bwr']
@@ -99,23 +99,23 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
 
         optics = exp.fit.update_optics(model, exp)
 
-        support = optics.primary.transmission(coords,2.4/512)
+        support = optics.primary.transmission(coords,2.4/wf_size)
         support_mask = support.at[support < .5].set(np.nan)
 
         # opd = optics.primary_opd.eval_basis(coords)*1e9
         opd = (optics.primary_opd.eval_basis() + optics.primary_low.eval_basis(coords))*1e9
         olim = np.nanmax(np.abs(opd*support_mask))
-        apt =axs[2].imshow(support_mask*opd,cmap=cmap,vmin=-olim, vmax=olim)
-        plt.colorbar(apt, ax=axs[2]).set_label("OPD (nm)")
+        apt =axs[0,1].imshow(support_mask*opd,cmap=cmap,vmin=-olim, vmax=olim)
+        plt.colorbar(apt, ax=axs[0,1]).set_label("OPD (nm)")
 
 
-        support = optics.cold_mask.transmission(coords,2.4/512)
+        support = optics.cold_mask.transmission(coords,2.4/wf_size)
         support_mask = support.at[support < .5].set(np.nan)
 
         opd = optics.cold_mask_opd.eval_basis(coords)*1e9
         olim = np.nanmax(np.abs(opd*support_mask))
-        apt =axs[3].imshow(support_mask*opd,cmap=cmap,vmin=-olim, vmax=olim)
-        plt.colorbar(apt, ax=axs[3]).set_label("OPD (nm)")
+        apt =axs[1,1].imshow(support_mask*opd,cmap=cmap,vmin=-olim, vmax=olim)
+        plt.colorbar(apt, ax=axs[1,1]).set_label("OPD (nm)")
 
 
         if quadrature:
@@ -128,20 +128,20 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
             rlim = np.nanpercentile(np.abs(resid), percentile)
         else:
             rlim = np.nanmax(np.abs(resid))
-        residual=axs[4].imshow(resid, cmap='bwr',vmin=-rlim, vmax=rlim)
-        plt.colorbar(residual,ax=axs[4])
+        residual=axs[0,2].imshow(resid, cmap='bwr',vmin=-rlim, vmax=rlim)
+        plt.colorbar(residual,ax=axs[0,2])
 
-        if graticule:
-            axs[4].axvline((wid-1)/2 + params.get(exp.map_param("positions"))[0], color='k',linestyle='--')
-            axs[4].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
+        # if graticule:
+        #     axs[4].axvline((wid-1)/2 + params.get(exp.map_param("positions"))[0], color='k',linestyle='--')
+        #     axs[4].axhline((wid-1)/2 + params.get(exp.map_param("positions"))[1], color='k',linestyle='--')
 
         x = np.nanmax(np.abs(resid))
         xs = np.linspace(-x, x, 200)
         ys = jsp.stats.norm.pdf(xs, scale=np.nanstd(resid))#/np.sqrt(np.nanstd(resid))
 
-        axs[5].set_title(fr"Noise normalised residual $\sigma ={np.nanstd(resid):.3}$")
-        axs[5].hist(resid.flatten(), bins=50, density=True)
-        axs[5].plot(xs, ys, c='k')
+        axs[1,2].set_title(fr"Noise normalised residual $\sigma ={np.nanstd(resid):.3}$")
+        axs[1,2].hist(resid.flatten(), bins=50, density=True)
+        axs[1,2].plot(xs, ys, c='k')
         #axs[4].set_xlabel("z-score")
         #axs[4].set_ylabel("Counts")
 
@@ -149,18 +149,18 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
         #lpd = axs[4].imshow(lpdf)
         #plt.colorbar(lpd, ax=axs[4])
 
-        axs[0].set_title("Measured PSF")
-        axs[1].set_title("Recovered PSF")
-        axs[2].set_title("Recovered Pupil")
-        axs[3].set_title("Recovered Cold Mask")
-        axs[4].set_title("Residual z-score")
+        axs[0, 0].set_title("Observed Image")
+        axs[1, 0].set_title("Recovered Image")
+        axs[0, 1].set_title("Recovered Pupil")
+        axs[1, 1].set_title("Recovered Cold Mask")
+        axs[0, 2].set_title("Residual z-score")
         #axs[4].set_title("Log Likelihood Map")
 
         for i in range(4):
-            axs[i].set_xticks([])
-            axs[i].set_yticks([])
+            axs[i//2, i%2].set_xticks([])
+            axs[i//2, i%2].set_yticks([])
         
-        fig.tight_layout()
+        # fig.tight_layout()
 
         if save:
             fig.savefig(f"{save}_{f}.png")
