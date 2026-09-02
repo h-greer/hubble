@@ -36,7 +36,7 @@ class Exposure(zdx.Base):
     orient: Array
 
 
-    fit: object = eqx.field(static=True)
+    fit: object# = eqx.field(static=True)
 
     def __init__(self, filename, name, filter, data, err, bad, fit, mjd, exptime, wcs, pam, orient):
         """
@@ -127,7 +127,7 @@ class LoadedExposure(Exposure):
         self.pam = 0.
         self.orient = 0.
 
-def exposure_from_file(fname, fit, extra_bad=None, crop=None):
+def exposure_from_file(fname, fit, extra_bad=None, crop=None, flatcorr=None):
 
     hdr = fits.getheader(fname, ext=0)
     image_hdr = fits.getheader(fname, ext=1)
@@ -138,7 +138,16 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None):
 
     detector_mask = np.full((256, 256), False, dtype=bool).at[127:130, :].set(True)#.at[:, 127:130].set(True)
 
-    bad = np.asarray((err==0.0) | (info&256) | (info&64) | (info&32) | detector_mask)
+    if flatcorr:
+        flatfile = flatcorr + hdr["FLATFILE"][5:] 
+        holeflat = fits.getdata(flatfile, 1)[200:230, 60:90]
+
+        thresh = 0.008
+        hole_map = (np.abs((holeflat[:,1:]-holeflat[:,:-1]))[:-1,:]<thresh) & (np.abs((holeflat[1:,:]-holeflat[:-1,:]))[:,:-1]<thresh)
+
+        detector_mask = detector_mask.at[200:229, 60:89].set(hole_map)
+
+    bad = np.asarray((err==0.0) | (info&0b1111111111 != 0) | detector_mask)
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
 

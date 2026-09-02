@@ -134,21 +134,16 @@ vects = np.load("../data/iterative_spectrum_basis_F160W.npy")[:,:npoly]
 assert vects.shape == (nwavels, npoly)
 spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 
+flatdir = '../data/NICMOS-LAPL-DD2/LAPL_HOLEFLATS_DD2/'
 
 
 
 exposures_single = [
-    exposure_from_file(f, SinglePointFit(spectrum_basis, "F160W"), crop=wid) for f in files[:2]
+    exposure_from_file(f, SinglePointFit(spectrum_basis, "F160W"), crop=wid, flatcorr=flatdir) for f in files[1:2]
 ]
 
 
-# %%
-plt.imshow(exposures_single[0].data**0.125)
 
-# %%
-exposures_single[0].target
-
-# %%
 params = {
     "spectrum": {},
     "primary_opd": {},
@@ -160,25 +155,28 @@ params = {
     "cold_mask_rot": {},
     "cold_mask_shear": {},
     "cold_mask_scale": {},
+    "primary_rot": {},
 
     "bias": {},
-    "occulter_radius": 0.76,
-    "fnumber": 45.3,
+    "occulter_radius": 0.7,
+    "occulter_coeffs": np.zeros(2)+1,
+    "fnumber": 45.7,
 }
 
 
 for idx, exp in enumerate(exposures_single):
-    params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set((np.nansum(exp.data)/nwavels)*6/exp.exptime)
+    params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set((np.nansum(exp.data)/nwavels)*4)
 
-    params["primary_tilt"][exp.fit.get_key(exp, "primary_tilt")] = np.array([0.00, 0.])
-    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = np.array([-0.3, -0.1])
+    params["primary_tilt"][exp.fit.get_key(exp, "primary_tilt")] = -np.array([0.75*0.07, 0.])#*0.
+    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = np.array([-0.2167105 , -0.17420508])#*0.
 
     params["primary_opd"][exp.fit.get_key(exp, "primary_opd")] = np.zeros((n_modes, n_modes))
     params["primary_low"][exp.fit.get_key(exp, "primary_low")] = np.zeros((n_zernikes))
-    params["cold_mask_opd"][exp.fit.get_key(exp, "cold_mask_opd")] = np.array([-160.])
+    params["cold_mask_opd"][exp.fit.get_key(exp, "cold_mask_opd")] = np.array([120.])
 
-    params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.asarray([-13.,-7.])
-    params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = 0.
+    params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.array([13.,10.]) #np.asarray([-13.,-7.])#
+    params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = 0.#-90.
+    params["primary_rot"][exp.fit.get_key(exp, "primary_rot")] = 0.##-90.
     params["cold_mask_scale"][exp.fit.get_key(exp, "cold_mask_scale")] = np.asarray([1.,1.])
     params["cold_mask_shear"][exp.fit.get_key(exp, "cold_mask_shear")] = np.asarray([0.,0.])
 
@@ -190,7 +188,7 @@ model_single = set_array(NICMOSModel(exposures_single, params, optics, detector)
 params = ModelParams(params)
 
 # %%
-plot_comparison(model_single, params, exposures_single)
+plot_comparison(model_single, params, exposures_single, percentile=99, wf_size=512)
 
 # %%
 def sgd(lr, delay, momentum=0.5):
@@ -230,19 +228,42 @@ g = 5e-2
 """
 
 things = {
-    "spectrum": sgd(g*3, 0),
-    "primary_opd": sgd(g*1, 40),
-    "primary_low": sgd(g*0.5, 20),
-    "primary_tilt": sgd(g*1., 10),
-    "cold_mask_tilt": sgd(g*1, 10),
-    "cold_mask_opd": sgd(g*1, 10),
+    "primary_opd": sgd(g*0.5, 0),
 
-    "bias": sgd(g*3, 50),
-    "cold_mask_shift": sgd(g*20, 80),
+    "spectrum": sgd(g*3, 0),
+    "primary_tilt": sgd(g*3, 0),
+    "cold_mask_tilt": sgd(g*3, 0),
+    "cold_mask_opd": sgd(g*1, 0),
+
+    "bias": sgd(g*3, 0),
+    "cold_mask_shift": sgd(g*3, 0),
+    "cold_mask_rot": sgd(g*0.2, 0),
+    "primary_rot": sgd(g*1, 0),
+
+    "primary_low": sgd(g*1, 0),
+
+
 }
 
 things_start = {
-    "positions": sgd(g*5, 0),
+    "spectrum": sgd(g*3, 30.),
+    "primary_tilt": sgd(g*3, 15.),
+    "cold_mask_tilt": sgd(g*3, 0),
+    "cold_mask_opd": sgd(g*1, 40),
+
+    "bias": sgd(g*3, 50),
+    "cold_mask_shift": sgd(g*3, 70),
+    "cold_mask_rot": sgd(g*0.2, 70),
+    "primary_rot": sgd(g*1, 70),
+
+    "primary_low": sgd(g*0.5, 90),
+
+    # "cold_mask_scale": sgd(g*5, 120),
+    # "cold_mask_shear": sgd(g*10, 120),
+
+    # "occulter_radius": sgd(g*0.3, 150),
+    # "occulter_coeffs": sgd(g*2, 200),
+    # # "fnumber": sgd(g*2., 150),
 }
 
 groups = list(things.keys())
@@ -258,26 +279,44 @@ groups = list(things.keys())
 # plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single)
 
 # %%
-orig_params = params.params #| params_history[-1]
+orig_params = params.params
+opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_start})
+
+# %%
+losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_start, 120, nbatches=30)
+
+
+# %%
+plt.figure(figsize=(10,10))
+plt.plot(losses[:])
+plt.savefig(f"calibrators/intermediate-losses-{index}.png")
+
+# %%
+losses[-1]
+
+# %%
+plot_params(params_history, list(things_start.keys()), xw = 3, save=f"calibrators/intermediate-params-{index}")
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, percentile=100, quadrature=False, wf_size=512, save=f"calibrators/intermediate-comparison-{index}")
+
+orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 100, nbatches=50)
+losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 400, nbatches=20)
 
 # %%
 plt.figure(figsize=(10,10))
 plt.plot(losses[:])
 plt.savefig(f"calibrators/losses-{index}.png")
 
-# %%
-losses[-1]
 
 # %%
-plot_params(params_history, groups, xw = 3, save=f"calibrators/params-{index}")
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save=f"calibrators/comparison-{index}")
+plot_params(params_history, list(things_start.keys()), xw = 3, save=f"calibrators/params-{index}")
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, percentile=100, quadrature=False, wf_size=512, save=f"calibrators/comparison-{index}")
 
 # %%
-params_history[-1]
+print(params_history[-1])
+
 
 
 np.save(f"calibrators/params-{target}-{index}", params_history[-1])

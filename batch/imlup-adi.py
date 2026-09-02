@@ -189,7 +189,7 @@ class PointResolvedFit(ModelFit):
 
         if "resolved" in model.params.keys():
             dist = self.get_distribution(model, exposure)
-            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + 0.1* L2_loss(dist) +  1.*TSV_loss(dist)
+            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + 0.02* L2_loss(dist) +  2.*TSV_loss(dist)
         
         return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im)
 
@@ -288,7 +288,7 @@ model_single = set_array(NICMOSModel(exposures_single, params, optics, detector)
 params = ModelParams(params)
 
 # %%
-plot_comparison(model_single, params, exposures_single)
+# plot_comparison(model_single, params, exposures_single)
 
 # %%
 def sgd(lr, delay, momentum=0.5):
@@ -398,7 +398,7 @@ opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_sta
 losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_start, 200, nbatches=10)
 
 # %%
-plt.plot(losses[:])
+# plt.plot(losses[:])
 
 # %%
 plot_params(params_history, list(things_start.keys()), xw = 3, save="imlup-intermediate-params")
@@ -428,6 +428,8 @@ params_history[-1]
 # %%
 plt.imshow(10**(params_history[-1]["resolved"]["SZ-82_F160W"]))  
 plt.colorbar()
+
+np.save("imlup.npy", params_history[-1]["resolved"]["SZ-82_F160W"])
 
 plt.figure(figsize=(10,10))
 plt.imshow(10**(params_history[-1]["resolved"]["SZ-82_F160W"]))
