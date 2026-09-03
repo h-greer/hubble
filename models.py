@@ -29,6 +29,7 @@ class Exposure(zdx.Base):
     mjd: str = eqx.field(static=True)
     exptime: str = eqx.field(static=True)
     wcs: object = eqx.field(static=True)
+    hdr: object = eqx.field(static=True)
     pam: Array#object = eqx.field(static=True)
     data: Array
     err: Array
@@ -38,7 +39,7 @@ class Exposure(zdx.Base):
 
     fit: object# = eqx.field(static=True)
 
-    def __init__(self, filename, name, filter, data, err, bad, fit, mjd, exptime, wcs, pam, orient):
+    def __init__(self, filename, name, filter, data, err, bad, fit, mjd, exptime, wcs, pam, orient, hdr):
         """
         Initialise exposure
         """
@@ -56,6 +57,7 @@ class Exposure(zdx.Base):
         self.wcs = wcs
         self.pam = pam
         self.orient = orient
+        self.hdr = hdr
     
     def get_key(self, param):
         return self.fit.get_key(self, param)
@@ -110,6 +112,7 @@ class InjectedExposure(Exposure):
         self.exptime = t_exp
         self.pam = 0.
         self.orient = 0.
+        self.hdr = None
 
 class LoadedExposure(Exposure):
     def __init__(self, name, filter, fit, data, err, bad):
@@ -126,6 +129,7 @@ class LoadedExposure(Exposure):
         self.exptime = 0.
         self.pam = 0.
         self.orient = 0.
+        self.hdr = None
 
 def exposure_from_file(fname, fit, extra_bad=None, crop=None, flatcorr=None):
 
@@ -191,7 +195,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None, flatcorr=None):
 
     bad_with_poisson = np.isnan(err_with_poisson)
 
-    return Exposure(filename, name, filter, data, err_with_poisson, bad_with_poisson, fit, mjd, exptime, wcs, pam, orient)
+    return Exposure(filename, name, filter, data, err_with_poisson, bad_with_poisson, fit, mjd, exptime, wcs, pam, orient, hdr)
 
 class ModelFit(zdx.Base):
     source: dl.Telescope

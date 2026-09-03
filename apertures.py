@@ -266,7 +266,7 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
 
 
             ("occulter", SoummerFastObstruction([
-                ("prop1", dl.MFT(128, focal_length=24*2.4, pixel_scale=3e-6)),
+                ("prop1", dl.MFT(256, focal_length=24*2.4, pixel_scale=1.5e-6)),
                 # ("occulter", dl.CircularAperture(dlu.arcsec2rad(0.3)*24*2.4)),
                 ("occulter", CLIMBOcculter(dlu.arcsec2rad(0.3)*24*2.4, np.zeros(1), np.zeros(1))),
                 ("prop1", dl.MFT(wf_npixels, focal_length=24*2.4, pixel_scale=diameter/wf_npixels)),

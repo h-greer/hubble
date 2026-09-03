@@ -59,7 +59,7 @@ fnames.sort()
 targinfo = []
 for fname in fnames[:]:
     hdr = fits.getheader(fname)
-    targinfo.append((fname, hdr["TARGNAME"], hdr["FILTER"]))
+    targinfo.append((fname, hdr["TARGNAME"], hdr["FILTER"], hdr["TARGCNTR"]))
 
 
 objs = [
@@ -109,7 +109,7 @@ objs = [
 index = int(sys.argv[1])
 target = objs[index]
 
-files = [x[0] for x in targinfo if x[1]==target and x[2]=="F160W"]
+files = [x[0] for x in targinfo if x[1]==target and x[2]=="F160W" and x[3]=="CENTERED"]
 
 # %%
 wid = 80
@@ -118,7 +118,7 @@ oversample = 4
 nwavels = 20
 npoly=4
 
-n_modes = 20
+n_modes = 15
 n_zernikes = 50
 
 resolved_wid = 1
@@ -139,7 +139,7 @@ flatdir = '../data/NICMOS-LAPL-DD2/LAPL_HOLEFLATS_DD2/'
 
 
 exposures_single = [
-    exposure_from_file(f, SinglePointFit(spectrum_basis, "F160W"), crop=wid, flatcorr=flatdir) for f in files[1:2]
+    exposure_from_file(f, SinglePointFit(spectrum_basis, "F160W"), crop=wid, flatcorr=flatdir) for f in files[0:1]
 ]
 
 
@@ -167,8 +167,12 @@ params = {
 for idx, exp in enumerate(exposures_single):
     params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set((np.nansum(exp.data)/nwavels)*4)
 
-    params["primary_tilt"][exp.fit.get_key(exp, "primary_tilt")] = -np.array([0.75*0.07, 0.])#*0.
-    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = np.array([-0.2167105 , -0.17420508])#*0.
+    params["primary_tilt"][exp.fit.get_key(exp, "primary_tilt")] = np.array([-0.05, -0.75])*0.075
+    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = np.array([
+        np.array(exp.hdr["TARSIAFX"],dtype=float) - (256-181), 
+        np.array(exp.hdr["TARSIAFY"],dtype=float) - (256-44)
+    ])*0.075
+
 
     params["primary_opd"][exp.fit.get_key(exp, "primary_opd")] = np.zeros((n_modes, n_modes))
     params["primary_low"][exp.fit.get_key(exp, "primary_low")] = np.zeros((n_zernikes))
@@ -176,7 +180,7 @@ for idx, exp in enumerate(exposures_single):
 
     params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.array([13.,10.]) #np.asarray([-13.,-7.])#
     params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = 0.#-90.
-    params["primary_rot"][exp.fit.get_key(exp, "primary_rot")] = 0.##-90.
+    params["primary_rot"][exp.fit.get_key(exp, "primary_rot")] = -0.6##-90.
     params["cold_mask_scale"][exp.fit.get_key(exp, "cold_mask_scale")] = np.asarray([1.,1.])
     params["cold_mask_shear"][exp.fit.get_key(exp, "cold_mask_shear")] = np.asarray([0.,0.])
 
@@ -200,33 +204,6 @@ def adam(lr, delay):
 
 g = 5e-2
 
-"""
-    "spectrum": sgd(g*3, 0),
-    "cold_mask_shift": sgd(g*20, 40),
-    
-    "bias": sgd(g*3, 20),
-    "primary_opd": sgd(g*0.1, 10),
-    # "primary_opd": adam(0.1, 10),
-
-    "cold_mask_opd": sgd(g*3, 10),
-
-    "primary_tilt": sgd(g*1, 10),
-    "cold_mask_tilt": sgd(g*1, 10),
-    #"jitter": opt(g*1, 120),
-
-
-    "cold_mask_shear": sgd(g*2, 200),
-    "cold_mask_rot": sgd(g*3, 200),
-    "cold_mask_scale": sgd(g*15, 200),
-
-    # "quadrature": sgd(g*20, 400)
-
-    "occulter_radius": sgd(g*10, 200),
-    "fnumber": sgd(g*0.05, 220),
-
-    "occulter_coeffs": sgd(g*20, 300),
-"""
-
 things = {
     "primary_opd": sgd(g*0.5, 0),
 
@@ -242,27 +219,33 @@ things = {
 
     "primary_low": sgd(g*1, 0),
 
+    "cold_mask_scale": sgd(g*1, 0),
+    "cold_mask_shear": sgd(g*1, 0),
+
+    "occulter_radius": sgd(g*1., 0),
+    # "occulter_coeffs": sgd(g*1, 0),
+
 
 }
 
 things_start = {
     "spectrum": sgd(g*3, 30.),
-    "primary_tilt": sgd(g*3, 15.),
-    "cold_mask_tilt": sgd(g*3, 0),
-    "cold_mask_opd": sgd(g*1, 40),
+    "primary_tilt": sgd(g*10, 15.),
+    "cold_mask_tilt": sgd(g*5, 0),
+    "cold_mask_opd": sgd(g*3, 40),
 
     "bias": sgd(g*3, 50),
     "cold_mask_shift": sgd(g*3, 70),
-    "cold_mask_rot": sgd(g*0.2, 70),
-    "primary_rot": sgd(g*1, 70),
+    "cold_mask_rot": sgd(g*0.2, 85),
+    "primary_rot": sgd(g*1, 85),
 
-    "primary_low": sgd(g*0.5, 90),
+    "primary_low": sgd(g*0.5, 150),
 
-    # "cold_mask_scale": sgd(g*5, 120),
-    # "cold_mask_shear": sgd(g*10, 120),
+    "cold_mask_scale": sgd(g*5, 100),
+    "cold_mask_shear": sgd(g*10, 100),
 
-    # "occulter_radius": sgd(g*0.3, 150),
-    # "occulter_coeffs": sgd(g*2, 200),
+    "occulter_radius": sgd(g*1., 120),
+    # "occulter_coeffs": sgd(g*1, 120),
     # # "fnumber": sgd(g*2., 150),
 }
 
@@ -283,7 +266,7 @@ orig_params = params.params
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_start})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_start, 120, nbatches=30)
+losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_start, 300, nbatches=30)
 
 
 # %%
@@ -302,7 +285,7 @@ orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 400, nbatches=20)
+losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 500, nbatches=20)
 
 # %%
 plt.figure(figsize=(10,10))
