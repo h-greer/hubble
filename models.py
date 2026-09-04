@@ -208,16 +208,16 @@ class ModelFit(zdx.Base):
         match param:
             case "primary_low" | "primary_tilt":
                 return exposure.key            
-            case "primary_opd" | "cold_mask_opd" | "cold_mask_tilt":
+            case "primary_opd" | "primary_klip" | "cold_mask_opd" | "cold_mask_tilt":
                 return "global"
-            case "cold_mask_shift" | "cold_mask_rot" | "cold_mask_shear" | "cold_mask_scale" | "primary_rot":
+            case "cold_mask_shift" | "cold_mask_rot" | "cold_mask_shear" | "cold_mask_scale" | "primary_rot" | "primary_shear":
                 return "global"
             case "bias":
                 return exposure.key
             case _: raise ValueError(f"Parameter {param} has no key")
     
     def map_param(self, exposure, param):
-        if param in ["primary_opd", "primary_low", "cold_mask_opd", "primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_rot", "primary_rot", "cold_mask_shear", "cold_mask_scale", "bias"]:
+        if param in ["primary_opd", "primary_klip", "primary_low", "cold_mask_opd", "primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_rot", "primary_rot", "cold_mask_shear", "primary_shear", "cold_mask_scale", "bias"]:
             return f"{param}.{exposure.get_key(param)}"
         return param
     
@@ -228,6 +228,10 @@ class ModelFit(zdx.Base):
             coefficients = coefficients.at[0,0].set(0.)
             optics = optics.set("primary_opd.coefficients", coefficients)
         
+        if "primary_klip" in model.params.keys():
+            coefficients = model.get(self.map_param(exposure, "primary_klip"))
+            optics = optics.set("primary_klip.coefficients", coefficients)
+
         if "primary_low" in model.params.keys():
             coefficients = model.get(self.map_param(exposure, "primary_low"))*1e-9
             optics = optics.set("primary_low.coefficients", coefficients)
@@ -267,6 +271,11 @@ class ModelFit(zdx.Base):
         if "primary_rot" in model.params.keys():
             translation = dlu.deg2rad(model.get(self.map_param(exposure, "primary_rot")))+np.pi/4
             optics = optics.set("primary.transformation.rotation", translation)
+        
+        if "primary_shear" in model.params.keys():
+            translation = model.get(self.map_param(exposure, "primary_shear"))
+            optics = optics.set("primary.transformation.shear", translation)
+            # optics = optics.set("cold_mask_opd.aperture.transformation.shear", translation)
 
         if "occulter_radius" in model.params.keys():
             radius = model.get(self.map_param(exposure, "occulter_radius"))*dlu.arcsec2rad(0.3)*24*2.4

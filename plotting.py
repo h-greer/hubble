@@ -30,7 +30,7 @@ def plot_params(models, groups, xw = 4, save=False):
     for i, param in enumerate(groups):
         sp = axs[i%xw, i//xw]
         # print(models[0].get(param))
-        if param in ["primary_low", "spectrum", "primary_opd", "cold_mask_opd","primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_shear", "cold_mask_scale", "cold_mask_rot", "primary_rot", "bias", "resolved"]:
+        if param in ["primary_low", "primary_klip", "spectrum", "primary_opd", "cold_mask_opd","primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_shear", "cold_mask_scale", "cold_mask_rot", "primary_rot", "bias", "resolved", "primary_shear"]:
 
             for j in range(len(list(models[-1].get(param).values()))):
                 vals = np.asarray([list(x.get(param).values())[j].flatten() for x in models]).T
@@ -49,7 +49,7 @@ def plot_params(models, groups, xw = 4, save=False):
         fig.savefig(f"{save}.png")
 
 
-def plot_comparison(model, params, exposures, quadrature=False, save=False, graticule=False, percentile=100, wf_size=512):
+def plot_comparison(model, params, exposures, quadrature=False, save=False, graticule=False, percentile=100, wf_size=512, klip=False):
     for f, exp in enumerate(exposures):
 
         fig, axs = plt.subplots(2,3, figsize=(30,20), layout='compressed')
@@ -103,7 +103,10 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
         support_mask = support.at[support < .5].set(np.nan)
 
         # opd = optics.primary_opd.eval_basis(coords)*1e9
-        opd = (optics.primary_opd.eval_basis() + optics.primary_low.eval_basis(coords))*1e9
+        if klip:
+            opd = (optics.primary_opd.eval_basis() + optics.primary_low.eval_basis(coords)+optics.primary_klip.eval_basis())*1e9
+        else:
+            opd = (optics.primary_opd.eval_basis() + optics.primary_low.eval_basis(coords))*1e9
         olim = np.nanmax(np.abs(opd*support_mask))
         apt =axs[0,1].imshow(support_mask*opd,cmap=cmap,vmin=-olim, vmax=olim)
         plt.colorbar(apt, ax=axs[0,1]).set_label("OPD (nm)")
@@ -112,7 +115,7 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
         support = optics.cold_mask.transmission(coords,2.4/wf_size)
         support_mask = support.at[support < .5].set(np.nan)
 
-        opd = optics.cold_mask_opd.eval_basis(coords)*1e9
+        opd = optics.cold_mask_opd.eval_basis(coords)*1e9 
         olim = np.nanmax(np.abs(opd*support_mask))
         apt =axs[1,1].imshow(support_mask*opd,cmap=cmap,vmin=-olim, vmax=olim)
         plt.colorbar(apt, ax=axs[1,1]).set_label("OPD (nm)")

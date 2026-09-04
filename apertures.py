@@ -237,9 +237,32 @@ class SoummerFastObstruction(dl.OpticalLayer):
             return wf.normalise()
         return wf
 
+class TransformedFourierBasis(dl.OpticalLayer):
+    mean: Array
+    modes: Array
+    coefficients: Array
+    kernels: tuple[Array, Array]
+    n_modes: Array
+
+    def __init__(self, npix, n_modes, basisfile):
+        basis = np.load(basisfile)
+        self.mean = basis["mean"]
+        self.modes = basis["modes"]
+        self.n_modes = n_modes
+        self.kernels = dlu.fourier_kernels((n_modes,n_modes), (npix,npix))
+        self.coefficients = np.zeros(self.modes.shape[0])
+    
+    def eval_basis(self):
+        fourier_coeffs = 1e-9* (self.mean + np.dot(self.coefficients, self.modes)).reshape((self.n_modes,self.n_modes))
+        print(fourier_coeffs.shape, self.n_modes)
+        return dlu.eval_fourier_basis(fourier_coeffs, *self.kernels)
+
+    def __call__(self, wavefront):
+        return wavefront.add_opd(self.eval_basis())
+
 
 class NICMOSCoronagraph(dl.LayeredOpticalSystem):
-    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1.):
+    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., turboklip=None):
         diameter = 3.
         layers = [
             ("primary",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4), softening=2)),
@@ -247,7 +270,14 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
             ("primary_tilt", dl.Tilt(angles=(0.,0.))),
 
             ("primary_opd", dl.FourierBasis(wf_npixels, n_modes=n_modes)),
+        ]
 
+        if turboklip:
+            layers += [
+                ("primary_klip", TransformedFourierBasis(wf_npixels, n_modes, turboklip)),
+            ]
+        
+        layers += [
             ("primary_low", dl.AberratedAperture(
                     dl.layers.CircularAperture(1.2),
                     noll_inds=np.arange(4,4+n_zernikes),

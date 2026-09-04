@@ -59,8 +59,11 @@ fnames.sort()
 targinfo = []
 for fname in fnames[:]:
     hdr = fits.getheader(fname)
-    targinfo.append((fname, hdr["TARGNAME"], hdr["FILTER"], hdr["TARGCNTR"]))
-
+    try:
+        targinfo.append((fname, hdr["TARGNAME"], hdr["FILTER"], hdr["TARGCNTR"]))
+    except:
+        pass
+        # print(hdr["TARGNAME"])
 
 objs = [
     "HD-139664",
@@ -118,7 +121,7 @@ oversample = 4
 nwavels = 20
 npoly=4
 
-n_modes = 15
+n_modes = 20
 n_zernikes = 50
 
 resolved_wid = 1
@@ -205,7 +208,7 @@ def adam(lr, delay):
 g = 5e-2
 
 things = {
-    "primary_opd": sgd(g*0.5, 0),
+    "primary_opd": sgd(g*0.1, 0),
 
     "spectrum": sgd(g*3, 0),
     "primary_tilt": sgd(g*3, 0),
@@ -285,7 +288,7 @@ orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 500, nbatches=20)
+losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 500, nbatches=50)
 
 # %%
 plt.figure(figsize=(10,10))
@@ -302,4 +305,4 @@ print(params_history[-1])
 
 
 
-np.save(f"calibrators/params-{target}-{index}", params_history[-1])
+np.save(f"calibrators/params-{index}-{target}", params_history[-1])
