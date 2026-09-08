@@ -252,6 +252,22 @@ class ModelFit(zdx.Base):
             translation = model.get(self.map_param(exposure, "cold_mask_shift"))*1e-2
             optics = optics.set("cold_mask.transformation.translation", translation)
             optics = optics.set("cold_mask_opd.aperture.transformation.translation", translation)
+
+        if "outer_radius" in model.params.keys():
+            radius = model.get(self.map_param(exposure, "outer_radius"))
+            optics = optics.set("cold_mask.outer.radius", radius)
+        
+        if "secondary_radius" in model.params.keys():
+            radius = model.get(self.map_param(exposure, "secondary_radius"))
+            optics = optics.set("cold_mask.secondary.radius", radius)
+        
+        if "spider_width" in model.params.keys():
+            radius = model.get(self.map_param(exposure, "spider_width"))
+            optics = optics.set("cold_mask.spider.width", radius)
+
+        if "primary_spider" in model.params.keys():
+            radius = model.get(self.map_param(exposure, "primary_spider"))
+            optics = optics.set("primary.spider.width", radius)
         
         if "cold_mask_shear" in model.params.keys():
             translation = model.get(self.map_param(exposure, "cold_mask_shear"))
@@ -289,7 +305,7 @@ class ModelFit(zdx.Base):
         if "fnumber" in model.params.keys():
             fnumber = model.get(self.map_param(exposure, "fnumber"))
             optics = optics.set("prop1.focal_length", fnumber*2.4)
-
+        
         return optics
 
     def update_detector(self, model, exposure):
@@ -298,9 +314,13 @@ class ModelFit(zdx.Base):
         if "bias" in model.params.keys():
             bias = model.get(self.map_param(exposure, "bias"))
             detector = detector.set("bias.value", bias)
-        if "jitter" in model.params.keys():
-            jitter = model.get(self.map_param(exposure, "jitter"))
-            detector = detector.set("jitter.sigma", np.abs(jitter))
+        # if "jitter" in model.params.keys():
+        #     jitter = model.get(self.map_param(exposure, "jitter"))
+        #     detector = detector.set("jitter.sigma", np.abs(jitter))
+        
+        if "anisotropy" in model.params.keys():
+            anisotropy = model.get(self.map_param(exposure, "anisotropy"))
+            detector = detector.set("resample.anisotropy", anisotropy)
         return detector
 
     def __call__(self, model, exposure):

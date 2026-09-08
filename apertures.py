@@ -24,7 +24,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 #normalise=True
             ),
             "spider" : dl.Spider(
-                width = 0.022*1.2,#0.038*1.2,
+                width = 0.0256,#0.022*1.2,#0.038*1.2,
                 angles = np.asarray([0, 90, 180, 270]),
                 softening=self.softening,
             ),
@@ -307,13 +307,13 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
 
             ("cold_mask_opd", dl.AberratedAperture(
                     dl.layers.CircularAperture(1.2, transformation=dl.CoordTransform(translation=np.asarray((-0.05, -0.05)))),
-                    noll_inds=np.arange(4,5),
+                    noll_inds=np.arange(4,20),
                     coefficients = np.zeros(1),
                 )),
 
             ("cold_mask_tilt", dl.Tilt(angles=(0.,0.))),
             
-            ("prop1", dl.MFT(psf_npixels*oversample, focal_length=45*2.4, pixel_scale=40e-6/oversample)),
+            ("prop1", dl.MFT(psf_npixels*oversample, focal_length=45.7*2.4, pixel_scale=40e-6/oversample)),
         ]
 
         super().__init__(wf_npixels, diameter, layers)
