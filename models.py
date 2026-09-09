@@ -269,6 +269,10 @@ class ModelFit(zdx.Base):
             radius = model.get(self.map_param(exposure, "primary_spider"))
             optics = optics.set("primary.spider.width", radius)
         
+        if "primary_secondary" in model.params.keys():
+            radius = model.get(self.map_param(exposure, "primary_secondary"))
+            optics = optics.set("primary.secondary.radius", radius)
+        
         if "cold_mask_shear" in model.params.keys():
             translation = model.get(self.map_param(exposure, "cold_mask_shear"))
             optics = optics.set("cold_mask.transformation.shear", translation)

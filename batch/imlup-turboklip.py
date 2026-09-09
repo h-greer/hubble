@@ -189,7 +189,7 @@ class PointResolvedFit(ModelFit):
 
         if "resolved" in model.params.keys():
             dist = self.get_distribution(model, exposure)
-            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + 0.02* L2_loss(dist) +  2.*TSV_loss(dist)
+            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + 0.1* L2_loss(dist) +  0.9*TSV_loss(dist)
         
         return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im)
 
@@ -248,6 +248,7 @@ params = {
     "occulter_radius": 0.7,
     "occulter_coeffs": np.zeros(2)+1,
     "fnumber": 45.7,
+    "resolved": {}
 }
 
 
@@ -267,12 +268,14 @@ for idx, exp in enumerate(exposures_single):
     params["primary_low"][exp.fit.get_key(exp, "primary_low")] = np.zeros((n_zernikes))
     params["cold_mask_opd"][exp.fit.get_key(exp, "cold_mask_opd")] = np.array([120.])
 
-    params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.array([13,11])#np.array([13.,10.]) #np.asarray([-13.,-7.])#
+    params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.array([13.,10.]) #np.asarray([-13.,-7.])#
     params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = 0.1#-90.
     params["primary_rot"][exp.fit.get_key(exp, "primary_rot")] = -0.6##-90.
     params["cold_mask_scale"][exp.fit.get_key(exp, "cold_mask_scale")] = np.asarray([1.,1.])
     params["cold_mask_shear"][exp.fit.get_key(exp, "cold_mask_shear")] = np.asarray([0.,0.])
     params["primary_shear"][exp.fit.get_key(exp, "primary_shear")] = np.asarray([0.,0.])
+
+    params["resolved"][exp.fit.get_key(exp, "resolved")] = np.zeros((resolved_wid,resolved_wid))
 
     params["bias"][exp.fit.get_key(exp, "bias")] = 0.
     
@@ -325,7 +328,7 @@ things_start = {
     "cold_mask_opd": sgd(g*3, 40),
 
     "bias": sgd(g*3, 50),
-    "cold_mask_shift": sgd(g*3, 70),
+    "cold_mask_shift": sgd(g*0.2, 70),
     "cold_mask_rot": sgd(g*0.2, 85),
     "primary_rot": sgd(g*1, 85),
 
@@ -360,7 +363,7 @@ orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new_resolved(opt_params, model_single, exposures_single, things, 300, nbatches=150)
+losses, params_history = optimise_new_resolved(opt_params, model_single, exposures_single, things, 300, nbatches=20)
 
 # %%
 plt.plot(losses[:])

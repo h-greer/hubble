@@ -59,7 +59,7 @@ oversample = 4
 nwavels = 20
 npoly=5
 
-n_modes = 40
+n_modes = 45
 n_zernikes = 30
 
 resolved_wid = 1
@@ -79,10 +79,12 @@ vects = np.load("../data/iterative_spectrum_basis_F160W.npy")[:,:npoly]
 assert vects.shape == (nwavels, npoly)
 spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 
-
+extra_bad = None # np.load("bad_map.npy")
 
 exposures_single = [
-    exposure_from_file(ddir + 'n8zu85ncq_m_clc_calf.fits', SinglePointFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, flatcorr=flatdir),
+    # exposure_from_file(ddir + 'n8zu85ncq_m_clc_calf.fits', SinglePointFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, flatcorr=flatdir),
+
+    exposure_from_file(ddir + 'n9gh23mgq_o_clc_calf.fits', SinglePointFit(spectrum_basis, "F160W"), crop=wid, extra_bad=extra_bad, flatcorr=flatdir),
 ]
 
 
@@ -155,11 +157,11 @@ def adam(lr, delay):
     return optax.adam(zdx.optimisation.delay(lr, delay))
 
 
-g = 5e-2
+g = 5e-3
 
 
 things = {
-    "primary_opd": sgd(g*2, 0),
+    "primary_opd": sgd(g*0.2, 0),
 
     "spectrum": sgd(g*1, 0),
     "primary_tilt": sgd(g*1., 0),
@@ -191,6 +193,8 @@ things = {
 
 
 }
+
+g = 1e-2
 
 things_start = {
     "spectrum": sgd(g*3, 30.),
@@ -240,14 +244,14 @@ plt.plot(losses[:])
 
 # %%
 plot_params(params_history, list(things_start.keys()), xw = 4, save="calibrator-intermediate-params")
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, percentile=100, quadrature=False, wf_size=512, save="calibrator-intermediate-comparison")
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, percentile=99, quadrature=False, wf_size=512, save="calibrator-intermediate-comparison")
 
 # %%
 orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 3000, nbatches=50)
+losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 5000, nbatches=50)
 
 # %%
 plt.plot(losses[:])
@@ -255,4 +259,16 @@ plt.plot(losses[:])
 
 # %%
 plot_params(params_history, groups, xw = 4, save="calibrator-params")
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="calibrator-comparison")
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="calibrator-comparison", percentile=99)
+
+
+final_model = ModelParams(params_history[-1]).inject(model_single)
+
+
+for exp in exposures_single:
+    fit = exp.fit(model_single, exp)
+    resid = np.nan_to_num((exp.data - fit)/exp.err)
+    bad_map = np.abs(resid)>40
+    plt.imshow(bad_map)
+
+np.save("bad_map.npy", bad_map)

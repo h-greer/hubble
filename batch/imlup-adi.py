@@ -189,7 +189,7 @@ class PointResolvedFit(ModelFit):
 
         if "resolved" in model.params.keys():
             dist = self.get_distribution(model, exposure)
-            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + 0.02* L2_loss(dist) +  2.*TSV_loss(dist)
+            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + 0.02* L2_loss(dist) +  0.4*TSV_loss(dist)
         
         return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im)
 
@@ -198,9 +198,9 @@ wid = 80
 oversample = 4
 
 nwavels = 20
-npoly=3
+npoly=5
 
-n_modes = 40
+n_modes = 45
 n_zernikes = 30
 
 resolved_wid = 60#*2
@@ -218,13 +218,14 @@ vects = np.load("../data/iterative_spectrum_basis_F160W.npy")[:,:npoly]
 assert vects.shape == (nwavels, npoly)
 spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 
+flatdir = '../data/NICMOS-LAPL-DD2/LAPL_HOLEFLATS_DD2/'
 
 
 
 exposures_single = [
-    exposure_from_file(ddir + 'n8zu11epq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
+    exposure_from_file(ddir + 'n8zu11epq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid, flatcorr=flatdir),
     # exposure_from_file(ddir + 'n8zu11eqq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
-    exposure_from_file(ddir + 'n8zu12exq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
+    exposure_from_file(ddir + 'n8zu12exq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid,flatcorr=flatdir),
     # exposure_from_file(ddir + 'n8zu12eyq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
 ]
 params = {
@@ -236,43 +237,49 @@ params = {
     "cold_mask_tilt": {},
     "cold_mask_shift": {},
     "cold_mask_rot": {},
-    "primary_rot": {},
     "cold_mask_shear": {},
     "cold_mask_scale": {},
+    "primary_rot": {},
+    "primary_shear": {},
 
     "bias": {},
     "occulter_radius": 0.7,
     "occulter_coeffs": np.zeros(2)+1,
     "fnumber": 45.7,
+    "anisotropy": 1.+1e-5,
+
+    "outer_radius": 1.2*0.9768,
+    "secondary_radius": 0.357*1.2,
+    "spider_width": 0.072*1.2,
+    "primary_spider": 0.0256,
 
     "resolved": {},
 }
 
 
 for idx, exp in enumerate(exposures_single):
-    params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set((np.nansum(exp.data)/nwavels)*3)
+    params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set((np.nansum(exp.data)/nwavels)*6)
 
-    params["primary_tilt"][exp.fit.get_key(exp, "primary_tilt")] = np.array([-0.02535399,  0.01166608])
-    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = np.array([-0.14056529, -0.22439143])
+    params["primary_tilt"][exp.fit.get_key(exp, "primary_tilt")] = np.array([-0.75, 0.05])*0.075#np.array([-0.05, -0.75])*0.075
+    # params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = np.array([-0.2167105 , -0.17420508])#*0.
+    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = np.array([
+        np.array(exp.hdr["TARSIAFX"],dtype=float) - (256-181), 
+        np.array(exp.hdr["TARSIAFY"],dtype=float) - (256-44)
+    ])*0.075
+
 
     params["primary_opd"][exp.fit.get_key(exp, "primary_opd")] = np.zeros((n_modes, n_modes))
-    params["primary_low"][exp.fit.get_key(exp, "primary_low")] = np.array([-15.86129843,  -0.71768201,  -1.42882413,  26.15460722,
-         -20.11501062,  -2.76059106,  21.16134548,  10.25475808,
-         -10.85443342, -11.49565824, -12.22853623,   4.40457998,
-           5.28396953,  -1.2162837 ,  -8.06600783,  -5.98268676,
-           4.60561808,   2.93092808,  -4.78088159,   4.79876309,
-           0.52691283,   2.49798775,   5.04594252,  -0.24174374,
-          -3.31476011,   3.4945766 ,  -8.59432607,   2.94284114,
-           5.45766127,  -0.50770123])#np.zeros((n_zernikes))
-    params["cold_mask_opd"][exp.fit.get_key(exp, "cold_mask_opd")] = np.array([132.24425199])
+    params["primary_low"][exp.fit.get_key(exp, "primary_low")] = np.zeros((n_zernikes))
+    params["cold_mask_opd"][exp.fit.get_key(exp, "cold_mask_opd")] = np.zeros(16).at[0].set(120.)#np.array([120.])
 
-    params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.array([13.12248021,  8.57885088])
-    params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = 0.#-90.
-    params["primary_rot"][exp.fit.get_key(exp, "primary_rot")] = 0.##-90.
+    params["cold_mask_shift"][exp.fit.get_key(exp, "cold_mask_shift")] = np.array([13.,10.]) #np.asarray([-13.,-7.])#
+    params["cold_mask_rot"][exp.fit.get_key(exp, "cold_mask_rot")] = 2.5#-90.
+    params["primary_rot"][exp.fit.get_key(exp, "primary_rot")] = -0.6##-90.
     params["cold_mask_scale"][exp.fit.get_key(exp, "cold_mask_scale")] = np.asarray([1.,1.])
-    params["cold_mask_shear"][exp.fit.get_key(exp, "cold_mask_shear")] = np.asarray([0.,0.])
+    params["cold_mask_shear"][exp.fit.get_key(exp, "cold_mask_shear")] = np.asarray([0.06,-0.06])
+    params["primary_shear"][exp.fit.get_key(exp, "primary_shear")] = np.asarray([0.,0.])
 
-    params["bias"][exp.fit.get_key(exp, "bias")] = 1.6
+    params["bias"][exp.fit.get_key(exp, "bias")] = 0.
 
     params["resolved"][exp.fit.get_key(exp, "resolved")] = np.zeros((resolved_wid,resolved_wid))#+3#.at[:3, :3].set(3.)-2
     
@@ -300,92 +307,72 @@ def adam(lr, delay):
 
 g = 5e-2
 
-"""
-    "spectrum": sgd(g*3, 0),
-    "cold_mask_shift": sgd(g*20, 40),
-    
-    "bias": sgd(g*3, 20),
-    "primary_opd": sgd(g*0.1, 10),
-    # "primary_opd": adam(0.1, 10),
 
-    "cold_mask_opd": sgd(g*3, 10),
-
-    "primary_tilt": sgd(g*1, 10),
-    "cold_mask_tilt": sgd(g*1, 10),
-    #"jitter": opt(g*1, 120),
-
-
-    "cold_mask_shear": sgd(g*2, 200),
-    "cold_mask_rot": sgd(g*3, 200),
-    "cold_mask_scale": sgd(g*15, 200),
-
-    # "quadrature": sgd(g*20, 400)
-
-    "occulter_radius": sgd(g*10, 200),
-    "fnumber": sgd(g*0.05, 220),
-
-    "occulter_coeffs": sgd(g*20, 300),
-"""
-
-# things = {
-#     "spectrum": sgd(g*3, 0),
-#     "primary_opd": sgd(g*3, 20),
-#     "primary_low": sgd(g*3, 10),
-#     "primary_tilt": sgd(g*1., 10),
-#     "cold_mask_tilt": sgd(g*1, 10),
-#     "cold_mask_opd": sgd(g*1, 10),
-
-#     "bias": sgd(g*3, 50),
-#     "cold_mask_shift": sgd(g*20, 60),
-
-#     # # "cold_mask_shear": sgd(g*2, 200),
-#     # # "cold_mask_rot": sgd(g*3, 200),
-#     # # "cold_mask_scale": sgd(g*15, 200),
-
-#     # # # "quadrature": sgd(g*20, 400)
-
-#     # # "occulter_radius": sgd(g*10, 200),
-#     # # "fnumber": sgd(g*0.05, 220),
-
-#     # "resolved": adam(3e-2, 100)
-# }
-
-# things_start = {
-#     "positions": sgd(g*5, 0),
-# }
 
 things = {
-    "primary_opd": sgd(g*0.1, 30),
-    "spectrum": sgd(g*3, 0),
-    "primary_tilt": sgd(g*3, 0),
+    "primary_opd": sgd(g*0.02, 0),
+
+    "spectrum": sgd(g*1, 0),
+    "primary_tilt": sgd(g*1., 0),
     "cold_mask_tilt": sgd(g*1, 0),
-    "cold_mask_opd": sgd(g*1, 0),
+    "cold_mask_opd": sgd(g*1., 0),
 
     "bias": sgd(g*3, 0),
     "cold_mask_shift": sgd(g*1, 0),
-    "cold_mask_rot": sgd(g*1, 0),
-    "primary_rot": sgd(g*1, 0),
-    "primary_low": sgd(g*1, 0),
-    "occulter_radius": sgd(g*3., 0),
-    # "fnumber": sgd(g*2., 0),
+    "cold_mask_rot": sgd(g*5., 50),
+    "primary_rot": sgd(g*3., 0),
 
-    "resolved": adam(3e-2, 60)
+    "primary_low": sgd(g*1, 0),
+
+    "cold_mask_scale": sgd(g*1, 0),
+    "cold_mask_shear": sgd(g*1, 0),
+
+    "primary_shear": sgd(g*1, 0),
+    # "primary_shear": sgd(g*5, 100),
+
+    "occulter_radius": sgd(g*1., 0),
+    "occulter_coeffs": sgd(g*1, 0),
+
+    "secondary_radius": sgd(g*1., 0),
+    "spider_width": sgd(g*1., 0),
+    "primary_spider": sgd(g*1., 0),
+
+    "fnumber": sgd(g*1., 0),
+    "anisotropy": sgd(g*1., 0),
+
+
+    "resolved": adam(3e-2, 500)
 }
 
 things_start = {
     "spectrum": sgd(g*3, 30.),
-    "primary_tilt": sgd(g*3, 15.),
-    "cold_mask_tilt": sgd(g*0.7, 0),
-    "cold_mask_opd": sgd(g*1, 40),
+    "primary_tilt": sgd(g*3., 15.),
+    "cold_mask_tilt": sgd(g*0.3, 0),
+    "cold_mask_opd": sgd(g*0.2, 40),
 
     "bias": sgd(g*3, 50),
-    "cold_mask_shift": sgd(g*1, 70),
-    "cold_mask_rot": sgd(g*10, 70),
-    "primary_rot": sgd(g*10, 70),
-    "primary_low": sgd(g*3, 90),
-    "occulter_radius": sgd(g*0.3, 130),
-    "occulter_coeffs": sgd(g*2, 200),
-    # "fnumber": sgd(g*2., 150),
+    "cold_mask_shift": sgd(g*10., 70),
+    "cold_mask_rot": sgd(g*3., 85),
+    "primary_rot": sgd(g*20., 85),
+
+    "primary_low": sgd(g*0.05, 150),
+
+    "cold_mask_scale": sgd(g*5, 100),
+    "cold_mask_shear": sgd(g*10, 100),
+
+    "primary_shear": sgd(g*5, 100),
+    # "primary_shear": sgd(g*5, 100),
+
+    "occulter_radius": sgd(g*1., 120),
+    "occulter_coeffs": sgd(g*1, 120),
+
+    # "outer_radius": sgd(g*1., 120),
+    "secondary_radius": sgd(g*1., 120),
+    "spider_width": sgd(g*1., 120),
+    "primary_spider": sgd(g*1., 120),
+
+    "fnumber": sgd(g*1., 200),
+    "anisotropy": sgd(g*2., 200),
 }
 
 groups = list(things.keys())
@@ -395,7 +382,7 @@ orig_params = params.params
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_start})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_start, 200, nbatches=10)
+losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_start, 600, nbatches=10)
 
 # %%
 # plt.plot(losses[:])
@@ -410,7 +397,7 @@ orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new_resolved(opt_params, model_single, exposures_single, things, 200, nbatches=150)
+losses, params_history = optimise_new_resolved(opt_params, model_single, exposures_single, things, 3000, nbatches=300)
 
 # %%
 plt.plot(losses[:])
@@ -419,7 +406,7 @@ plt.plot(losses[:])
 losses[-1]
 
 # %%
-plot_params(params_history, groups, xw = 3, save="imlup-params")
+plot_params(params_history, groups, xw = 4, save="imlup-params")
 plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="imlup-comparison", percentile=99)
 
 # %%
