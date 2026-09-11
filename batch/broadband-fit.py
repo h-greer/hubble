@@ -56,10 +56,10 @@ def set_array(pytree):
 wid = 80
 oversample = 4
 
-nwavels = 20
-npoly=5
+nwavels = 50
+npoly=10
 
-n_modes = 45
+n_modes = 40
 n_zernikes = 30
 
 resolved_wid = 1
@@ -75,16 +75,16 @@ ddir = '../data/NICMOS-LAPL-DD2/LAPL_DATA_DD2/comtemp_flats-DD2/'
 
 flatdir = '../data/NICMOS-LAPL-DD2/LAPL_HOLEFLATS_DD2/'
 
-vects = np.load("../data/iterative_spectrum_basis_F160W.npy")[:,:npoly]
+vects = np.load("../data/iterative_spectrum_basis_F160W_50.npy")[:,:npoly]
 assert vects.shape == (nwavels, npoly)
 spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 
 extra_bad = None # np.load("bad_map.npy")
 
 exposures_single = [
-    # exposure_from_file(ddir + 'n8zu85ncq_m_clc_calf.fits', SinglePointFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, flatcorr=flatdir),
+    exposure_from_file(ddir + 'n8zu85ncq_m_clc_calf.fits', SinglePointFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, flatcorr=flatdir),
 
-    exposure_from_file(ddir + 'n9gh23mgq_o_clc_calf.fits', SinglePointFit(spectrum_basis, "F160W"), crop=wid, extra_bad=extra_bad, flatcorr=flatdir),
+    # exposure_from_file(ddir + 'n9gh23mgq_o_clc_calf.fits', SinglePointFit(spectrum_basis, "F160W"), crop=wid, extra_bad=extra_bad, flatcorr=flatdir),
 ]
 
 
@@ -161,7 +161,7 @@ g = 5e-3
 
 
 things = {
-    "primary_opd": sgd(g*0.2, 0),
+    "primary_opd": adam(5e-2, 0),#sgd(g*0.2, 0),
 
     "spectrum": sgd(g*1, 0),
     "primary_tilt": sgd(g*1., 0),
@@ -170,7 +170,7 @@ things = {
 
     "bias": sgd(g*3, 0),
     "cold_mask_shift": sgd(g*1, 0),
-    "cold_mask_rot": sgd(g*5., 50),
+    "cold_mask_rot": sgd(g*1., 0),
     "primary_rot": sgd(g*3., 0),
 
     "primary_low": sgd(g*1, 0),
@@ -251,7 +251,7 @@ orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 5000, nbatches=50)
+losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 5000, nbatches=200)
 
 # %%
 plt.plot(losses[:])

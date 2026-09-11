@@ -121,7 +121,7 @@ oversample = 4
 nwavels = 20
 npoly=6
 
-n_modes = 30
+n_modes = 45
 n_zernikes = 50
 
 optics = NICMOSCoronagraph(512, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes)
@@ -212,20 +212,22 @@ def adam(lr, delay):
     return optax.adam(zdx.optimisation.delay(lr, delay))
 
 
-g = 5e-2
+g = np.minimum(2e-2, 2e-2* (193734/np.nansum(exposures_single[0].data)))#2e-2
+
+print(g)
 
 things = {
-    "primary_opd": sgd(g*0.05, 0),
+    "primary_opd": adam(5e-2, 50),
 
     "spectrum": sgd(g*1, 0),
     "primary_tilt": sgd(g*1., 0),
     "cold_mask_tilt": sgd(g*1, 0),
     "cold_mask_opd": sgd(g*1., 0),
 
-    "bias": sgd(g*3, 0),
+    "bias": sgd(g*1, 0),
     "cold_mask_shift": sgd(g*1, 0),
-    "cold_mask_rot": sgd(g*5., 50),
-    "primary_rot": sgd(g*3., 0),
+    "cold_mask_rot": sgd(g*1., 0),
+    "primary_rot": sgd(g*1., 0),
 
     "primary_low": sgd(g*1, 0),
 
@@ -286,7 +288,7 @@ orig_params = params.params
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_start})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_start, 1000, nbatches=30)
+losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_start, 600, nbatches=30)
 
 
 # %%
@@ -298,14 +300,14 @@ plt.savefig(f"calibrators/intermediate-losses-{index}.png")
 losses[-1]
 
 # %%
-plot_params(params_history, list(things_start.keys()), xw = 3, save=f"calibrators/intermediate-params-{index}")
+plot_params(params_history, list(things_start.keys()), xw = 5, save=f"calibrators/intermediate-params-{index}")
 plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, percentile=99, quadrature=False, wf_size=512, save=f"calibrators/intermediate-comparison-{index}")
 
 orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 300, nbatches=50)
+losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 5000, nbatches=50)
 
 # %%
 plt.figure(figsize=(10,10))
@@ -314,7 +316,7 @@ plt.savefig(f"calibrators/losses-{index}.png")
 
 
 # %%
-plot_params(params_history, list(things_start.keys()), xw = 3, save=f"calibrators/params-{index}")
+plot_params(params_history, list(things_start.keys()), xw = 5, save=f"calibrators/params-{index}")
 plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, percentile=99, quadrature=False, wf_size=512, save=f"calibrators/comparison-{index}")
 
 # %%

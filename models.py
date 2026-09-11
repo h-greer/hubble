@@ -84,6 +84,7 @@ class BlankExposure(Exposure):
         self.exptime = 0.
         self.pam = 0.
         self.orient=0.
+        self.hdr = None
 
 
 class InjectedExposure(Exposure):
@@ -206,9 +207,9 @@ class ModelFit(zdx.Base):
 
     def get_key(self, exposure, param):
         match param:
-            case "primary_low" | "primary_tilt":
+            case "primary_low" | "primary_tilt" | "primary_klip":
                 return exposure.key            
-            case "primary_opd" | "primary_klip" | "cold_mask_opd" | "cold_mask_tilt":
+            case "primary_opd" | "cold_mask_opd" | "cold_mask_tilt":
                 return "global"
             case "cold_mask_shift" | "cold_mask_rot" | "cold_mask_shear" | "cold_mask_scale" | "primary_rot" | "primary_shear":
                 return "global"
@@ -406,49 +407,6 @@ class SinglePointFit(ModelFit):
 
 
 
-# class SpectrumVisFit(ModelFit):
-#     vis_model: LogVisModel
-#     def __init__(self, spectrum, nwavels, vis_model):
-#         super().__init__(spectrum, nwavels)
-#         self.vis_model = vis_model
-
-#     def get_key(self, exposure, param):
-#         if param == "phases":
-#             return exposure.key
-#         elif param == "amplitudes":
-#             return exposure.key
-#         else:
-#             return super().get_key(exposure, param)
-    
-#     def map_param(self, exposure, param):
-#         if param == "phases":
-#             return f"{param}.{exposure.get_key(param)}"
-#         elif param == "amplitudes":
-#             return f"{param}.{exposure.get_key(param)}"
-#         else:
-#             return super().map_param(exposure, param)
-
-
-#     def __call__(self, model, exposure):
-
-#         source = self.update_source(model, exposure)
-#         optics = self.update_optics(model, exposure)
-#         detector = self.update_detector(model, exposure)
-
-#         wfs = optics.model(source, return_wf=True)
-
-#         phases = model.get(exposure.fit.map_param(exposure, "phases"))
-#         amplitudes = model.get(exposure.fit.map_param(exposure, "amplitudes"))
-
-#         psfs = self.vis_model.model_vis(wfs, amplitudes, phases, exposure.filter)
-
-#         psf = psfs.data.sum(tuple(range(psfs.ndim)))
-#         pixel_scale = psfs.pixel_scale.mean()
-
-#         psf_obj = dl.PSF(psf, pixel_scale)
-        
-#         return detector.model(psf_obj, return_psf=False)
-
 
 class BreathingFit(ModelFit):
     ns: int = eqx.field(static=True)
@@ -496,6 +454,150 @@ class BreathingSinglePointFit(SinglePointFit, BreathingFit):
     def __init__(self, spectrum, nwavels, ns):
         SinglePointFit.__init__(self, spectrum, nwavels)
         BreathingFit.__init__(self, ns)
+
+# %%
+def L1_loss(arr):
+    """L1 norm loss for array-like inputs."""
+    return np.nansum(np.abs(arr))
+
+
+def L2_loss(arr):
+    """L2 (quadratic) loss for array-like inputs."""
+    return np.nansum(arr**2)
+
+
+def tikhinov(arr):
+    """Finite-difference approximation used by several regularisers."""
+    pad_arr = np.pad(arr, 2)  # padding
+    dx = np.diff(pad_arr[0:-1, :], axis=1)
+    dy = np.diff(pad_arr[:, 0:-1], axis=0)
+    return dx**2 + dy**2
+
+
+def TV_loss(arr, eps=1e-16):
+    """Total variation (approx.) loss computed from finite differences."""
+    return np.sqrt(tikhinov(arr) + eps**2).sum()
+
+
+def TSV_loss(arr):
+    """Total squared variation (quadratic) loss."""
+    return tikhinov(arr).sum()
+
+
+def ME_loss(arr, eps=1e-16):
+    """Maximum-entropy inspired loss (negative entropy of distribution)."""
+    P = arr / np.nansum(arr)
+    S = np.nansum(-P * np.log(P + eps))
+    return -S
+
+# %%
+np.vstack((np.ones(5), np.arange(5))).T
+
+# %%
+class CursedResolvedSource(dl.sources.Source):
+    distribution: Array
+    position: Array
+    pitch: float
+    roll: Array
+
+    def __init__(self, distribution, pitch, position=np.zeros(2), roll=0., **kwargs):
+        self.distribution = distribution
+        self.pitch = float(pitch)
+        self.position = position
+        self.roll = roll
+        super().__init__(**kwargs)
+    
+    def normalise(self):
+        return self
+    
+    def model(self, optics, return_wf=False, return_psf=False):
+        R, TH = dlu.pixel_coords(self.distribution.shape[0], pixel_scale=self.pitch, polar=True)
+        coords = dlu.polar2cart(np.array([R, TH+self.roll]))
+        # coords = dlu.nd_coords(self.distribution.shape, self.pitch, self.position)
+        xs = coords[0].flatten()
+        ys = coords[1].flatten()
+        ds = self.distribution.flatten()
+
+
+        conv_psf = np.sum(
+            jax.lax.map(
+                lambda x: x[2]*jax.lax.stop_gradient(optics.propagate(self.wavelengths, np.array([x[0], x[1]]), self.weights)),
+                np.stack((xs, ys, ds)).T,
+                batch_size=256,
+            ), 
+            axis=0
+        )
+
+        wf = optics.propagate(self.wavelengths, np.array([xs.mean(), ys.mean()]), self.weights, return_wf=True)
+        if return_psf:
+            return dl.PSF(conv_psf, wf.pixel_scale.mean())
+        return conv_psf
+
+# %%
+class PointResolvedFit(ModelFit):
+    wid: float
+    regulariser: Array
+
+    def __init__(self, spectrum_basis, filter, wid, regulariser=np.zeros(2)):
+        nwavels, nbasis = spectrum_basis.shape
+        wv, inten = calc_throughput(filter, nwavels)
+
+        wvr, intenr = calc_throughput(filter, 1)
+
+        self.source = dl.Scene([            
+            ("resolved", CursedResolvedSource(
+                wavelengths=wvr,
+                spectrum=dl.Spectrum(wvr, intenr), 
+                distribution=np.ones((wid, wid)),
+                pitch=dlu.arcsec2rad(0.0432*2)
+            )),
+            ("point", dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))),
+        ])
+        self.wid = wid
+        self.regulariser=regulariser
+    
+    def get_key(self, exposure, param):
+        if param == "positions":
+            return exposure.key
+        elif param == "spectrum" or param == "flux":
+            return f"{exposure.target}_{exposure.filter}"
+        elif param == "resolved":
+            return f"{exposure.target}_{exposure.filter}"
+        else:
+            return super().get_key(exposure, param)
+    
+    def map_param(self, exposure, param):
+        if param in ["positions", "spectrum", "resolved"]:
+            return f"{param}.{exposure.get_key(param)}"
+        else:
+            return super().map_param(exposure, param)
+
+    def get_distribution(self, model, exposure):
+        return 10**(model.get(exposure.fit.map_param(exposure, "resolved")))
+
+    def update_source(self, model, exposure):
+        
+        spectrum_coeffs = model.get(exposure.fit.map_param(exposure, "spectrum"))
+
+        source = self.source.set("point.spectrum.basis_weights", spectrum_coeffs)
+        source = source.set("point.flux", source.point.spectrum.flux)        
+
+        distribution = self.get_distribution(model, exposure)
+
+        source = source.set("resolved.distribution",  distribution)
+        source = source.set("resolved.roll", -np.deg2rad(exposure.orient))
+        
+        return source
+
+    def loglike(self, model, exposure, per_pix=False, return_im=False):
+
+
+        if "resolved" in model.params.keys():
+            dist = self.get_distribution(model, exposure)
+            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + self.regulariser[0]* L2_loss(dist) +  self.regulariser[1]*TSV_loss(dist)
+        
+        return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im)
+
 
 
 class BinaryFit(ModelFit):
