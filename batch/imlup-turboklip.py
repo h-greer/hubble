@@ -43,14 +43,7 @@ from fitting import *
 from plotting import *
 from spectra import *
 
-import jax.tree_util as jtu
 import interpax as ipx
-
-def set_array(pytree):
-    dtype = np.float64 if jax.config.x64_enabled else np.float32
-    floats, other = eqx.partition(pytree, eqx.is_inexact_array_like)
-    floats = jtu.tree_map(lambda x: np.array(x, dtype=dtype), floats)
-    return eqx.combine(floats, other)
 
 # %%
 wid = 80
@@ -59,7 +52,7 @@ oversample = 4
 nwavels = 20
 npoly=8
 
-n_modes = 40
+n_modes = 45
 n_zernikes = 50
 
 resolved_wid = 60
@@ -79,13 +72,13 @@ assert vects.shape == (nwavels, npoly)
 spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 
 
-regulariser = np.array([0.1,0.9])
+regulariser = np.array([0.05,0.5])
 
 exposures_single = [
     exposure_from_file(ddir + 'n8zu11epq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid, regulariser=regulariser), crop=wid, flatcorr=flatdir),
-    # exposure_from_file(ddir + 'n8zu11eqq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
+    exposure_from_file(ddir + 'n8zu11eqq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid, regulariser=regulariser), crop=wid, flatcorr=flatdir),
     exposure_from_file(ddir + 'n8zu12exq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid, regulariser=regulariser), crop=wid, flatcorr=flatdir),
-    # exposure_from_file(ddir + 'n8zu12eyq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
+    # exposure_from_file(ddir + 'n8zu12eyq_m_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid, regulariser=regulariser), crop=wid, flatcorr=flatdir),
 ]
 
 params = {
@@ -127,12 +120,6 @@ params = ModelParams(params)
 # plot_comparison(model_single, params, exposures_single)
 
 # %%
-def sgd(lr, delay, momentum=0.5):
-    return optax.sgd(zdx.optimisation.delay(lr, delay), momentum=momentum)
-
-def adam(lr, delay):
-    return optax.adam(zdx.optimisation.delay(lr, delay))
-
 
 g = 5e-2
 
@@ -145,26 +132,26 @@ things_start = {
     "bias": sgd(g*3, 40),
     "cold_mask_shift": sgd(g*0.1, 50),
 
-    "primary_low": sgd(g*1., 70),
+    "primary_low": sgd(g*0.05, 70),
     "cold_mask_opd": sgd(g*1., 70),
     "primary_klip": sgd(g*2, 100),
 
     "resolved": adam(3e-2, 150),
 }
 
-groups = list(things.keys())
-
 # %%
 orig_params = params.params
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_start})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_start, 400, nbatches=10)
+losses, params_history = optimise_new_resolved(
+    opt_params, model_single, exposures_single, things_start, 1000,
+    precond_method="gn_probe", precond_kwargs=dict(n_probes=32), precond_resolved=True)
 
 
 # %%
-plot_params(params_history, groups, xw = 3, save="imlup-params")
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="imlup-comparison", percentile=99)
+plot_params(params_history, list(things_start.keys()), xw = 3, save="imlup-params")
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="imlup-comparison", percentile=99, klip=True)
 
 # %%
 params_history[-1]

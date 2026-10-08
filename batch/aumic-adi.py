@@ -43,155 +43,7 @@ from fitting import *
 from plotting import *
 from spectra import *
 
-import jax.tree_util as jtu
 import interpax as ipx
-
-def set_array(pytree):
-    dtype = np.float64 if jax.config.x64_enabled else np.float32
-    floats, other = eqx.partition(pytree, eqx.is_inexact_array_like)
-    floats = jtu.tree_map(lambda x: np.array(x, dtype=dtype), floats)
-    return eqx.combine(floats, other)
-
-# %%
-def L1_loss(arr):
-    """L1 norm loss for array-like inputs."""
-    return np.nansum(np.abs(arr))
-
-
-def L2_loss(arr):
-    """L2 (quadratic) loss for array-like inputs."""
-    return np.nansum(arr**2)
-
-
-def tikhinov(arr):
-    """Finite-difference approximation used by several regularisers."""
-    pad_arr = np.pad(arr, 2)  # padding
-    dx = np.diff(pad_arr[0:-1, :], axis=1)
-    dy = np.diff(pad_arr[:, 0:-1], axis=0)
-    return dx**2 + dy**2
-
-
-def TV_loss(arr, eps=1e-16):
-    """Total variation (approx.) loss computed from finite differences."""
-    return np.sqrt(tikhinov(arr) + eps**2).sum()
-
-
-def TSV_loss(arr):
-    """Total squared variation (quadratic) loss."""
-    return tikhinov(arr).sum()
-
-
-def ME_loss(arr, eps=1e-16):
-    """Maximum-entropy inspired loss (negative entropy of distribution)."""
-    P = arr / np.nansum(arr)
-    S = np.nansum(-P * np.log(P + eps))
-    return -S
-
-# %%
-np.vstack((np.ones(5), np.arange(5))).T
-
-# %%
-class CursedResolvedSource(dl.sources.Source):
-    distribution: Array
-    position: Array
-    pitch: float
-    roll: Array
-
-    def __init__(self, distribution, pitch, position=np.zeros(2), roll=0., **kwargs):
-        self.distribution = distribution
-        self.pitch = float(pitch)
-        self.position = position
-        self.roll = roll
-        super().__init__(**kwargs)
-    
-    def normalise(self):
-        return self
-    
-    def model(self, optics, return_wf=False, return_psf=False):
-        R, TH = dlu.pixel_coords(self.distribution.shape[0], pixel_scale=self.pitch, polar=True)
-        coords = dlu.polar2cart(np.array([R, TH+self.roll]))
-        # coords = dlu.nd_coords(self.distribution.shape, self.pitch, self.position)
-        xs = coords[0].flatten()
-        ys = coords[1].flatten()
-        ds = self.distribution.flatten()
-
-
-        conv_psf = np.sum(
-            jax.lax.map(
-                lambda x: x[2]*jax.lax.stop_gradient(optics.propagate(self.wavelengths, np.array([x[0], x[1]]), self.weights)),
-                np.stack((xs, ys, ds)).T,
-                batch_size=256,
-            ), 
-            axis=0
-        )
-
-        wf = optics.propagate(self.wavelengths, np.array([xs.mean(), ys.mean()]), self.weights, return_wf=True)
-        if return_psf:
-            return dl.PSF(conv_psf, wf.pixel_scale.mean())
-        return conv_psf
-
-# %%
-class PointResolvedFit(ModelFit):
-    wid: float
-
-    def __init__(self, spectrum_basis, filter, wid):
-        nwavels, nbasis = spectrum_basis.shape
-        wv, inten = calc_throughput(filter, nwavels)
-
-        wvr, intenr = calc_throughput(filter, 1)
-
-        self.source = dl.Scene([            
-            ("resolved", CursedResolvedSource(
-                wavelengths=wvr,
-                spectrum=dl.Spectrum(wvr, intenr), 
-                distribution=np.ones((wid, wid)),
-                pitch=dlu.arcsec2rad(0.0432*2)
-            )),
-            ("point", dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))),
-        ])
-        self.wid = wid
-    
-    def get_key(self, exposure, param):
-        if param == "positions":
-            return exposure.key
-        elif param == "spectrum" or param == "flux":
-            return f"{exposure.target}_{exposure.filter}"
-        elif param == "resolved":
-            return f"{exposure.target}_{exposure.filter}"
-        else:
-            return super().get_key(exposure, param)
-    
-    def map_param(self, exposure, param):
-        if param in ["positions", "spectrum", "resolved"]:
-            return f"{param}.{exposure.get_key(param)}"
-        else:
-            return super().map_param(exposure, param)
-
-    def get_distribution(self, model, exposure):
-        return 10**(model.get(exposure.fit.map_param(exposure, "resolved")))
-
-    def update_source(self, model, exposure):
-        
-        spectrum_coeffs = model.get(exposure.fit.map_param(exposure, "spectrum"))
-
-        source = self.source.set("point.spectrum.basis_weights", spectrum_coeffs)
-        source = source.set("point.flux", source.point.spectrum.flux)        
-
-        distribution = self.get_distribution(model, exposure)
-
-        source = source.set("resolved.distribution",  distribution)
-        source = source.set("resolved.roll", -np.deg2rad(exposure.orient))
-        
-        return source
-
-    def loglike(self, model, exposure, per_pix=False, return_im=False):
-
-
-        if "resolved" in model.params.keys():
-            dist = self.get_distribution(model, exposure)
-            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + 0.1* L2_loss(dist) +  1.*TSV_loss(dist)
-        
-        return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im)
 
 # %%
 wid = 80
@@ -204,6 +56,7 @@ n_modes = 40
 n_zernikes = 30
 
 resolved_wid = 60#*2
+regulariser = np.array([0.1, 1.])
 
 optics = NICMOSCoronagraph(512, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes)
 
@@ -222,8 +75,8 @@ spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 
 
 exposures_single = [
-    exposure_from_file(ddir + 'n93m23lmq_o_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
-    exposure_from_file(ddir + 'n93m24lsq_o_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid), crop=wid),
+    exposure_from_file(ddir + 'n93m23lmq_o_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid, regulariser=regulariser), crop=wid),
+    exposure_from_file(ddir + 'n93m24lsq_o_clc_calf.fits', PointResolvedFit(spectrum_basis, "F160W", wid=resolved_wid, regulariser=regulariser), crop=wid),
 ]
 params = {
     "spectrum": {},
@@ -289,12 +142,6 @@ params = ModelParams(params)
 plot_comparison(model_single, params, exposures_single)
 
 # %%
-def sgd(lr, delay, momentum=0.5):
-    return optax.sgd(zdx.optimisation.delay(lr, delay), momentum=momentum)
-
-def adam(lr, delay):
-    return optax.adam(zdx.optimisation.delay(lr, delay))
-
 
 g = 5e-2
 
@@ -353,7 +200,7 @@ g = 5e-2
 # }
 
 things = {
-    "primary_opd": sgd(g*0.1, 30),
+    "primary_opd": sgd(g*0.02, 30),
     "spectrum": sgd(g*3, 0),
     "primary_tilt": sgd(g*3, 0),
     "cold_mask_tilt": sgd(g*1, 0),
@@ -382,7 +229,7 @@ things_start = {
     "primary_rot": sgd(g*10, 70),
     "primary_low": sgd(g*0.1, 90),
     "occulter_radius": sgd(g*0.3, 130),
-    "occulter_coeffs": sgd(g*2, 200),
+    # "occulter_coeffs": sgd(g*2, 200),
     # "fnumber": sgd(g*2., 150),
 }
 
@@ -393,7 +240,9 @@ orig_params = params.params
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_start})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_start, 200, nbatches=10)
+losses, params_history = optimise_new(
+    opt_params, model_single, exposures_single, things_start, 500,
+    precond_method="gn_exact", precond_kwargs=dict(chunk=16))
 
 # %%
 plt.plot(losses[:])
@@ -408,7 +257,9 @@ orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new_resolved(opt_params, model_single, exposures_single, things, 200, nbatches=150)
+losses, params_history = optimise_new_resolved(
+    opt_params, model_single, exposures_single, things, 300,
+    precond_method="gn_probe", precond_kwargs=dict(n_probes=32), precond_resolved=True)
 
 # %%
 plt.plot(losses[:])

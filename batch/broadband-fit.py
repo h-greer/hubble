@@ -43,14 +43,7 @@ from fitting import *
 from plotting import *
 from spectra import *
 
-import jax.tree_util as jtu
 import interpax as ipx
-
-def set_array(pytree):
-    dtype = np.float64 if jax.config.x64_enabled else np.float32
-    floats, other = eqx.partition(pytree, eqx.is_inexact_array_like)
-    floats = jtu.tree_map(lambda x: np.array(x, dtype=dtype), floats)
-    return eqx.combine(floats, other)
 
 # %%
 wid = 80
@@ -59,7 +52,7 @@ oversample = 4
 nwavels = 50
 npoly=10
 
-n_modes = 40
+n_modes = 48
 n_zernikes = 30
 
 resolved_wid = 1
@@ -150,18 +143,12 @@ params = ModelParams(params)
 plot_comparison(model_single, params, exposures_single, percentile=99, wf_size=512)
 
 # %%
-def sgd(lr, delay, momentum=0.5):
-    return optax.sgd(zdx.optimisation.delay(lr, delay), momentum=momentum)
-
-def adam(lr, delay):
-    return optax.adam(zdx.optimisation.delay(lr, delay))
-
 
 g = 5e-3
 
 
 things = {
-    "primary_opd": adam(5e-2, 0),#sgd(g*0.2, 0),
+    "primary_opd": adam(2e-1, 0),#sgd(g*0.2, 0),
 
     "spectrum": sgd(g*1, 0),
     "primary_tilt": sgd(g*1., 0),
@@ -237,7 +224,9 @@ orig_params = params.params
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_start})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things_start, 600, nbatches=20)
+losses, params_history = optimise_new(
+    opt_params, model_single, exposures_single, things_start, 600,
+    precond_method="gn_exact", precond_kwargs=dict(chunk=16))
 
 # %%
 plt.plot(losses[:])
@@ -251,7 +240,9 @@ orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new(opt_params, model_single, exposures_single, things, 5000, nbatches=200)
+losses, params_history = optimise_new(
+    opt_params, model_single, exposures_single, things, 5000,
+    precond_method="gn_probe", precond_kwargs=dict(n_probes=32))
 
 # %%
 plt.plot(losses[:])

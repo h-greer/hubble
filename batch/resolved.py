@@ -43,52 +43,7 @@ from fitting import *
 from plotting import *
 from spectra import *
 
-import jax.tree_util as jtu
 import interpax as ipx
-
-def set_array(pytree):
-    dtype = np.float64 if jax.config.x64_enabled else np.float32
-    floats, other = eqx.partition(pytree, eqx.is_inexact_array_like)
-    floats = jtu.tree_map(lambda x: np.array(x, dtype=dtype), floats)
-    return eqx.combine(floats, other)
-
-# %%
-def L1_loss(arr):
-    """L1 norm loss for array-like inputs."""
-    return np.nansum(np.abs(arr))
-
-
-def L2_loss(arr):
-    """L2 (quadratic) loss for array-like inputs."""
-    return np.nansum(arr**2)
-
-
-def tikhinov(arr):
-    """Finite-difference approximation used by several regularisers."""
-    pad_arr = np.pad(arr, 2)  # padding
-    dx = np.diff(pad_arr[0:-1, :], axis=1)
-    dy = np.diff(pad_arr[:, 0:-1], axis=0)
-    return dx**2 + dy**2
-
-
-def TV_loss(arr, eps=1e-16):
-    """Total variation (approx.) loss computed from finite differences."""
-    return np.sqrt(tikhinov(arr) + eps**2).sum()
-
-
-def TSV_loss(arr):
-    """Total squared variation (quadratic) loss."""
-    return tikhinov(arr).sum()
-
-
-def ME_loss(arr, eps=1e-16):
-    """Maximum-entropy inspired loss (negative entropy of distribution)."""
-    P = arr / np.nansum(arr)
-    S = np.nansum(-P * np.log(P + eps))
-    return -S
-
-# %%
-np.vstack((np.ones(5), np.arange(5))).T
 
 # %%
 class CursedResolvedSource(dl.sources.Source):
@@ -292,12 +247,6 @@ params = ModelParams(params)
 # plot_comparison(model_single, params, exposures_single)
 
 # %%
-def sgd(lr, delay, momentum=0.5):
-    return optax.sgd(zdx.optimisation.delay(lr, delay), momentum=momentum)
-
-def adam(lr, delay):
-    return optax.adam(zdx.optimisation.delay(lr, delay))
-
 
 g = 5e-2
 
@@ -349,7 +298,9 @@ orig_params = params.params #| params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 # %%
-losses, params_history = optimise_new_resolved(opt_params, model_single, exposures_single, things, 500, nbatches=9)
+losses, params_history = optimise_new_resolved(
+    opt_params, model_single, exposures_single, things, 500,
+    precond_method="gn_probe", precond_kwargs=dict(n_probes=32), precond_resolved=True)
 
 # %%
 plt.plot(losses[:])

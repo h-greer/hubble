@@ -5,6 +5,7 @@ from jax import Array
 import jax.tree_util as jtu
 from jax.flatten_util import ravel_pytree
 import jax
+import numpy as onp
 
 import dLux as dl
 import dLux.utils as dlu
@@ -115,23 +116,6 @@ class InjectedExposure(Exposure):
         self.orient = 0.
         self.hdr = None
 
-class LoadedExposure(Exposure):
-    def __init__(self, name, filter, fit, data, err, bad):
-        self.filter = filter
-        self.filename = f"{name}"
-        self.target = name
-        self.fit = fit
-        self.mjd = 0.0
-        self.wcs = None
-
-        self.data = data
-        self.err = err
-        self.bad = bad
-        self.exptime = 0.
-        self.pam = 0.
-        self.orient = 0.
-        self.hdr = None
-
 def exposure_from_file(fname, fit, extra_bad=None, crop=None, flatcorr=None):
 
     hdr = fits.getheader(fname, ext=0)
@@ -166,15 +150,9 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None, flatcorr=None):
     filter = hdr['FILTER']
 
     exptime = float(hdr['EXPTIME'])
-    gain = float(hdr['ADCGAIN'])
     orient = float(hdr["ORIENTAT"])
-    print(exptime, gain)
 
     mjd = hdr['EXPSTART']
-
-    print(hdr["CAL_VER"])
-
-    print(hdr["ORIENTAT"])
 
     if crop:
         w = WCS(image_hdr)
@@ -192,125 +170,117 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None, flatcorr=None):
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
     data = np.where(bad, np.nan, np.asarray(data, dtype=float))
 
-    err_with_poisson = np.sqrt(data/(gain*exptime) + err**2)
+    err_with_poisson = err#np.sqrt(data/(gain*exptime) + err**2)
 
     bad_with_poisson = np.isnan(err_with_poisson)
 
     return Exposure(filename, name, filter, data, err_with_poisson, bad_with_poisson, fit, mjd, exptime, wcs, pam, orient, hdr)
 
+def _nm(x):
+    return x*1e-9
+
+
+def _jitter_grid(n=3):
+    """Gauss-Hermite offsets (units of sigma) and weights for a unit 2D Gaussian."""
+    x, w = onp.polynomial.hermite_e.hermegauss(n)
+    nodes = onp.stack(onp.meshgrid(x, x), -1).reshape(-1, 2)
+    weights = onp.outer(w, w).ravel()
+    return np.array(nodes), np.array(weights/weights.sum())
+
+
+def _occulter(x):
+    """Occulter size in units of 0.3 arcsec (at 24 * 2.4 focal ratio) to metres."""
+    return x*dlu.arcsec2rad(0.3)*24*2.4
+
+
+# Unit of primary_amp (log-amplitude): the field perturbation of 1 nm OPD at 1.87 um, so primary_amp
+# and primary_opd steps of the same size (e.g. the same adam learning rate) are comparable.
+AMP_UNIT = 2*np.pi*1e-9/1.87e-6
+
+
+def _no_piston(x):
+    """Zero the [0, 0] Fourier coefficient: a piston is a no-op (OPD) or degenerate with flux (amplitude)."""
+    return x.at[0, 0].set(0.)
+
+
+# Parameters that set the same transformed value at one or more optics paths:
+# (param, optics paths, transform of the param value). The rest of update_optics is special-cased.
+OPTICS_PARAMS = [
+    ("primary_opd", ["primary_opd.coefficients"], lambda x: _no_piston(_nm(x))),
+    ("primary_amp", ["primary_amp.coefficients"], lambda x: _no_piston(x*AMP_UNIT)),
+    ("primary_klip", ["primary_klip.coefficients"], lambda x: x),
+    ("primary_low", ["primary_low.coefficients"], _nm),
+    ("primary_tilt", ["primary_tilt.angles"], dlu.arcsec2rad),
+    ("cold_mask_tilt", ["cold_mask_tilt.angles"], dlu.arcsec2rad),
+    ("cold_mask_opd", ["cold_mask_opd.coefficients"], _nm),
+    ("cold_mask_shift", ["cold_mask.transformation.translation",
+                         "cold_mask_opd.aperture.transformation.translation"], lambda x: x*1e-2),
+    ("outer_radius", ["cold_mask.outer.radius", "cold_mask_opd.aperture.radius"], lambda x: x),
+    ("secondary_radius", ["cold_mask.secondary.radius"], lambda x: x),
+    ("spider_width", ["cold_mask.spider.width"], lambda x: x),
+    ("primary_spider", ["primary.spider.width"], lambda x: x),
+    ("primary_secondary", ["primary.secondary.radius"], lambda x: x),
+    ("primary_outer", ["primary.mirror.radius", "primary_low.aperture.radius"], lambda x: x),
+    ("primary_pad", ["primary.pad_1.radius", "primary.pad_2.radius", "primary.pad_3.radius"], lambda x: x),
+    ("cold_mask_shear", ["cold_mask.transformation.shear"], lambda x: x),
+    ("cold_mask_scale", ["cold_mask.transformation.compression",
+                         "cold_mask_opd.aperture.transformation.compression"], lambda x: x),
+    ("cold_mask_rot", ["cold_mask.transformation.rotation",
+                       "cold_mask_opd.aperture.transformation.rotation"], lambda x: dlu.deg2rad(x)+np.pi/4),
+    ("primary_rot", ["primary.transformation.rotation"], lambda x: dlu.deg2rad(x)+np.pi/4),
+    ("primary_shear", ["primary.transformation.shear", "primary_low.aperture.transformation.shear"], lambda x: x),
+    ("occulter_radius", ["occulter.layers.occulter.r"], _occulter),
+    ("fnumber", ["prop1.focal_length"], lambda x: x*2.4),
+    ("defocus1", ["prop1.FreeSpace.distance"], lambda x: x),
+    ("defocus2", ["prop2.FreeSpace.distance"], lambda x: x),
+    ("defocus3", ["prop3.FreeSpace.distance"], lambda x: x),
+]
+
+
 class ModelFit(zdx.Base):
     source: dl.Telescope
+
+    # Parameter -> how its leaves are keyed in the model params: "exposure" (one per exposure),
+    # "target" (one per target and filter) or "global" (shared by all exposures). Subclasses extend it.
+    PARAM_KEYS = {
+        "primary_low": "exposure", "primary_tilt": "exposure", "primary_klip": "exposure", "bias": "exposure",
+        "primary_opd": "exposure", "primary_amp": "global", "primary_rot": "global",
+        "primary_shear": "global",
+        "cold_mask_opd": "global", "cold_mask_tilt": "global", "cold_mask_shift": "global",
+        "cold_mask_rot": "global", "cold_mask_shear": "global", "cold_mask_scale": "global",
+        "jitter": "exposure",
+    }
 
     @abstractmethod
     def update_source(self, model, exposure):
         pass
 
     def get_key(self, exposure, param):
-        match param:
-            case "primary_low" | "primary_tilt" | "primary_klip":
-                return exposure.key            
-            case "primary_opd" | "cold_mask_opd" | "cold_mask_tilt":
-                return "global"
-            case "cold_mask_shift" | "cold_mask_rot" | "cold_mask_shear" | "cold_mask_scale" | "primary_rot" | "primary_shear":
-                return "global"
-            case "bias":
-                return exposure.key
-            case _: raise ValueError(f"Parameter {param} has no key")
-    
+        if param not in self.PARAM_KEYS:
+            raise ValueError(f"Parameter {param} has no key")
+        match self.PARAM_KEYS[param]:
+            case "exposure": return exposure.key
+            case "target": return f"{exposure.target}_{exposure.filter}"
+            case "global": return "global"
+
     def map_param(self, exposure, param):
-        if param in ["primary_opd", "primary_klip", "primary_low", "cold_mask_opd", "primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_rot", "primary_rot", "cold_mask_shear", "primary_shear", "cold_mask_scale", "bias"]:
+        if param in self.PARAM_KEYS:
             return f"{param}.{exposure.get_key(param)}"
         return param
-    
+
     def update_optics(self, model, exposure):
         optics = model.optics
-        if "primary_opd" in model.params.keys():
-            coefficients = model.get(self.map_param(exposure, "primary_opd"))*1e-9
-            coefficients = coefficients.at[0,0].set(0.)
-            optics = optics.set("primary_opd.coefficients", coefficients)
-        
-        if "primary_klip" in model.params.keys():
-            coefficients = model.get(self.map_param(exposure, "primary_klip"))
-            optics = optics.set("primary_klip.coefficients", coefficients)
-
-        if "primary_low" in model.params.keys():
-            coefficients = model.get(self.map_param(exposure, "primary_low"))*1e-9
-            optics = optics.set("primary_low.coefficients", coefficients)
-        
-        if "primary_tilt" in model.params.keys():
-            angles = dlu.arcsec2rad(model.get(self.map_param(exposure, "primary_tilt")))
-            optics = optics.set("primary_tilt.angles", angles)
-
-        if "cold_mask_tilt" in model.params.keys():
-            angles = dlu.arcsec2rad(model.get(self.map_param(exposure, "cold_mask_tilt")))
-            optics = optics.set("cold_mask_tilt.angles", angles)
-        
-        if "cold_mask_opd" in model.params.keys():
-            coefficients = model.get(self.map_param(exposure, "cold_mask_opd"))*1e-9
-            optics = optics.set("cold_mask_opd.coefficients", coefficients)
-        
-        if "cold_mask_shift" in model.params.keys():
-            translation = model.get(self.map_param(exposure, "cold_mask_shift"))*1e-2
-            optics = optics.set("cold_mask.transformation.translation", translation)
-            optics = optics.set("cold_mask_opd.aperture.transformation.translation", translation)
-
-        if "outer_radius" in model.params.keys():
-            radius = model.get(self.map_param(exposure, "outer_radius"))
-            optics = optics.set("cold_mask.outer.radius", radius)
-        
-        if "secondary_radius" in model.params.keys():
-            radius = model.get(self.map_param(exposure, "secondary_radius"))
-            optics = optics.set("cold_mask.secondary.radius", radius)
-        
-        if "spider_width" in model.params.keys():
-            radius = model.get(self.map_param(exposure, "spider_width"))
-            optics = optics.set("cold_mask.spider.width", radius)
-
-        if "primary_spider" in model.params.keys():
-            radius = model.get(self.map_param(exposure, "primary_spider"))
-            optics = optics.set("primary.spider.width", radius)
-        
-        if "primary_secondary" in model.params.keys():
-            radius = model.get(self.map_param(exposure, "primary_secondary"))
-            optics = optics.set("primary.secondary.radius", radius)
-        
-        if "cold_mask_shear" in model.params.keys():
-            translation = model.get(self.map_param(exposure, "cold_mask_shear"))
-            optics = optics.set("cold_mask.transformation.shear", translation)
-            optics = optics.set("cold_mask_opd.aperture.transformation.shear", translation)
-
-        if "cold_mask_scale" in model.params.keys():
-            translation = model.get(self.map_param(exposure, "cold_mask_scale"))
-            optics = optics.set("cold_mask.transformation.compression", translation)
-            optics = optics.set("cold_mask_opd.aperture.transformation.compression", translation)
-        
-        if "cold_mask_rot" in model.params.keys():
-            translation = dlu.deg2rad(model.get(self.map_param(exposure, "cold_mask_rot")))+np.pi/4
-            optics = optics.set("cold_mask.transformation.rotation", translation)
-            optics = optics.set("cold_mask_opd.aperture.transformation.rotation", translation)
-
-        if "primary_rot" in model.params.keys():
-            translation = dlu.deg2rad(model.get(self.map_param(exposure, "primary_rot")))+np.pi/4
-            optics = optics.set("primary.transformation.rotation", translation)
-        
-        if "primary_shear" in model.params.keys():
-            translation = model.get(self.map_param(exposure, "primary_shear"))
-            optics = optics.set("primary.transformation.shear", translation)
-            # optics = optics.set("cold_mask_opd.aperture.transformation.shear", translation)
-
-        if "occulter_radius" in model.params.keys():
-            radius = model.get(self.map_param(exposure, "occulter_radius"))*dlu.arcsec2rad(0.3)*24*2.4
-            optics = optics.set("occulter.layers.occulter.r", radius)
-        
         if "occulter_coeffs" in model.params.keys():
             coeffs = model.get(self.map_param(exposure, "occulter_coeffs"))*dlu.arcsec2rad(0.3)*24*2.4
             optics = optics.set("occulter.layers.occulter.cc", coeffs[::2])
             optics = optics.set("occulter.layers.occulter.ss", coeffs[1::2])
-        
-        if "fnumber" in model.params.keys():
-            fnumber = model.get(self.map_param(exposure, "fnumber"))
-            optics = optics.set("prop1.focal_length", fnumber*2.4)
-        
+
+        for name, paths, transform in OPTICS_PARAMS:
+            if name in model.params.keys():
+                value = transform(model.get(self.map_param(exposure, name)))
+                for path in paths:
+                    optics = optics.set(path, value)
+
         return optics
 
     def update_detector(self, model, exposure):
@@ -319,9 +289,6 @@ class ModelFit(zdx.Base):
         if "bias" in model.params.keys():
             bias = model.get(self.map_param(exposure, "bias"))
             detector = detector.set("bias.value", bias)
-        # if "jitter" in model.params.keys():
-        #     jitter = model.get(self.map_param(exposure, "jitter"))
-        #     detector = detector.set("jitter.sigma", np.abs(jitter))
         
         if "anisotropy" in model.params.keys():
             anisotropy = model.get(self.map_param(exposure, "anisotropy"))
@@ -333,13 +300,22 @@ class ModelFit(zdx.Base):
         optics = self.update_optics(model, exposure)
         detector = self.update_detector(model, exposure)
 
-        psfs = optics.model(source, return_psf=True)
-        psf = psfs.data.sum(tuple(range(psfs.ndim)))
-        pixel_scale = psfs.pixel_scale.mean()
+        def model_psf(offset):
+            # Pointing offset as extra tilt at the primary, i.e. upstream of the occulter
+            tilted = optics.set("primary_tilt.angles", optics.primary_tilt.angles + offset)
+            psfs = tilted.model(source, return_psf=True)
+            return psfs.data.sum(tuple(range(psfs.ndim))), psfs.pixel_scale.mean()
 
-        psf_obj = dl.PSF(psf, pixel_scale)
-        
-        return detector.model(psf_obj, return_psf=False)
+        if "jitter" in model.params.keys():
+            # jitter is in mas (cf. primary_tilt, which is in arcsec)
+            sigma = dlu.arcsec2rad(1e-3*np.abs(model.get(self.map_param(exposure, "jitter"))))
+            nodes, weights = _jitter_grid()
+            psfs, pixel_scales = jax.lax.map(model_psf, sigma*nodes)
+            psf, pixel_scale = np.tensordot(weights, psfs, 1), pixel_scales[0]
+        else:
+            psf, pixel_scale = model_psf(np.zeros(2))
+
+        return detector.model(dl.PSF(psf, pixel_scale), return_psf=False)
     
     def loglike(self, model, exposure, per_pix=False, return_im=False):
         psf = self(model, exposure)
@@ -365,35 +341,21 @@ class ModelFit(zdx.Base):
         
 
 class SinglePointFit(ModelFit):
+    PARAM_KEYS = ModelFit.PARAM_KEYS | {"positions": "exposure", "spectrum": "target"}
     #nwavels: int = eqx.field(static=True)
     #spectrum: CombinedSpectrum
     time_series: bool = eqx.field(static=True)
 
-    def __init__(self, spectrum_basis, filter, time_series=False, precombined=False, wavels=None):
+    def __init__(self, spectrum_basis, filter, time_series=False):
         nwavels, nbasis = spectrum_basis.shape
-        if precombined:
-            self.source = dl.PointSource(spectrum=PreCombinedBasisSpectrum(wavels, np.zeros(nbasis), spectrum_basis))
-        else:
-            wv, inten = calc_throughput(filter, nwavels)
-            self.source = dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))
+        wv, inten = calc_throughput(filter, nwavels)
+        self.source = dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))
         self.time_series=time_series
     
     def get_key(self, exposure, param):
-        if param == "positions":
+        if self.time_series and param == "spectrum":
             return exposure.key
-        elif param == "spectrum" or param == "flux":
-            if self.time_series:
-                return exposure.key
-            else:    
-                return f"{exposure.target}_{exposure.filter}"
-        else:
-            return super().get_key(exposure, param)
-    
-    def map_param(self, exposure, param):
-        if param in ["positions", "spectrum"]:
-            return f"{param}.{exposure.get_key(param)}"
-        else:
-            return super().map_param(exposure, param)
+        return super().get_key(exposure, param)
 
     def update_source(self, model, exposure):
         
@@ -407,53 +369,6 @@ class SinglePointFit(ModelFit):
 
 
 
-
-class BreathingFit(ModelFit):
-    ns: int = eqx.field(static=True)
-    def __init__(self, ns):
-        self.source = dl.PointSource(wavelengths=[1])
-        self.ns = ns
-
-    def get_key(self, exposure, param):
-        if param == "breathing":
-            return exposure.key
-        else:
-            return super().get_key(exposure, param)
-    
-    def map_param(self, exposure, param):
-        if param == "breathing":
-            return f"{param}.{exposure.get_key(param)}"
-        else:
-            return super().map_param(exposure, param)
-
-    def __call__(self, model, exposure):
-        source = self.update_source(model, exposure)
-        detector = self.update_detector(model, exposure)
-
-        breathing = model.get(exposure.fit.map_param(exposure, "breathing"))
-        aberrations = model.get(exposure.fit.map_param(exposure, "aberrations"))
-
-        defocuses = np.linspace(-breathing, breathing, self.ns)
-
-        psf = 0.0
-
-        for i in range(self.ns):
-            ab = aberrations.at[0].add(defocuses[i])
-            model = model.set(exposure.fit.map_param(exposure, "aberrations"), ab)
-            optics = self.update_optics(model, exposure)
-            psfs = optics.model(source, return_psf=True)
-            psf = psf + psfs.data.sum(tuple(range(psfs.ndim)))/self.ns
-
-        pixel_scale = psfs.pixel_scale.mean()
-
-        psf_obj = dl.PSF(psf, pixel_scale)
-        
-        return detector.model(psf_obj, return_psf=False)
-    
-class BreathingSinglePointFit(SinglePointFit, BreathingFit):
-    def __init__(self, spectrum, nwavels, ns):
-        SinglePointFit.__init__(self, spectrum, nwavels)
-        BreathingFit.__init__(self, ns)
 
 # %%
 def L1_loss(arr):
@@ -489,9 +404,6 @@ def ME_loss(arr, eps=1e-16):
     P = arr / np.nansum(arr)
     S = np.nansum(-P * np.log(P + eps))
     return -S
-
-# %%
-np.vstack((np.ones(5), np.arange(5))).T
 
 # %%
 class CursedResolvedSource(dl.sources.Source):
@@ -534,44 +446,161 @@ class CursedResolvedSource(dl.sources.Source):
         return conv_psf
 
 # %%
+class InterpolatedResolvedSource(dl.sources.Source):
+    """Cheap stand-in for CursedResolvedSource: K anchor PSFs instead of one PSF per source pixel.
+
+    The PSF of a source at p is approximated by a weighted sum of shifted anchor PSFs,
+        PSF(p) ~ sum_k w_k(p) * shift(PSF(a_k), p - a_k),     sum_k w_k = 1,
+    so the image is sum_k PSF(a_k) (*) S_k, with S_k the deltas {w_k(p_j) d_j} at (p_j - a_k) / pixel_scale,
+    placed at exact sub-pixel positions (Fourier-domain shifts).
+    The anchors sit on a polar grid in the detector frame (a centre point plus n_angular points on each
+    ring of anchor_radii, in arcsec), densest near the occulter where the PSF varies fastest; the weights
+    are bilinear in (r, theta). The only approximation is the shift-invariance of the PSF between neighbouring
+    anchors (exact at anchors). The image is linear in
+    `distribution`, so its gradient is exact for the approximate model. Cost: K propagations + K FFTs.
+
+    Hybrid: pixels with radius < exact_radius (arcsec) are propagated exactly, one PSF each, because the PSF
+    varies too fast there for interpolation. Radius does not depend on roll, so these pixels are a static set;
+    the anchor rings then start at exact_radius (no centre anchor). exact_radius=0 gives pure interpolation.
+
+    Assumes the last layer of `optics` is the MFT onto the detector grid (NICMOSCoronagraph's "prop1"), whose
+    npixels / pixel_scale / focal_length define the grid; a source offset (x, y) moves the PSF by (y, x)
+    pixels about the grid centre (N - 1) / 2. Source positions are rolled as in CursedResolvedSource.
+    """
+    distribution: Array
+    position: Array
+    pitch: float = eqx.field(static=True)    # static: the inner/outer pixel split below is fixed at trace time
+    roll: Array
+    anchor_radii: tuple = eqx.field(static=True)
+    n_angular: int = eqx.field(static=True)
+    include_centre: bool = eqx.field(static=True)
+    grad_optics: bool = eqx.field(static=True)
+    batch_size: int = eqx.field(static=True)
+    exact_radius: float = eqx.field(static=True)
+
+    def __init__(self, distribution, pitch, position=np.zeros(2), roll=0.,
+                 anchor_radii=(0.1, 0.2, 0.3, 0.4, 0.5, 0.65, 0.85, 1.1, 1.5, 2.2), n_angular=8,
+                 include_centre=True, grad_optics=False, batch_size=4, exact_radius=0.6, **kwargs):
+        self.distribution = distribution
+        self.pitch = float(pitch)
+        self.position = position
+        self.roll = roll
+        self.anchor_radii = tuple(float(r) for r in anchor_radii)
+        self.n_angular = int(n_angular)
+        self.include_centre = bool(include_centre)
+        self.grad_optics = bool(grad_optics)
+        self.batch_size = int(batch_size)
+        self.exact_radius = float(exact_radius)
+        super().__init__(**kwargs)
+
+    def normalise(self):
+        return self
+
+    def layout(self):
+        """(centre anchor?, ring radii in arcsec). With an exact core, rings start at exact_radius."""
+        if self.exact_radius > 0:
+            return False, (self.exact_radius,) + tuple(r for r in self.anchor_radii if r > self.exact_radius)
+        return self.include_centre, self.anchor_radii
+
+    def anchors(self):
+        """Anchor offsets (K, 2) in radians, (x, y); the centre anchor (if any) comes first."""
+        centre, radii = self.layout()
+        ang = np.arange(self.n_angular) * 2 * np.pi / self.n_angular
+        ring = np.array([[r * np.cos(t), r * np.sin(t)] for r in radii for t in ang])
+        a = np.concatenate([np.zeros((1, 2)), ring]) if centre else ring
+        return dlu.arcsec2rad(a)
+
+    def weights_matrix(self, r, theta):
+        """(K, M) interpolation weights for sources at polar position (r, theta): linear in r between rings
+        (centre to first ring included, constant beyond the last), periodic-linear in theta."""
+        centre, radii = self.layout()
+        nodes = np.array(([0.] if centre else []) + [dlu.arcsec2rad(x) for x in radii])
+        w_r = jax.vmap(lambda e: np.interp(r, nodes, e), out_axes=1)(np.eye(len(nodes)))   # (M, nodes)
+        n = self.n_angular
+        u = np.mod(theta, 2 * np.pi) * n / (2 * np.pi)
+        j, f = np.floor(u).astype(int) % n, u % 1
+        w_t = (1 - f)[:, None] * jax.nn.one_hot(j, n) + f[:, None] * jax.nn.one_hot((j + 1) % n, n)
+        if centre:
+            w_r, w_c = w_r[:, 1:], w_r[:, :1]
+        w = (w_r[:, :, None] * w_t[:, None, :]).reshape(len(r), -1)
+        return (np.concatenate([w_c, w], axis=1) if centre else w).T
+
+    def model(self, optics, return_wf=False, return_psf=False):
+        final = optics.layers["prop1"]
+        N, ps = final.npixels, final.pixel_scale / final.focal_length   # output grid, radians / pixel
+        wid = self.distribution.shape[0]
+        R, TH = dlu.pixel_coords(wid, pixel_scale=self.pitch, polar=True)
+        TH = TH + self.roll
+        pos = np.stack(dlu.polar2cart(np.array([R, TH])), -1).reshape(-1, 2)    # (M, 2) source (x, y)
+        d = self.distribution.flatten()
+        # inner (exact) / outer (interpolated) split, in numpy so that it is concrete under jit (pitch is static)
+        xs = (onp.arange(wid) - (wid - 1) / 2) * self.pitch
+        inner = onp.flatnonzero(onp.hypot(*onp.meshgrid(xs, xs)).flatten() < dlu.arcsec2rad(self.exact_radius))
+        outer = onp.setdiff1d(onp.arange(wid ** 2), inner)
+        image = np.zeros((N, N))
+
+        if len(inner):
+            sg = (lambda x: x) if self.grad_optics else jax.lax.stop_gradient
+            exact = lambda x: x[2] * sg(optics.propagate(self.wavelengths, x[:2], self.weights))
+            xyd = np.concatenate([pos[inner], d[inner, None]], axis=1)
+            image += np.sum(jax.lax.map(exact, xyd, batch_size=self.batch_size), axis=0)
+
+        if len(outer):
+            W = self.weights_matrix(R.flatten()[outer], TH.flatten()[outer])
+            image += np.sum(jax.lax.map(self._anchor_image(optics, pos[outer], d[outer], N, ps),
+                                        (self.anchors(), W), batch_size=self.batch_size), axis=0)
+        if return_psf:
+            return dl.PSF(image, final.pixel_scale)
+        return image
+
+    def _anchor_image(self, optics, pos, d, N, ps):
+        """Returns the function mapping (anchor offset, its weights over the outer pixels) to its image term."""
+        fy, fx = np.fft.fftfreq(2 * N), np.fft.rfftfreq(2 * N)
+
+        def one(args):
+            a, w = args
+            psf = optics.propagate(self.wavelengths, a, self.weights)
+            psf = psf if self.grad_optics else jax.lax.stop_gradient(psf)
+            # S_k in the Fourier domain, exactly: sum_j c_j exp(-2 pi i f . t_j) with t_j the (row, col) pixel shift
+            # of source j from the anchor (a separable matmul; no sub-pixel interpolation error). A shift beyond
+            # the window contributes nothing to it and would wrap around, so it is dropped.
+            t = ((pos - a) / ps)[:, ::-1]
+            c = w * d * np.all(np.abs(t) < N, axis=1)
+            A = np.exp(-2j * np.pi * fy[:, None] * t[:, 0]) * c                 # (2N, M)
+            B = np.exp(-2j * np.pi * t[:, 1, None] * fx)                        # (M, N + 1)
+            # zero padding to 2N keeps the circular convolution free of wrap-around inside the N x N window
+            return np.fft.irfft2(np.fft.rfft2(psf, (2 * N, 2 * N)) * (A @ B), (2 * N, 2 * N))[:N, :N]
+
+        return one
+
+# %%
 class PointResolvedFit(ModelFit):
+    PARAM_KEYS = ModelFit.PARAM_KEYS | {"positions": "exposure", "spectrum": "target", "resolved": "target"}
     wid: float
     regulariser: Array
 
-    def __init__(self, spectrum_basis, filter, wid, regulariser=np.zeros(2)):
+    def __init__(self, spectrum_basis, filter, wid, regulariser=np.zeros(2), resolved_source="exact", resolved_kwargs=None):
+        """resolved_source: "exact" (CursedResolvedSource, one PSF per pixel) or "interp"
+        (InterpolatedResolvedSource(**resolved_kwargs), anchor PSFs + interpolation)."""
         nwavels, nbasis = spectrum_basis.shape
         wv, inten = calc_throughput(filter, nwavels)
 
         wvr, intenr = calc_throughput(filter, 1)
+        resolved_cls = {"exact": CursedResolvedSource, "interp": InterpolatedResolvedSource}[resolved_source]
 
         self.source = dl.Scene([            
-            ("resolved", CursedResolvedSource(
+            ("resolved", resolved_cls(
                 wavelengths=wvr,
                 spectrum=dl.Spectrum(wvr, intenr), 
                 distribution=np.ones((wid, wid)),
-                pitch=dlu.arcsec2rad(0.0432*2)
+                pitch=dlu.arcsec2rad(0.0432*2),
+                **(resolved_kwargs or {}),
             )),
             ("point", dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))),
         ])
         self.wid = wid
         self.regulariser=regulariser
     
-    def get_key(self, exposure, param):
-        if param == "positions":
-            return exposure.key
-        elif param == "spectrum" or param == "flux":
-            return f"{exposure.target}_{exposure.filter}"
-        elif param == "resolved":
-            return f"{exposure.target}_{exposure.filter}"
-        else:
-            return super().get_key(exposure, param)
-    
-    def map_param(self, exposure, param):
-        if param in ["positions", "spectrum", "resolved"]:
-            return f"{param}.{exposure.get_key(param)}"
-        else:
-            return super().map_param(exposure, param)
-
     def get_distribution(self, model, exposure):
         return 10**(model.get(exposure.fit.map_param(exposure, "resolved")))
 
@@ -600,95 +629,6 @@ class PointResolvedFit(ModelFit):
 
 
 
-class BinaryFit(ModelFit):
-    def __init__(self, spectrum_basis, filter):
-        nwavels, nbasis = spectrum_basis.shape
-        wv, inten = calc_throughput(filter, nwavels)
-        self.source = dl.Scene([
-            ("primary",dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))), 
-            ("secondary",dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis)))
-        ])
-            
-    def get_key(self, exposure, param):
-        if param == "positions":
-            return exposure.key
-        elif param == "primary_spectrum" or param == "secondary_spectrum":
-            return f"{exposure.target}_{exposure.filter}"
-        else:
-            return super().get_key(exposure, param)
-    
-    def map_param(self, exposure, param):
-        if param in ["positions", "primary_spectrum", "secondary_spectrum"]:
-            return f"{param}.{exposure.get_key(param)}"
-        else:
-            return super().map_param(exposure, param)
-
-    def update_source(self, model, exposure):
-        primary_coeffs = model.get(exposure.fit.map_param(exposure, "primary_spectrum"))
-        secondary_coeffs = model.get(exposure.fit.map_param(exposure, "secondary_spectrum"))
-
-        source = self.source.set("primary.spectrum.basis_weights", primary_coeffs)
-        source = source.set("primary.flux", source.primary.spectrum.flux)
-        source = source.set("secondary.spectrum.basis_weights", secondary_coeffs)
-        source = source.set("secondary.flux", source.secondary.spectrum.flux)
-
-
-        position = model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432)
-        separation = model.get(exposure.fit.map_param(exposure, "separation"))*dlu.arcsec2rad(0.0432)
-        position_angle = dlu.deg2rad(model.get(exposure.fit.map_param(exposure, "position_angle")))
-
-
-        positions = dlu.positions_from_sep(position, separation, position_angle)
-
-        source = source.set("primary.position", positions[0])
-        source = source.set("secondary.position", positions[1])
-        
-        return source
-
-class PointSourceContrastFit(ModelFit):
-    def __init__(self, spectrum_basis, filter):
-        nwavels, nbasis = spectrum_basis.shape
-        wv, inten = calc_throughput(filter, nwavels)
-        self.source = dl.Scene([
-            ("primary",dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis))), 
-            ("secondary",dl.PointSource(spectrum=CombinedBasisSpectrum(wv, inten, np.zeros(nbasis), spectrum_basis)))
-        ])
-            
-    def get_key(self, exposure, param):
-        if param == "positions":
-            return exposure.key
-        elif param == "spectrum" or param == "secondary_spectrum" or param == "secondary_position":
-            return f"{exposure.target}_{exposure.filter}"
-        else:
-            return super().get_key(exposure, param)
-    
-    def map_param(self, exposure, param):
-        if param in ["positions", "spectrum", "secondary_spectrum", "secondary_position"]:
-            return f"{param}.{exposure.get_key(param)}"
-        else:
-            return super().map_param(exposure, param)
-
-    def update_source(self, model, exposure):
-        primary_coeffs = model.get(exposure.fit.map_param(exposure, "spectrum"))
-        secondary_coeffs = model.get(exposure.fit.map_param(exposure, "secondary_spectrum"))
-
-        source = self.source.set("primary.spectrum.basis_weights", primary_coeffs)
-        source = source.set("primary.flux", source.primary.spectrum.flux)
-        source = source.set("secondary.spectrum.basis_weights", secondary_coeffs)
-        source = source.set("secondary.flux", source.secondary.spectrum.flux)
-
-
-        position = model.get(exposure.fit.map_param(exposure, "positions"))*dlu.arcsec2rad(0.0432)
-
-        secondary_position = model.get(exposure.fit.map_param(exposure, "secondary_position"))*dlu.arcsec2rad(0.0432)
-
-        source = source.set("primary.position", position)
-
-        source = source.set("secondary.position", secondary_position)
-        
-        return source
-
-
 class BaseModeller(zdx.Base):
     params: dict
 
@@ -715,7 +655,6 @@ class BaseModeller(zdx.Base):
         return values
 
 class NICMOSModel(BaseModeller):
-    filters: dict
     optics: NICMOSOptics
     detector: NICMOSDetector
 
@@ -723,16 +662,6 @@ class NICMOSModel(BaseModeller):
         self.optics = optics
         self.detector = detector
         self.params = params
-        self.filters = {}
-
-        for filter in [e.filter for e in exposures]:
-            #print(filter)
-            spec = filter_files[filter]
-            spec = spec.at[:,0].divide(1e10)
-            self.filters[filter] = spec[::5,:]    
-
-
-
 
 
 class ModelParams(BaseModeller):
