@@ -2,10 +2,10 @@
 #SBATCH --job-name=calibrator-bootstrap
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=2
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=04:00:00
-#SBATCH --mem-per-cpu=8000M
+#SBATCH --time=00:30:00
+#SBATCH --mem-per-cpu=4000M
 #SBATCH -o calibrator-bootstrap.out
 
 

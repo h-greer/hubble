@@ -145,10 +145,10 @@ plot_comparison_detailed(model_single, params, exposures_single, percentile=99, 
 g = 5e-2
 
 things = {
-    "primary_opd": adam(5e-3, 50),
+    "primary_opd": adam(2e-2, 50),
     # Delayed until well after the phase (primary_opd starts at 50), so the phase is fitted first
     # and the phase/amplitude degeneracy is avoided
-    "primary_amp": adam(5e-3, 150),
+    "primary_amp": adam(2e-2, 150),
 
     "spectrum": sgd(g*1, 0),
     "primary_tilt": sgd(g*1., 0),
@@ -166,7 +166,7 @@ things = {
     "cold_mask_scale": sgd(g*1, 0),
 
     "occulter_radius": sgd(g*1., 0),
-    "occulter_coeffs": adam(5e-3, 300),
+    "occulter_coeffs": adam(2e-2, 300),
 
     "secondary_radius": sgd(g*1., 0),
     "spider_width": sgd(g*1., 0),
@@ -232,7 +232,7 @@ orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 losses, params_history = optimise_new(
-    opt_params, model_single, exposures_single, things, 600,
+    opt_params, model_single, exposures_single, things, 2000,
     precond_method="gn_probe", precond_kwargs=dict(n_probes=32))
 
 # %%
