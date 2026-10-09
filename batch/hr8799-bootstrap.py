@@ -73,10 +73,35 @@ spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 ddir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL/NICMOS-LAPL-DD1/LAPL_DATA/contemp_flats/repaired/'
 flatdir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL/NICMOS-LAPL-DD1/HOLEFLATS/'
 
+# The cold mask lateral position (shift) and its tilt (a pupil-plane Tilt initialised from each exposure's own
+# TARSIAFX/Y header, i.e. pointing) can differ between exposures; rotation, shear, scale and opd stay global
+class PerExposureColdMaskFit(SinglePointFit):
+    PARAM_KEYS = SinglePointFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure"}
+
+# Hold-out: crop (x, y) pixels of HR 8799 b and c from Soummer et al. 2011 1998 astrometry and the exposure WCS.
+# The star position is uncertain by 1-3 px, so each planet is masked with a (2*hold_hw+1)^2 box
+hold_hw = 3
+holdouts = {
+    "n4qs09akq": {"b": (46, 18), "c": (25, 40)},
+    "n4qs10asq": {"b": (33, 18), "c": (26, 48)},
+}
+
+def holdout_mask(root):
+    mask = np.full((wid, wid), False)
+    for x, y in holdouts[root].values():
+        mask = mask.at[y-hold_hw:y+hold_hw+1, x-hold_hw:x+hold_hw+1].set(True)
+    return mask
+
 # Same visit pair at two rolls (ORIENTAT -147.4 and -117.5 deg); the spectrum is keyed by target, so both share it
+roots = ["n4qs09akq", "n4qs10asq"]
 exposures_single = [
-    exposure_from_file(ddir + 'n4qs09akq_clc_calf.fits', SinglePointFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, flatcorr=flatdir),
-    exposure_from_file(ddir + 'n4qs10asq_clc_calf.fits', SinglePointFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, flatcorr=flatdir),
+    exposure_from_file(ddir + f'{root}_clc_calf.fits', PerExposureColdMaskFit(spectrum_basis, "F160W"), crop=wid, extra_bad=holdout_mask(root), flatcorr=flatdir)
+    for root in roots
+]
+# Unmasked copies, only for plotting residuals inside the held-out boxes
+exposures_full = [
+    exposure_from_file(ddir + f'{root}_clc_calf.fits', PerExposureColdMaskFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, flatcorr=flatdir)
+    for root in roots
 ]
 
 # %%
@@ -245,7 +270,20 @@ plt.savefig(f"{out}/losses.png")
 print("final loss", losses[-1])
 
 plot_params(params_history, groups, xw = 5, save=f"{out}/params")
-plot_comparison_detailed(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, wf_size=wf_wid, percentile=99, save=f"{out}/comparison")
+plot_comparison_detailed(model_single, ModelParams(params_history[-1]), exposures_full, quadrature=False, wf_size=wf_wid, percentile=99, save=f"{out}/comparison")
+
+# %%
+# Residuals of the unmasked data, with the held-out boxes outlined, to look for b and c
+model = ModelParams(params_history[-1]).inject(model_single)
+for exp in exposures_full:
+    resid = exp.data - exp.fit(model, exp)
+    fig, axs = plt.subplots(1, 2, figsize=(20, 9), layout='compressed')
+    for ax, im, unit in zip(axs, [resid, resid/exp.err], ["DN/s", "z"]):
+        _signed_panel(ax, im, f"{exp.key} residual ({unit})", percentile=99, label=unit, bad='w')
+        for name, (x, y) in holdouts[exp.key].items():
+            ax.add_patch(matplotlib.patches.Rectangle((x-hold_hw-.5, y-hold_hw-.5), 2*hold_hw+1, 2*hold_hw+1, fill=False, ec='g', lw=2))
+            ax.text(x+hold_hw+1, y+hold_hw+1, name, color='g', fontsize=24)
+    fig.savefig(f"{out}/holdout-residual_{exp.key}.png")
 
 # %%
 # Recovered amplitude where both the primary and the cold mask transmit, as in "Pupil x Cold Mask"
