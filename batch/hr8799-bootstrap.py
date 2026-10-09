@@ -73,14 +73,10 @@ spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 ddir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL/NICMOS-LAPL-DD1/LAPL_DATA/contemp_flats/repaired/'
 flatdir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL/NICMOS-LAPL-DD1/HOLEFLATS/'
 
-# High-order wavefront (primary_opd) shared by both rolls; low-order Zernikes stay per exposure
-class SharedOPDFit(SinglePointFit):
-    PARAM_KEYS = SinglePointFit.PARAM_KEYS | {"primary_opd": "global"}
-
 # Same visit pair at two rolls (ORIENTAT -147.4 and -117.5 deg); the spectrum is keyed by target, so both share it
 exposures_single = [
-    exposure_from_file(ddir + 'n4qs09akq_clc_calf.fits', SharedOPDFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, flatcorr=flatdir),
-    exposure_from_file(ddir + 'n4qs10asq_clc_calf.fits', SharedOPDFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, flatcorr=flatdir),
+    exposure_from_file(ddir + 'n4qs09akq_clc_calf.fits', SinglePointFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, flatcorr=flatdir),
+    exposure_from_file(ddir + 'n4qs10asq_clc_calf.fits', SinglePointFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, flatcorr=flatdir),
 ]
 
 # %%
