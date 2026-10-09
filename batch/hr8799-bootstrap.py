@@ -78,12 +78,13 @@ flatdir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/L
 class PerExposureColdMaskFit(SinglePointFit):
     PARAM_KEYS = SinglePointFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure"}
 
-# Hold-out: crop (x, y) pixels of HR 8799 b and c from Soummer et al. 2011 1998 astrometry and the exposure WCS.
-# The star position is uncertain by 1-3 px, so each planet is masked with a (2*hold_hw+1)^2 box
-hold_hw = 3
+# Hold-out: crop (x, y) pixels of HR 8799 b and c from Soummer et al. 2011 1998 astrometry and the exposure WCS,
+# about the star position of the fitted (unocculted) model, (36.5, 37.4) and (35.4, 38.5), not the header target
+# position, which is ~2.2 px high. Each planet is masked with a (2*hold_hw+1)^2 box
+hold_hw = 5
 holdouts = {
-    "n4qs09akq": {"b": (46, 18), "c": (25, 40)},
-    "n4qs10asq": {"b": (33, 18), "c": (26, 48)},
+    "n4qs09akq": {"b": (45, 16), "c": (24, 38)},
+    "n4qs10asq": {"b": (32, 16), "c": (25, 45)},
 }
 
 def holdout_mask(root):
