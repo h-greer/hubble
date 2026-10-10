@@ -30,7 +30,7 @@ def plot_params(models, groups, xw = 4, save=False):
     for i, param in enumerate(groups):
         sp = axs[i%xw, i//xw]
         # print(models[0].get(param))
-        if param in ["primary_low", "primary_klip", "spectrum", "primary_opd", "primary_amp", "cold_mask_opd","primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_shear", "cold_mask_scale", "cold_mask_rot", "primary_rot", "bias", "resolved", "primary_shear", "jitter", "primary_amp_klip"]:
+        if isinstance(models[-1].get(param), dict):  # keyed (per exposure / target) parameters
 
             for j in range(len(list(models[-1].get(param).values()))):
                 vals = np.asarray([list(x.get(param).values())[j].flatten() for x in models]).T
