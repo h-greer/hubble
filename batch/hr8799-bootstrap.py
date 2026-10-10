@@ -55,17 +55,17 @@ wf_wid = 512
 wid = 80
 oversample = 4
 
-nwavels = 20
-npoly=5
+nwavels = 30
+npoly=8
 
 n_modes = 45
-n_zernikes = 30
+n_zernikes = 50
 
 optics = NICMOSCoronagraph(wf_wid, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, amplitude=True)
 
 detector = NICMOSDetector(oversample, wid)
 
-vects = np.load("../data/iterative_spectrum_basis_F160W.npy")[:,:npoly]
+vects = np.load(f"../data/iterative_spectrum_basis_F160W_{nwavels}.npy")[:,:npoly]
 assert vects.shape == (nwavels, npoly)
 spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 
@@ -83,17 +83,19 @@ class PerExposureColdMaskFit(SinglePointFit):
 # the star position of the fitted (unocculted) model, (36.5, 37.4) and (35.4, 38.5), not the header target
 # position, which is ~2.2 px high. Pixels within hold_r of the planet are masked
 hold_r = 4
-holdouts = {
-    "n4qs09akq": {"b": (45.1, 16.0)},
-    "n4qs10asq": {"b": (32.3, 15.7)},
+# All three exposures of each roll (ORIENTAT -147.4 and -117.5 deg) share that roll's planet positions
+rolls = {
+    "-147.4": (["n4qs09akq", "n4qs09anq", "n4qs09aoq"], {"b": (45.1, 16.0)}),
+    "-117.5": (["n4qs10asq", "n4qs10avq", "n4qs10awq"], {"b": (32.3, 15.7)}),
 }
+holdouts = {root: planets for roots, planets in rolls.values() for root in roots}
 
 def holdout_mask(root):
     yy, xx = np.indices((wid, wid))
     return np.any(np.stack([np.hypot(xx - x, yy - y) <= hold_r for x, y in holdouts[root].values()]), axis=0)
 
-# Same visit pair at two rolls (ORIENTAT -147.4 and -117.5 deg); the spectrum is keyed by target, so both share it
-roots = ["n4qs09akq", "n4qs10asq"]
+# The same visit at two rolls; the spectrum is keyed by target, so all exposures share it
+roots = list(holdouts)
 exposures_single = [
     exposure_from_file(ddir + f'{root}_clc_calf.fits', PerExposureColdMaskFit(spectrum_basis, "F160W"), crop=wid, extra_bad=holdout_mask(root), flatcorr=flatdir)
     for root in roots
