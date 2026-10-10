@@ -74,17 +74,20 @@ ddir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL
 flatdir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL/NICMOS-LAPL-DD1/HOLEFLATS/'
 
 # Extended emission: an InterpolatedResolvedSource (anchor PSFs + interpolation, exact within 0.6") of
-# resolved_wid^2 pixels at pitch 0.0864", shared by both rolls (keyed by target, rotated by each exposure's ORIENTAT), with L1 regularisation of its
+# resolved_wid^2 pixels at pitch 0.0864", shared by all exposures (keyed by target, rotated by each exposure's ORIENTAT), with L1 regularisation of its
 # 10**resolved distribution
+# Both rolls of the visit pair, three exposures each (ORIENTAT -147.4 and -117.5 deg)
+roots = ["n4qs09akq", "n4qs09anq", "n4qs09aoq", "n4qs10asq", "n4qs10avq", "n4qs10awq"]
+
 resolved_wid = 60
 # L1 (sparsity) only, on the linear distribution 10**resolved. The penalty is added in every exposure's loglike,
 # so split the total weight between them
 l1_total = 10.
-regulariser = np.array([l1_total/2])
+regulariser = np.array([l1_total/len(roots)])
 
 # The cold mask lateral position (shift) and its tilt (a pupil-plane Tilt initialised from each exposure's own
 # TARSIAFX/Y header, i.e. pointing) can differ between exposures; rotation, shear, scale and opd stay global.
-# The high-order wavefront (primary_opd) is shared by both rolls; low-order Zernikes stay per exposure
+# The high-order wavefront (primary_opd) is shared by all exposures; low-order Zernikes stay per exposure
 class PerExposureColdMaskResolvedFit(PointResolvedFit):
     PARAM_KEYS = PointResolvedFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure", "primary_opd": "global"}
 
@@ -95,11 +98,10 @@ class PerExposureColdMaskResolvedFit(PointResolvedFit):
             ll = ll + self.regulariser[0]*L1_loss(self.get_distribution(model, exposure))
         return ll
 
-# Same visit pair at two rolls (ORIENTAT -147.4 and -117.5 deg); the spectrum and resolved distribution are keyed
-# by target, so both share them
+# Same visit at two rolls; the spectrum and resolved distribution are keyed by target, so all six share them
 exposures_single = [
     exposure_from_file(ddir + f'{root}_clc_calf.fits', PerExposureColdMaskResolvedFit(spectrum_basis, "F160W", wid=resolved_wid, regulariser=regulariser, resolved_source="interp"), crop=wid, extra_bad=None, flatcorr=flatdir)
-    for root in ["n4qs09akq", "n4qs10asq"]
+    for root in roots
 ]
 
 # %%
