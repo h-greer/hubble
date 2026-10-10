@@ -30,7 +30,7 @@ def plot_params(models, groups, xw = 4, save=False):
     for i, param in enumerate(groups):
         sp = axs[i%xw, i//xw]
         # print(models[0].get(param))
-        if param in ["primary_low", "primary_klip", "spectrum", "primary_opd", "primary_amp", "cold_mask_opd","primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_shear", "cold_mask_scale", "cold_mask_rot", "primary_rot", "bias", "resolved", "primary_shear", "jitter"]:
+        if param in ["primary_low", "primary_klip", "spectrum", "primary_opd", "primary_amp", "cold_mask_opd","primary_tilt", "cold_mask_tilt", "cold_mask_shift", "cold_mask_shear", "cold_mask_scale", "cold_mask_rot", "primary_rot", "bias", "resolved", "primary_shear", "jitter", "primary_amp_klip"]:
 
             for j in range(len(list(models[-1].get(param).values()))):
                 vals = np.asarray([list(x.get(param).values())[j].flatten() for x in models]).T
@@ -153,9 +153,10 @@ def plot_comparison_detailed(model, params, exposures, quadrature=False, save=Fa
         for ax, (support, opd, title) in zip(axs[1], pupils):
             _signed_panel(ax, np.where(support < .5, np.nan, opd*1e9), title, label="OPD (nm)")
 
-        # Fractional amplitude variation on the primary, if the optics has an amplitude screen
-        if "primary_amp" in optics.layers:
-            amp = 100*(np.exp(optics.primary_amp.eval_basis()) - 1)
+        # Fractional amplitude variation on the primary, summed over whichever amplitude screens the optics has
+        amp_layers = [optics.layers[k] for k in ("primary_amp", "primary_amp_klip") if k in optics.layers]
+        if amp_layers:
+            amp = 100*(np.exp(sum(layer.eval_basis() for layer in amp_layers)) - 1)
             _signed_panel(axs[2, 0], np.where(primary < .5, np.nan, amp), "Recovered Amplitude",
                           label="Amplitude (%)")
         else:

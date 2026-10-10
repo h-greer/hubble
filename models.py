@@ -193,9 +193,6 @@ def _occulter(x):
     return x*dlu.arcsec2rad(0.3)*24*2.4
 
 
-# Unit of primary_amp (log-amplitude): the field perturbation of 1 nm OPD at 1.87 um, so primary_amp
-# and primary_opd steps of the same size (e.g. the same adam learning rate) are comparable.
-AMP_UNIT = 2*np.pi*1e-9/1.87e-6
 
 
 def _no_piston(x):
@@ -209,6 +206,7 @@ OPTICS_PARAMS = [
     ("primary_opd", ["primary_opd.coefficients"], lambda x: _no_piston(_nm(x))),
     ("primary_amp", ["primary_amp.coefficients"], lambda x: _no_piston(x*AMP_UNIT)),
     ("primary_klip", ["primary_klip.coefficients"], lambda x: x),
+    ("primary_amp_klip", ["primary_amp_klip.coefficients"], lambda x: x),
     ("primary_low", ["primary_low.coefficients"], _nm),
     ("primary_tilt", ["primary_tilt.angles"], dlu.arcsec2rad),
     ("cold_mask_tilt", ["cold_mask_tilt.angles"], dlu.arcsec2rad),
@@ -244,6 +242,7 @@ class ModelFit(zdx.Base):
     # "target" (one per target and filter) or "global" (shared by all exposures). Subclasses extend it.
     PARAM_KEYS = {
         "primary_low": "exposure", "primary_tilt": "exposure", "primary_klip": "exposure", "bias": "exposure",
+        "primary_amp_klip": "global",
         "primary_opd": "exposure", "primary_amp": "global", "primary_rot": "global",
         "primary_shear": "global",
         "cold_mask_opd": "global", "cold_mask_tilt": "global", "cold_mask_shift": "global",

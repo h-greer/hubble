@@ -274,28 +274,46 @@ class SoummerFastObstruction(dl.OpticalLayer):
             return wf.normalise()
         return wf
 
+# Unit of primary_amp (log-amplitude): the field perturbation of 1 nm OPD at 1.87 um, so primary_amp
+# and primary_opd steps of the same size (e.g. the same adam learning rate) are comparable.
+AMP_UNIT = 2*np.pi*1e-9/1.87e-6
+
+
 class TransformedFourierBasis(dl.OpticalLayer):
+    """OPD from a mean plus a linear combination of modes, all Fourier coefficients (e.g. from a PCA) in units of
+    `scale` (1e-9: nm)."""
     mean: Array
     modes: Array
     coefficients: Array
     kernels: tuple[Array, Array]
     n_modes: Array
+    scale: float = eqx.field(static=True)
 
-    def __init__(self, npix, n_modes, basisfile):
+    def __init__(self, npix, n_modes, basisfile, scale=1e-9):
         basis = np.load(basisfile)
         self.mean = basis["mean"]
         self.modes = basis["modes"]
         self.n_modes = n_modes
+        self.scale = scale
         self.kernels = dlu.fourier_kernels((n_modes,n_modes), (npix,npix))
         self.coefficients = np.zeros(self.modes.shape[0])
     
     def eval_basis(self):
-        fourier_coeffs = 1e-9* (self.mean + np.dot(self.coefficients, self.modes)).reshape((self.n_modes,self.n_modes))
+        fourier_coeffs = self.scale*(self.mean + np.dot(self.coefficients, self.modes)).reshape((self.n_modes,self.n_modes))
         return dlu.eval_fourier_basis(fourier_coeffs, *self.kernels)
 
     def __call__(self, wavefront):
         return wavefront.add_opd(self.eval_basis())
 
+
+class TransformedFourierAmplitude(TransformedFourierBasis):
+    """Log-amplitude counterpart of TransformedFourierBasis (mean and modes in units of AMP_UNIT)."""
+
+    def __init__(self, npix, n_modes, basisfile):
+        super().__init__(npix, n_modes, basisfile, scale=AMP_UNIT)
+
+    def __call__(self, wavefront):
+        return wavefront * np.exp(self.eval_basis())
 
 
 class ScanAberratedAperture(dl.AberratedAperture):
@@ -365,11 +383,13 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
                   (sequential; with remat=True the reverse pass only holds k wavelengths of residuals).
     remat    : jax.checkpoint the per-wavelength propagation (only useful together with wl_batch).
     amplitude : add a Fourier log-amplitude screen "primary_amp" after primary_opd.
+    turboklip : file of OPD modes (mean, modes) for a "primary_klip" layer.
+    amp_klip  : file of log-amplitude modes (mean, modes) for a "primary_amp_klip" layer.
     """
     wl_batch: int | None = eqx.field(static=True)
     remat: bool = eqx.field(static=True)
 
-    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., turboklip=None, wl_batch=None, remat=False, amplitude=False):
+    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., turboklip=None, amp_klip=None, wl_batch=None, remat=False, amplitude=False):
         diameter = 3.
         layers = [
             ("primary",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4), softening=5)),
@@ -386,6 +406,9 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
             layers += [
                 ("primary_klip", TransformedFourierBasis(wf_npixels, n_modes, turboklip)),
             ]
+
+        if amp_klip:
+            layers += [("primary_amp_klip", TransformedFourierAmplitude(wf_npixels, n_modes, amp_klip))]
         
         layers += [
             ("primary_low", ScanAberratedAperture(
