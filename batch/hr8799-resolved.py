@@ -73,11 +73,14 @@ spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 ddir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL/NICMOS-LAPL-DD1/LAPL_DATA/contemp_flats/repaired/'
 flatdir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL/NICMOS-LAPL-DD1/HOLEFLATS/'
 
-# Extended emission: a CursedResolvedSource (one PSF per pixel) of resolved_wid^2 pixels at pitch 0.0864",
-# shared by both rolls (keyed by target, rotated by each exposure's ORIENTAT), with L2 and total-squared-variation
-# regularisation (regulariser) of its 10**resolved distribution
+# Extended emission: an InterpolatedResolvedSource (anchor PSFs + interpolation, exact within 0.6") of
+# resolved_wid^2 pixels at pitch 0.0864", shared by both rolls (keyed by target, rotated by each exposure's ORIENTAT), with L1 regularisation of its
+# 10**resolved distribution
 resolved_wid = 60
-regulariser = np.array([0.1, 1.])
+# L1 (sparsity) only, on the linear distribution 10**resolved. The penalty is added in every exposure's loglike,
+# so split the total weight between them
+l1_total = 10.
+regulariser = np.array([l1_total/2])
 
 # The cold mask lateral position (shift) and its tilt (a pupil-plane Tilt initialised from each exposure's own
 # TARSIAFX/Y header, i.e. pointing) can differ between exposures; rotation, shear, scale and opd stay global.
@@ -85,10 +88,17 @@ regulariser = np.array([0.1, 1.])
 class PerExposureColdMaskResolvedFit(PointResolvedFit):
     PARAM_KEYS = PointResolvedFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure", "primary_opd": "global"}
 
+    def loglike(self, model, exposure, per_pix=False, return_im=False):
+        # L1 penalty only (regulariser[0]), in place of PointResolvedFit's L2 + total squared variation
+        ll = ModelFit.loglike(self, model, exposure, per_pix=per_pix, return_im=return_im)
+        if "resolved" in model.params.keys() and not return_im:
+            ll = ll + self.regulariser[0]*L1_loss(self.get_distribution(model, exposure))
+        return ll
+
 # Same visit pair at two rolls (ORIENTAT -147.4 and -117.5 deg); the spectrum and resolved distribution are keyed
 # by target, so both share them
 exposures_single = [
-    exposure_from_file(ddir + f'{root}_clc_calf.fits', PerExposureColdMaskResolvedFit(spectrum_basis, "F160W", wid=resolved_wid, regulariser=regulariser), crop=wid, extra_bad=None, flatcorr=flatdir)
+    exposure_from_file(ddir + f'{root}_clc_calf.fits', PerExposureColdMaskResolvedFit(spectrum_basis, "F160W", wid=resolved_wid, regulariser=regulariser, resolved_source="interp"), crop=wid, extra_bad=None, flatcorr=flatdir)
     for root in ["n4qs09akq", "n4qs10asq"]
 ]
 
@@ -191,7 +201,7 @@ things = {
     "fnumber": sgd(g*1., 0),
     "anisotropy": sgd(g*1., 0),
 
-    "resolved": adam(3e-2, 60),
+    "resolved": adam(3e-2, 1000),
 }
 
 things_start = {
