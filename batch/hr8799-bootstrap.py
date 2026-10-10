@@ -79,20 +79,18 @@ flatdir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/L
 class PerExposureColdMaskFit(SinglePointFit):
     PARAM_KEYS = SinglePointFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure", "primary_opd": "global"}
 
-# Hold-out: crop (x, y) pixels of HR 8799 b and c from Soummer et al. 2011 1998 astrometry and the exposure WCS,
-# about the star position of the fitted (unocculted) model, (36.5, 37.4) and (35.4, 38.5), not the header target
-# position, which is ~2.2 px high. Each planet is masked with a (2*hold_hw+1)^2 box
-hold_hw = 5
+# Hold-out: crop (x, y) pixels of HR 8799 b from Soummer et al. 2011 1998 astrometry and the exposure WCS, about
+# the star position of the fitted (unocculted) model, (36.5, 37.4) and (35.4, 38.5), not the header target
+# position, which is ~2.2 px high. Pixels within hold_r of the planet are masked
+hold_r = 4
 holdouts = {
-    "n4qs09akq": {"b": (45, 16), "c": (24, 38)},
-    "n4qs10asq": {"b": (32, 16), "c": (25, 45)},
+    "n4qs09akq": {"b": (45.1, 16.0)},
+    "n4qs10asq": {"b": (32.3, 15.7)},
 }
 
 def holdout_mask(root):
-    mask = np.full((wid, wid), False)
-    for x, y in holdouts[root].values():
-        mask = mask.at[y-hold_hw:y+hold_hw+1, x-hold_hw:x+hold_hw+1].set(True)
-    return mask
+    yy, xx = np.indices((wid, wid))
+    return np.any(np.stack([np.hypot(xx - x, yy - y) <= hold_r for x, y in holdouts[root].values()]), axis=0)
 
 # Same visit pair at two rolls (ORIENTAT -147.4 and -117.5 deg); the spectrum is keyed by target, so both share it
 roots = ["n4qs09akq", "n4qs10asq"]
@@ -121,7 +119,6 @@ params = {
     "cold_mask_scale": {},
     "primary_rot": {},
     "primary_shear": {},
-    "jitter": {},
 
     "bias": {},
     "occulter_radius": 0.8,
@@ -161,7 +158,6 @@ for idx, exp in enumerate(exposures_single):
     params["primary_shear"][exp.fit.get_key(exp, "primary_shear")] = np.asarray([0.,0.])
 
     params["bias"][exp.fit.get_key(exp, "bias")] = 0.
-    params["jitter"][exp.fit.get_key(exp, "jitter")] = 7. # mas; gradient vanishes at 0
 
 
 model_single = set_array(NICMOSModel(exposures_single, params, optics, detector))
@@ -191,7 +187,6 @@ things = {
     "primary_rot": sgd(g*3., 0),
 
     "primary_low": sgd(g*1, 0),
-    "jitter": sgd(g*1, 100),
 
     "cold_mask_scale": sgd(g*1, 0),
 
@@ -275,7 +270,7 @@ plot_params(params_history, groups, xw = 5, save=f"{out}/params")
 plot_comparison_detailed(model_single, ModelParams(params_history[-1]), exposures_full, quadrature=False, wf_size=wf_wid, percentile=99, save=f"{out}/comparison")
 
 # %%
-# Residuals of the unmasked data, with the held-out boxes outlined, to look for b and c
+# Residuals of the unmasked data, with the held-out region outlined, to look for b
 model = ModelParams(params_history[-1]).inject(model_single)
 for exp in exposures_full:
     resid = exp.data - exp.fit(model, exp)
@@ -283,8 +278,8 @@ for exp in exposures_full:
     for ax, im, unit in zip(axs, [resid, resid/exp.err], ["DN/s", "z"]):
         _signed_panel(ax, im, f"{exp.key} residual ({unit})", percentile=99, label=unit, bad='w')
         for name, (x, y) in holdouts[exp.key].items():
-            ax.add_patch(matplotlib.patches.Rectangle((x-hold_hw-.5, y-hold_hw-.5), 2*hold_hw+1, 2*hold_hw+1, fill=False, ec='g', lw=2))
-            ax.text(x+hold_hw+1, y+hold_hw+1, name, color='g', fontsize=24)
+            ax.add_patch(matplotlib.patches.Circle((x, y), hold_r, fill=False, ec='g', lw=2))
+            ax.text(x+hold_r, y+hold_r, name, color='g', fontsize=24)
     fig.savefig(f"{out}/holdout-residual_{exp.key}.png")
 
 # %%
@@ -317,4 +312,4 @@ fig.savefig(f"{out}/spectrum.png")
 
 # %%
 np.save(f"{out}/params_amp.npy", params_history[-1])
-print({k: float(np.abs(v)) for k, v in ModelParams(params_history[-1]).get("jitter").items()}, "mas")
+
