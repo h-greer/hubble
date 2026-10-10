@@ -74,7 +74,7 @@ ddir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL
 flatdir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL/NICMOS-LAPL-DD1/HOLEFLATS/'
 
 # Planets: point sources with a flat spectrum (filter throughput only), at sky offsets (east, north; arcsec) and fluxes
-# (DN/s, same convention as the star's flux) keyed by target, so both rolls share them. Initialised at the
+# (DN/s, same convention as the star's flux) keyed by target, so all exposures share them. Initialised at the
 # Soummer et al. 2011 1998 positions and roughly the expected F160W fluxes
 planets = {"b": (1.738, 54.7, 25.), "c": (0.966, 300., 50.)}  # separation ("), PA (deg), flux (DN/s)
 planet_offsets = np.array([[sep*np.sin(np.deg2rad(pa)), sep*np.cos(np.deg2rad(pa))] for sep, pa, _ in planets.values()])
@@ -91,7 +91,7 @@ class StopGradPointSource(dl.PointSource):
 class PlanetFit(ModelFit):
     """Star plus point-source planets. The cold mask lateral position (shift) and its tilt (a pupil-plane Tilt
     initialised from each exposure's own TARSIAFX/Y header, i.e. pointing) can differ between exposures; the
-    high-order wavefront (primary_opd) is shared by both rolls; low-order Zernikes stay per exposure."""
+    high-order wavefront (primary_opd) is shared by all exposures; low-order Zernikes stay per exposure."""
     PARAM_KEYS = ModelFit.PARAM_KEYS | {"spectrum": "target", "cold_mask_shift": "exposure", "cold_mask_tilt": "exposure",
                                         "primary_opd": "global", "planet_offsets": "target", "planet_fluxes": "target"}
 
@@ -116,11 +116,11 @@ class PlanetFit(ModelFit):
             source = source.set([f"planet{i}.flux", f"planet{i}.position"], [fluxes[i], position])
         return source
 
-# Same visit pair at two rolls (ORIENTAT -147.4 and -117.5 deg); the spectrum and planets are keyed by target, so
-# both share them
+# Same visit at two rolls (ORIENTAT -147.4 and -117.5 deg), three exposures each; the spectrum and planets are keyed
+# by target, so all six share them
 exposures_single = [
     exposure_from_file(ddir + f'{root}_clc_calf.fits', PlanetFit(spectrum_basis, "F160W", len(planets)), crop=wid, extra_bad=None, flatcorr=flatdir)
-    for root in ["n4qs09akq", "n4qs10asq"]
+    for root in ["n4qs09akq", "n4qs09anq", "n4qs09aoq", "n4qs10asq", "n4qs10avq", "n4qs10awq"]
 ]
 
 # %%
