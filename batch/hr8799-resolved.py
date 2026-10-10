@@ -245,10 +245,12 @@ plot_comparison_detailed(model_single, ModelParams(params_history[-1]), exposure
 np.save(f"{out}/intermediate-params.npy", params_history[-1])
 
 # %%
+# Keep the stage-1 values of parameters that stage 2 does not fit (stage 2 injects into model_single)
+model_single = ModelParams(params_history[-1]).inject(model_single)
 orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
-losses, params_history = optimise_new(
+losses, params_history = optimise_new_resolved(
     opt_params, model_single, exposures_single, things, 2000,
     precond_method="gn_probe", precond_kwargs=dict(n_probes=32))
 

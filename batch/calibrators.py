@@ -292,6 +292,8 @@ losses[-1]
 plot_params(params_history, list(things_start.keys()), xw = 5, save=f"calibrators/intermediate-params-{index}")
 plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, percentile=99, quadrature=False, wf_size=512, save=f"calibrators/intermediate-comparison-{index}")
 
+# Keep the stage-1 values of parameters that stage 2 does not fit (stage 2 injects into model_single)
+model_single = ModelParams(params_history[-1]).inject(model_single)
 orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 

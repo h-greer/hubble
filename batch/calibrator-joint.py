@@ -273,6 +273,8 @@ np.save(f"{out}/intermediate-params.npy", params_history[-1])
 losses_start = losses
 
 # %%
+# Keep the stage-1 values of parameters that stage 2 does not fit (stage 2 injects into model_single)
+model_single = ModelParams(params_history[-1]).inject(model_single)
 orig_params = params.params | params_history[-1]
 opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
