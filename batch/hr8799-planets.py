@@ -85,11 +85,19 @@ planet_fluxes = np.array([f for *_, f in planets.values()])
 
 class StopGradPointSource(dl.PointSource):
     """PointSource whose PSF passes no gradient to the optics: the planets constrain only their own flux
-    and position, not the wavefront or instrument parameters."""
+    and position, not the wavefront or instrument parameters. Its PSF uses n_nodes knot wavelengths (a planet
+    is far off-axis and faint, so far fewer than the star needs)."""
+    n_nodes: int = eqx.field(static=True)
+
+    def __init__(self, n_nodes=3, **kwargs):
+        super().__init__(**kwargs)
+        self.n_nodes = n_nodes
 
     def model(self, optics, return_wf=False, return_psf=False):
         optics = jtu.tree_map(lambda x: jax.lax.stop_gradient(x) if eqx.is_inexact_array(x) else x, optics)
-        return super().model(optics, return_wf, return_psf)
+        source = self.normalise()
+        return optics.propagate(source.wavelengths, source.position, source.weights * source.flux,
+                                return_wf, return_psf, n_nodes=self.n_nodes)
 
 class PlanetFit(ModelFit):
     """Star plus point-source planets. The cold mask lateral position (shift) and its tilt (a pupil-plane Tilt
@@ -126,8 +134,8 @@ exposures_single = [
     exposure_from_file(ddir + f'{root}_clc_calf.fits', PlanetFit(spectrum_basis, "F160W", len(planets)), crop=wid, extra_bad=None, flatcorr=flatdir)
     for root in 
         [
-            "n4qs09akq", #"n4qs09anq", "n4qs09aoq", 
-            "n4qs10asq", #"n4qs10avq", "n4qs10awq"
+            "n4qs09akq", "n4qs09anq", "n4qs09aoq", 
+            "n4qs10asq", "n4qs10avq", "n4qs10awq"
         ]
 ]
 
@@ -305,7 +313,7 @@ opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_sta
 
 losses, params_history = optimise_new(
     opt_params, model_single, exposures_single, things_start, 500,
-    precond_method="gn_exact", precond_kwargs=dict(chunk=16))
+    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4))
 
 # %%
 plt.figure(figsize=(10,10))
@@ -324,7 +332,7 @@ opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 losses, params_history = optimise_new(
     opt_params, model_single, exposures_single, things, 2000,
-    precond_method="gn_probe", precond_kwargs=dict(n_probes=32))
+    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4))
 
 # %%
 plt.figure(figsize=(10,10))

@@ -581,7 +581,9 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
         wf = final_mft(wf).multiply("phasor", weight ** 0.5)
         return wf.psf, wf.pixel_scale
 
-    def propagate(self, wavelengths, offset=None, weights=None, return_wf=False, return_psf=False):
+    def propagate(self, wavelengths, offset=None, weights=None, return_wf=False, return_psf=False, n_nodes=None):
+        """n_nodes : overrides self.n_nodes for this call (e.g. fewer knots for faint off-axis sources)."""
+        n_nodes = self.n_nodes if n_nodes is None else n_nodes
         if return_wf:                                   # rarely needed: keep the stock dLux path
             return super().propagate(wavelengths, offset, weights, return_wf, return_psf)
         wavelengths = np.atleast_1d(wavelengths)
@@ -592,8 +594,8 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
         one = lambda s, st, wl, w: s._one_wavelength(st, wl, w)
         if self.remat:
             one = eqx.filter_checkpoint(one)
-        if self.n_nodes:
-            psf, ps = hermite_propagate(lambda wl: one(self, static, wl, 1.), wavelengths, weights, self.n_nodes, self.wl_batch)
+        if n_nodes:
+            psf, ps = hermite_propagate(lambda wl: one(self, static, wl, 1.), wavelengths, weights, n_nodes, self.wl_batch)
             return dl.PSF(psf, ps) if return_psf else psf
         if self.wl_batch is None:
             psfs, ps = eqx.filter_vmap(lambda wl, w: one(self, static, wl, w))(wavelengths, weights)
@@ -717,14 +719,16 @@ class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
         super().__init__(wf_npixels, diameter, layers)
         self.n_nodes = n_nodes
 
-    def propagate(self, wavelengths, offset=None, weights=None, return_wf=False, return_psf=False):
-        if return_wf or not self.n_nodes:
+    def propagate(self, wavelengths, offset=None, weights=None, return_wf=False, return_psf=False, n_nodes=None):
+        """n_nodes : overrides self.n_nodes for this call (e.g. fewer knots for faint off-axis sources)."""
+        n_nodes = self.n_nodes if n_nodes is None else n_nodes
+        if return_wf or not n_nodes:
             return super().propagate(wavelengths, offset, weights, return_wf, return_psf)
         wavelengths = np.atleast_1d(wavelengths)
         weights = np.ones_like(wavelengths) / len(wavelengths) if weights is None else np.atleast_1d(weights)
         offset = np.zeros(2) if offset is None else np.asarray(offset)
         mono = lambda wl: (lambda wf: (wf.psf, wf.pixel_scale))(self.propagate_mono(wl, offset, return_wf=True))
-        psf, ps = hermite_propagate(mono, wavelengths, weights, self.n_nodes)
+        psf, ps = hermite_propagate(mono, wavelengths, weights, n_nodes)
         return dl.PSF(psf, ps) if return_psf else psf
 
 
