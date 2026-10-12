@@ -124,7 +124,11 @@ class PlanetFit(ModelFit):
 # by target, so all six share them
 exposures_single = [
     exposure_from_file(ddir + f'{root}_clc_calf.fits', PlanetFit(spectrum_basis, "F160W", len(planets)), crop=wid, extra_bad=None, flatcorr=flatdir)
-    for root in ["n4qs09akq", "n4qs09anq", "n4qs09aoq", "n4qs10asq", "n4qs10avq", "n4qs10awq"]
+    for root in 
+        [
+            "n4qs09akq", #"n4qs09anq", "n4qs09aoq", 
+            "n4qs10asq", #"n4qs10avq", "n4qs10awq"
+        ]
 ]
 
 # %%
