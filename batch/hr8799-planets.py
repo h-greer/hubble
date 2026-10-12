@@ -143,7 +143,7 @@ exposures_single = [
 params = {
     "spectrum": {},
     "primary_opd": {},
-    # "primary_amp": {},
+    "primary_amp": {},
     "primary_low": {},
     "primary_tilt": {},
     "cold_mask_opd": {},
@@ -225,7 +225,7 @@ things = {
     "primary_opd": adam(2e-2, 50),
     # Delayed until well after the phase (primary_opd starts at 50), so the phase is fitted first
     # and the phase/amplitude degeneracy is avoided
-    # "primary_amp": adam(2e-2, 150),/
+    "primary_amp": adam(2e-2, 150),
 
     "spectrum": sgd(g*1, 0),
     "primary_tilt": sgd(g*1., 0),
