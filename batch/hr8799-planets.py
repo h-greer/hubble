@@ -55,13 +55,16 @@ wf_wid = 512
 wid = 80
 oversample = 4
 
-nwavels = 30
+nwavels = 200
 npoly=8
 
 n_modes = 45
 n_zernikes = 50
 
-optics = NICMOSCoronagraph(wf_wid, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, amplitude=True)
+# Fresnel occulter (defocus1/2 at the occulter, defocus3 at the detector), elliptical occulter with an edge glint ring;
+# the PSF is Hermite-interpolated between 20 knot wavelengths across the 200-wavelength spectrum. No pupil amplitude map
+optics = NICMOSFresnelCoronagraph(wf_wid, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, n_nodes=20)
+# optics = NICMOSFresnelCoronagraph(wf_wid, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, n_nodes=20, amplitude=True)
 
 detector = NICMOSDetector(oversample, wid)
 
@@ -90,10 +93,11 @@ class StopGradPointSource(dl.PointSource):
 
 class PlanetFit(ModelFit):
     """Star plus point-source planets. The cold mask lateral position (shift) and its tilt (a pupil-plane Tilt
-    initialised from each exposure's own TARSIAFX/Y header, i.e. pointing) can differ between exposures; the
-    high-order wavefront (primary_opd) is shared by all exposures; low-order Zernikes stay per exposure."""
+    initialised from each exposure's own TARSIAFX/Y header, i.e. pointing), cold-mask OPD and defocus can differ between
+    exposures; the high-order wavefront (primary_opd) is shared by all exposures; low-order Zernikes stay per exposure."""
     PARAM_KEYS = ModelFit.PARAM_KEYS | {"spectrum": "target", "cold_mask_shift": "exposure", "cold_mask_tilt": "exposure",
-                                        "primary_opd": "global", "planet_offsets": "target", "planet_fluxes": "target"}
+                                        "primary_opd": "global", "planet_offsets": "target", "planet_fluxes": "target",
+                                        "cold_mask_opd": "exposure", "defocus3": "exposure"}
 
     def __init__(self, spectrum_basis, filter, n_planets):
         nwavels, nbasis = spectrum_basis.shape
@@ -127,7 +131,7 @@ exposures_single = [
 params = {
     "spectrum": {},
     "primary_opd": {},
-    "primary_amp": {},
+    # "primary_amp": {},
     "primary_low": {},
     "primary_tilt": {},
     "cold_mask_opd": {},
@@ -136,6 +140,10 @@ params = {
     "cold_mask_rot": {},
     "cold_mask_shear": {},
     "cold_mask_scale": {},
+    "cold_mask_distortion": {},
+    "defocus1": {},
+    "defocus2": {},
+    "defocus3": {},
     "primary_rot": {},
     "primary_shear": {},
     "planet_offsets": {},
@@ -143,7 +151,9 @@ params = {
 
     "bias": {},
     "occulter_radius": 0.8,
-    "occulter_coeffs": np.zeros(2)+1e-3,
+    "occulter_ellipticity": np.zeros(2),   # (e1, e2); major axis at atan2(e2, e1)/2 from the occulter-plane x axis
+    "occulter_glint": np.zeros((5, 2)),    # (re, im) Fourier coefficients (g0, g1 cos/sin, g2 cos/sin) of the edge ring
+    "occulter_glint_width": 3.,            # um in the occulter plane
     "fnumber": 45.7,
     "anisotropy": 1.+1e-5,
 
@@ -154,6 +164,9 @@ params = {
     "primary_secondary": 0.330*1.2,
     "primary_outer": 1.2,
     "primary_pad": 0.065*1.2,
+    "secondary_shift": np.zeros(2),        # cm, spider-aligned frame; ~1 cm expected from the 7.4' field offset
+    "primary_distortion": np.zeros((2, 7)),  # fraction of the 1.2 m radius at the edge
+    "distortion": np.zeros((2, 7)),        # detector-plane polynomial distortion
 }
 
 
@@ -167,7 +180,7 @@ for idx, exp in enumerate(exposures_single):
     ])*0.075
 
     params["primary_opd"][exp.fit.get_key(exp, "primary_opd")] = np.zeros((n_modes, n_modes))
-    params["primary_amp"][exp.fit.get_key(exp, "primary_amp")] = np.zeros((n_modes, n_modes))
+    # params["primary_amp"][exp.fit.get_key(exp, "primary_amp")] = np.zeros((n_modes, n_modes))
     params["primary_low"][exp.fit.get_key(exp, "primary_low")] = np.zeros((n_zernikes))
     params["cold_mask_opd"][exp.fit.get_key(exp, "cold_mask_opd")] = np.zeros(16).at[0].set(120.)
 
@@ -179,6 +192,9 @@ for idx, exp in enumerate(exposures_single):
     params["primary_shear"][exp.fit.get_key(exp, "primary_shear")] = np.asarray([0.,0.])
 
     params["bias"][exp.fit.get_key(exp, "bias")] = 0.
+    for k in ("defocus1", "defocus2", "defocus3"):
+        params[k][exp.fit.get_key(exp, k)] = 0.
+    params["cold_mask_distortion"][exp.fit.get_key(exp, "cold_mask_distortion")] = np.zeros((2, 7))
     params["planet_offsets"][exp.fit.get_key(exp, "planet_offsets")] = planet_offsets
     params["planet_fluxes"][exp.fit.get_key(exp, "planet_fluxes")] = planet_fluxes
 
@@ -197,12 +213,15 @@ things = {
     "primary_opd": adam(2e-2, 50),
     # Delayed until well after the phase (primary_opd starts at 50), so the phase is fitted first
     # and the phase/amplitude degeneracy is avoided
-    "primary_amp": adam(2e-2, 150),
+    # "primary_amp": adam(2e-2, 150),
 
     "spectrum": sgd(g*1, 0),
     "primary_tilt": sgd(g*1., 0),
     "cold_mask_tilt": sgd(g*1, 0),
     "cold_mask_opd": sgd(g*1., 0),
+
+    "defocus1": sgd(g*1, 0),
+    "defocus2": sgd(g*1, 0),
 
     "bias": sgd(g*3, 0),
     "cold_mask_shift": sgd(g*1, 0),
@@ -212,19 +231,25 @@ things = {
     "primary_low": sgd(g*1, 0),
 
     "cold_mask_scale": sgd(g*1, 0),
+    "cold_mask_distortion": sgd(g*3, 0),
 
     "occulter_radius": sgd(g*1., 0),
-    "occulter_coeffs": adam(2e-2, 300),
+    "occulter_ellipticity": sgd(g*3, 300),
+    "occulter_glint": sgd(g*15, 400),
+    "occulter_glint_width": sgd(g*5, 600),   # smaller: width and amplitude trade off (ring area ~ g w)
 
     "secondary_radius": sgd(g*1., 0),
     "spider_width": sgd(g*1., 0),
     "primary_spider": sgd(g*1., 0),
     "primary_secondary": sgd(g*1., 0),
+    "secondary_shift": sgd(g*1, 0),
+    "primary_distortion": sgd(g*3, 0),
 
     "fnumber": sgd(g*1., 0),
     "anisotropy": sgd(g*1., 0),
+    "distortion": sgd(g*1, 0),
 
-    # Planets held at their initial positions and fluxes until the wavefront and amplitude have converged
+    # Planets held at their initial positions and fluxes until the wavefront and instrument have converged
     "planet_fluxes": sgd(g*1., 1200),
     "planet_offsets": sgd(g*0.3, 1400),
 }
@@ -235,6 +260,9 @@ things_start = {
     "cold_mask_tilt": sgd(g*1., 0),
     "cold_mask_opd": sgd(g*0.1, 40),
 
+    "defocus1": sgd(g*1, 60),
+    "defocus2": sgd(g*10, 60),
+
     "bias": sgd(g*3, 50),
     "cold_mask_shift": sgd(g*0.3, 70),
     "cold_mask_rot": sgd(g*0.1, 85),
@@ -243,10 +271,13 @@ things_start = {
     "primary_low": sgd(g*2., 150),
 
     "cold_mask_shear": sgd(g*0.1, 100),
+    "cold_mask_distortion": sgd(g*0.1, 150),
 
     "primary_shear": sgd(g*1, 100),
 
     "occulter_radius": sgd(g*1., 120),
+    # in stage 1 too, so stage 2's preconditioner (computed once) sees a nonzero glint and can move its width
+    "occulter_glint": sgd(g*0.1, 300),
 
     "outer_radius": sgd(g*0.1, 120),
     "secondary_radius": sgd(g*0.1, 120),
@@ -255,6 +286,8 @@ things_start = {
     "primary_secondary": sgd(g*0.1, 120),
     "primary_pad": sgd(g*0.1, 120),
     "primary_outer": sgd(g*0.1, 120),
+    "secondary_shift": sgd(g*0.3, 120),
+    "primary_distortion": sgd(g*0.1, 150),
 
     "fnumber": sgd(g*1., 200),
     "anisotropy": sgd(g*2., 200),
@@ -307,19 +340,19 @@ for name, (east, north), flux in zip(planets, final.get(f"planet_offsets.{key}")
     print(f"{name}: east {east:.3f}\" north {north:.3f}\" (sep {sep:.3f}\", PA {pa:.1f} deg), flux {flux:.1f} DN/s")
 
 # %%
-# Recovered amplitude where both the primary and the cold mask transmit, as in "Pupil x Cold Mask"
-model = ModelParams(params_history[-1]).inject(model_single)
-exp = exposures_single[0]
-optics = exp.fit.update_optics(model, exp)
+# # Recovered amplitude where both the primary and the cold mask transmit, as in "Pupil x Cold Mask"
+# model = ModelParams(params_history[-1]).inject(model_single)
+# exp = exposures_single[0]
+# optics = exp.fit.update_optics(model, exp)
 
-coords = dlu.pixel_coords(wf_wid, optics.diameter)
-primary = optics.primary.transmission(coords, 2.4/wf_wid)
-cold_mask = optics.cold_mask.transmission(coords, 2.4/wf_wid)
-amp = 100*(np.exp(optics.primary_amp.eval_basis()) - 1)
+# coords = dlu.pixel_coords(wf_wid, optics.diameter)
+# primary = optics.primary.transmission(coords, 2.4/wf_wid)
+# cold_mask = optics.cold_mask.transmission(coords, 2.4/wf_wid)
+# amp = 100*(np.exp(optics.primary_amp.eval_basis()) - 1)
 
-fig, ax = plt.subplots(figsize=(10, 10), layout='compressed')
-_signed_panel(ax, np.where(primary*cold_mask < .5, np.nan, amp), "Pupil x Cold Mask Amplitude", label="Amplitude (%)", percentile=99)
-fig.savefig(f"{out}/amplitude.png")
+# fig, ax = plt.subplots(figsize=(10, 10), layout='compressed')
+# _signed_panel(ax, np.where(primary*cold_mask < .5, np.nan, amp), "Pupil x Cold Mask Amplitude", label="Amplitude (%)", percentile=99)
+# fig.savefig(f"{out}/amplitude.png")
 
 # %%
 # Recovered stellar spectrum (before the filter) and the detected (filtered) spectrum

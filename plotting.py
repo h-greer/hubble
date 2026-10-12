@@ -42,7 +42,7 @@ def plot_params(models, groups, xw = 4, save=False):
                 sp.set_title(param)
         else:
             sp.set_title(param)
-            sp.plot([x.get(param) for x in models])
+            sp.plot([np.ravel(x.get(param)) for x in models])
         
     fig.tight_layout()
     if save:
@@ -134,8 +134,8 @@ def plot_comparison_detailed(model, params, exposures, quadrature=False, save=Fa
         vm = max(np.nanmax(exp.data**0.25), np.nanmax(fit**0.25))
         _panel(axs[0, 0], exp.data**0.25, "Observed Image", 'inferno', 0, vm)
         _panel(axs[0, 1], fit**0.25, "Recovered Image", 'inferno', 0, vm)
-        mft, occulter, _ = optics.occulter.layers.values()
-        _panel(axs[0, 2], occulter.mask(mft.npixels, mft.pixel_scale), "Recovered Occulter", 'inferno', 0, 1)
+        # occulter-plane grid of NICMOSCoronagraph's MFT (the Fresnel model has no MFT there)
+        _panel(axs[0, 2], np.abs(optics.occulter.layers["occulter"].mask(256, 1.5e-6)), "Recovered Occulter", 'inferno', 0, 1)
 
         # OPDs in nm, blanked where the aperture does not transmit
         primary = optics.primary.transmission(coords, 2.4/wf_size)

@@ -220,18 +220,35 @@ OPTICS_PARAMS = [
     ("primary_secondary", ["primary.secondary.radius"], lambda x: x),
     ("primary_outer", ["primary.mirror.radius", "primary_low.aperture.radius"], lambda x: x),
     ("primary_pad", ["primary.pad_1.radius", "primary.pad_2.radius", "primary.pad_3.radius"], lambda x: x),
+    ("secondary_shift", ["primary.spider.transformation.translation",
+                         "primary.secondary.transformation.translation"], lambda x: x*1e-2),
     ("cold_mask_shear", ["cold_mask.transformation.shear"], lambda x: x),
     ("cold_mask_scale", ["cold_mask.transformation.compression",
                          "cold_mask_opd.aperture.transformation.compression"], lambda x: x),
     ("cold_mask_rot", ["cold_mask.transformation.rotation",
                        "cold_mask_opd.aperture.transformation.rotation"], lambda x: dlu.deg2rad(x)+np.pi/4),
+    # as primary_distortion, for the cold mask and its OPD support together (cold_mask_rot frame); linear terms
+    # stay zero since they duplicate cold_mask_scale / _rot / _shear
+    ("cold_mask_distortion", ["cold_mask.transformation.distortion.distortion",
+                              "cold_mask_opd.aperture.transformation.distortion.distortion"], lambda x: np.pad(x, ((0, 0), (2, 0)))),
     ("primary_rot", ["primary.transformation.rotation"], lambda x: dlu.deg2rad(x)+np.pi/4),
     ("primary_shear", ["primary.transformation.shear", "primary_low.aperture.transformation.shear"], lambda x: x),
+    # (2, 7) 2nd- and 3rd-order coefficients, rows = shift along the spider-aligned x / y axes, columns as
+    # primary.transformation.distortion.powers[:, 2:] (x², xy, y², x³, x²y, xy², y³); the linear terms stay zero
+    # since they duplicate primary_rot, primary_shear and primary_outer. The Zernike disc follows; the Fourier grids don't
+    ("primary_distortion", ["primary.transformation.distortion.distortion",
+                            "primary_low.aperture.transformation.distortion.distortion"], lambda x: np.pad(x, ((0, 0), (2, 0)))),
     ("occulter_radius", ["occulter.layers.occulter.r"], _occulter),
+    # EllipticalOcculter only (NICMOSFresnelCoronagraph): area-preserving ellipticity components (e1, e2)
+    ("occulter_ellipticity", ["occulter.layers.occulter.e"], lambda x: x),
+    # EllipticalOcculter only: complex edge ring (glint), (2 n_max + 1, 2) Fourier coefficients and width (um)
+    ("occulter_glint", ["occulter.layers.occulter.glint"], lambda x: x),
+    ("occulter_glint_width", ["occulter.layers.occulter.glint_width"], lambda x: x*1e-6),
     ("fnumber", ["prop1.focal_length"], lambda x: x*2.4),
-    ("defocus1", ["prop1.FreeSpace.distance"], lambda x: x),
-    ("defocus2", ["prop2.FreeSpace.distance"], lambda x: x),
-    ("defocus3", ["prop3.FreeSpace.distance"], lambda x: x),
+    # NICMOSFresnelCoronagraph only: defocus before / after the occulter (FresnelFastObstruction) and at the detector
+    ("defocus1", ["occulter.defocus1"], lambda x: x),
+    ("defocus2", ["occulter.defocus2"], lambda x: x),
+    ("defocus3", ["prop1.FreeSpace.distance"], lambda x: x),
 ]
 
 
@@ -242,11 +259,12 @@ class ModelFit(zdx.Base):
     # "target" (one per target and filter) or "global" (shared by all exposures). Subclasses extend it.
     PARAM_KEYS = {
         "primary_low": "exposure", "primary_tilt": "exposure", "primary_klip": "exposure", "bias": "exposure",
+        "defocus1": "exposure", "defocus2": "exposure",
         "primary_amp_klip": "global",
         "primary_opd": "exposure", "primary_amp": "global", "primary_rot": "global",
         "primary_shear": "global",
         "cold_mask_opd": "global", "cold_mask_tilt": "global", "cold_mask_shift": "global",
-        "cold_mask_rot": "global", "cold_mask_shear": "global", "cold_mask_scale": "global",
+        "cold_mask_rot": "global", "cold_mask_shear": "global", "cold_mask_scale": "global", "cold_mask_distortion": "global",
         "jitter": "exposure",
     }
 
@@ -292,6 +310,12 @@ class ModelFit(zdx.Base):
         if "anisotropy" in model.params.keys():
             anisotropy = model.get(self.map_param(exposure, "anisotropy"))
             detector = detector.set("resample.anisotropy", anisotropy)
+
+        if "distortion" in model.params.keys():
+            # (2, n) coefficients of the 2nd- and higher-order terms (columns as resample.distortion.powers[:, 2:]);
+            # the linear terms stay zero since they duplicate anisotropy, the rotation and fnumber
+            coeffs = model.get(self.map_param(exposure, "distortion"))
+            detector = detector.set("resample.distortion.distortion", np.pad(coeffs, ((0, 0), (2, 0))))
         return detector
 
     def __call__(self, model, exposure):

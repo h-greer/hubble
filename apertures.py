@@ -13,6 +13,8 @@ import numpy as onp
 from abcdLux.lct import *
 from abcdLux.abcd import *
 
+from spectra import hermite_propagate
+
 # ---- dLux soft-aperture fixes (monkeypatches of dLux.utils.geometry) ----------------------------
 # 1. soften: stock dLux rescales the clipped distances by the array's own min/max. When a feature is
 #    narrower than 2*clip_dist (the HST primary spider at 512 px / softening 5) the max is never
@@ -60,11 +62,15 @@ class HSTMainAperture(dl.CompoundAperture):
             "spider" : dl.Spider(
                 width = 0.0256,#0.022*1.2,#0.038*1.2,
                 angles = np.asarray([0, 90, 180, 270]),
+                # Secondary-plane features (spider, secondary) sit ~4.9 m in front of the primary, so an off-axis field
+                # shears their shadow relative to the rim and pads (~1 cm for NIC2, 7.4' off-axis): fitted via secondary_shift
+                transformation=dl.CoordTransform(translation=np.zeros(2)),
                 softening=self.softening,
             ),
             "secondary" : dl.CircularAperture(
                 radius = 0.330*1.2,
                 occulting = True,
+                transformation=dl.CoordTransform(translation=np.zeros(2)),
                 softening = self.softening
             ),
             "pad_1" : dl.CircularAperture(
@@ -79,7 +85,7 @@ class HSTMainAperture(dl.CompoundAperture):
                 radius = 0.065*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4615*1.2, -0.7555*1.2),
+                    translation = (-0.4615*1.2, 0.7555*1.2),
                 ),
                 softening = self.softening
             ),
@@ -87,12 +93,37 @@ class HSTMainAperture(dl.CompoundAperture):
                 radius = 0.065*1.2,
                 occulting = True,
                 transformation=dl.CoordTransform(
-                    translation = (-0.4564*1.2, 0.7606*1.2),
+                    translation = (-0.4564*1.2, -0.7606*1.2),
                 ),
                 softening=self.softening
             )
         }
 
+
+
+class DistortedCoordTransform(dl.CoordTransform):
+    """CoordTransform followed by a polynomial distortion (dl.DistortedCoords) evaluated in units of `radius`, in a
+    frame rotated by `frame` (rotated back afterwards). An x^k or y^k coefficient is the coordinate shift on that axis
+    at the edge as a fraction of the radius (the aperture itself moves the opposite way). The primary's transformation
+    already rotates into the spider-aligned frame (frame=0); the low-order Zernike disc is unrotated, so it uses
+    frame=pi/4 to see the same distortion without rotating its Zernikes (primary_rot's ~1 deg is neglected). As the
+    transformation of a CompoundAperture it distorts every sub-aperture (rim, secondary, spiders, pads) together."""
+    distortion: dl.DistortedCoords
+    radius: float = eqx.field(static=True)
+    frame: float = eqx.field(static=True)
+
+    def __init__(self, order=3, radius=1.2, frame=0., **kwargs):
+        super().__init__(**kwargs)
+        # built here (gen_powers cannot be traced under jit); integer powers so x**p has no log(x) term, whose
+        # gradient is nan where a coordinate is exactly zero (e.g. on the diagonals after the frame rotation)
+        self.distortion = dl.DistortedCoords(order)
+        self.distortion = self.distortion.set("powers", self.distortion.powers.astype(int))
+        self.radius = radius
+        self.frame = frame
+
+    def __call__(self, coords):
+        coords = dlu.rotate_coords(super().__call__(coords), self.frame)
+        return dlu.rotate_coords(self.radius*self.distortion(coords/self.radius), -self.frame)
 
 
 class NICMOSColdMask(dl.CompoundAperture):
@@ -257,6 +288,61 @@ class CLIMBOcculter(dl.OpticalLayer):
             return wf.normalise()
         return wf
 
+class EllipticalOcculter(dl.OpticalLayer):
+    """CLIMB occulter with an elliptical edge, parameterised by the ellipticity components e = (e1, e2): the edge is
+    x^T A x = r^2 with A = [[1 - e1, -e2], [-e2, 1 + e1]] / sqrt(1 - e1^2 - e2^2). det A = 1, so r is the radius of
+    the circle of equal area; |e| = (a^2 - b^2) / (a^2 + b^2) sets the axis ratio b/a = sqrt((1 - |e|) / (1 + |e|))
+    and the major axis lies at atan2(e2, e1) / 2 from the x axis. Smooth through e = 0 (the circle of CLIMBOcculter
+    with no Fourier terms), unlike an (ellipticity, angle) pair.
+    glint : (2 n_max + 1, 2) real / imaginary parts of the Fourier coefficients (g0, g1 cos, g1 sin, ...) in the
+            occulter-plane angle theta (from its x axis, after the model's flip) of a complex ring on the edge,
+            subtracted from the obstruction: mask = disc - g(theta) exp(-(rho - rho_edge)^2 / 2 w^2), i.e. light the
+            hole's edge reflects or scatters back into the beam (positive real g0 adds in-phase light). Zero = no glint.
+    glint_width : w (m) in the occulter plane."""
+    r: Array
+    e: Array
+    glint: Array
+    glint_width: Array
+
+    normalise: bool
+    invert: bool
+
+    def __init__(self, r, e=np.zeros(2), glint=np.zeros((1, 2)), glint_width=3e-6, normalise: bool = False, invert: bool = False):
+        self.r = np.asarray(r, float)
+        self.e = np.asarray(e, float)
+        self.glint = np.asarray(glint, float)
+        self.glint_width = np.asarray(glint_width, float)
+        self.normalise = normalise
+        self.invert = invert
+
+    def _rho2(self, xx, yy):
+        """Squared elliptical radius (area-preserving, see class docstring)."""
+        e1, e2 = self.e
+        return ((1 - e1)*xx**2 - 2*e2*xx*yy + (1 + e1)*yy**2) / np.sqrt(1 - e1**2 - e2**2)
+
+    def mask(self, npixels, pixel_scale):
+        """Wavelength-independent transmission (so it can be hoisted out of the wavelength loop); complex (glint)."""
+        xx, yy = dlu.pixel_coords(npixels*3, pixel_scale=pixel_scale/3)
+        rho2 = self._rho2(xx, yy)
+        circ = dlu.soft_binarise(-rho2/(2*self.r)**2 + 0.5, oversample=3)   # as fourier_circle: edge at rho = sqrt(2) r
+
+        # glint ring on the same 3x oversampled grid, mean-pooled to the mask's pixels (w is only ~2 pixels)
+        theta = np.arctan2(yy, xx)
+        harmonics = np.stack([np.ones_like(theta)] + [f(k*theta) for k in range(1, (len(self.glint) - 1)//2 + 1)
+                                                      for f in (np.cos, np.sin)])
+        g = np.tensordot(self.glint[:, 0] + 1j*self.glint[:, 1], harmonics, 1)
+        ring = g * np.exp(-(np.sqrt(rho2) - np.sqrt(2)*self.r)**2 / (2*self.glint_width**2))
+        ring = ring.reshape(npixels, 3, npixels, 3).mean((1, 3))
+        circ = circ - ring
+        return 1-circ if self.invert else circ
+
+    def __call__(self, wavefront):
+        wf = wavefront * self.mask(wavefront.npixels, wavefront.pixel_scale)
+
+        if self.normalise:
+            return wf.normalise()
+        return wf
+
 class SoummerFastObstruction(dl.OpticalLayer):
     layers: dict
     normalise: bool
@@ -385,14 +471,17 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
     amplitude : add a Fourier log-amplitude screen "primary_amp" after primary_opd.
     turboklip : file of OPD modes (mean, modes) for a "primary_klip" layer.
     amp_klip  : file of log-amplitude modes (mean, modes) for a "primary_amp_klip" layer.
+    n_nodes   : None -> propagate every wavelength. int k -> Hermite-interpolate the PSF between k knot wavelengths
+                (spectra.hermite_propagate; ~9 knots on-axis for ~2e-4 accuracy, independent of the fine grid).
     """
     wl_batch: int | None = eqx.field(static=True)
     remat: bool = eqx.field(static=True)
+    n_nodes: int | None = eqx.field(static=True)
 
-    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., turboklip=None, amp_klip=None, wl_batch=None, remat=False, amplitude=False):
+    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., turboklip=None, amp_klip=None, wl_batch=None, remat=False, amplitude=False, n_nodes=None):
         diameter = 3.
         layers = [
-            ("primary",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4), softening=5)),
+            ("primary",HSTMainAperture(transformation=DistortedCoordTransform(rotation=np.pi/4), softening=5)),
 
             ("primary_tilt", dl.Tilt(angles=(0.,0.))),
 
@@ -412,7 +501,7 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
         
         layers += [
             ("primary_low", ScanAberratedAperture(
-                    dl.layers.CircularAperture(1.2,transformation=dl.CoordTransform(translation=np.zeros(2)),),
+                    dl.layers.CircularAperture(1.2,transformation=DistortedCoordTransform(frame=np.pi/4, translation=np.zeros(2)),),
                     noll_inds=np.arange(4,4+n_zernikes),
                     coefficients = np.zeros(n_zernikes),
                     
@@ -437,10 +526,11 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
             ])),
 
 
-            ("cold_mask",   NIC2ColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=5, normalise=False)),
+            ("cold_mask",   NIC2ColdMask(transformation=DistortedCoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=5, normalise=False)),
 
             ("cold_mask_opd", ScanAberratedAperture(
-                    dl.layers.CircularAperture(1.2, transformation=dl.CoordTransform(translation=np.asarray((-0.05, -0.05)))),
+                    # rotation as the mask's, so cold_mask_distortion acts in the same frame even if cold_mask_rot is unset
+                    dl.layers.CircularAperture(1.2, transformation=DistortedCoordTransform(translation=np.asarray((-0.05, -0.05)), rotation=np.pi/4)),
                     noll_inds=np.arange(4,20),
                     coefficients = np.zeros(1),
                 )),
@@ -453,6 +543,7 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
         super().__init__(wf_npixels, diameter, layers)
         self.wl_batch = wl_batch
         self.remat = bool(remat)
+        self.n_nodes = n_nodes
 
     # Layout is fixed: [wavelength-independent layers] occulter [wavelength-independent layers] final MFT.
     # The wavelength-independent layers (Zernikes, soft apertures, CLIMB mask) are evaluated once per call
@@ -501,6 +592,9 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
         one = lambda s, st, wl, w: s._one_wavelength(st, wl, w)
         if self.remat:
             one = eqx.filter_checkpoint(one)
+        if self.n_nodes:
+            psf, ps = hermite_propagate(lambda wl: one(self, static, wl, 1.), wavelengths, weights, self.n_nodes, self.wl_batch)
+            return dl.PSF(psf, ps) if return_psf else psf
         if self.wl_batch is None:
             psfs, ps = eqx.filter_vmap(lambda wl, w: one(self, static, wl, w))(wavelengths, weights)
         else:
@@ -509,64 +603,109 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
         return dl.PSF(psf, ps.mean()) if return_psf else psf
 
 
+class FresnelFastObstruction(dl.OpticalLayer):
+    """SoummerFastObstruction with Fresnel propagation, so the occulter can be out of focus (Soummer et al. 2007,
+    Babinet). The relay is lens (focal_length) -> defocus1 -> occulter -> defocus2 -> lens, i.e.
+    M1 = D(defocus1) F(f) to the occulter and M2 = F(f) D(defocus2) back, and
+
+        u_lyot = -flip(u) * exp(-i pi c r^2 / lambda) - LCT_M2(mask * LCT_M1(u)),
+
+    where M2 M1 = [[-1, 0], [c, -1]], c = (defocus1 + defocus2) / f^2: the direct (unobstructed) term is the
+    closed form of that b = 0 LCT, an inversion with curvature (-flip(u) in focus). The occulter's mask(n, d) is the obstruction itself (1 on the
+    disc, not inverted), on an npixels grid of pixel_scale (m) in the occulter plane; the field returns to the
+    input grid. The occulter is held as layers["occulter"] so its parameter paths match SoummerFastObstruction's."""
+    layers: dict
+    focal_length: Array
+    defocus1: Array
+    defocus2: Array
+    npixels: int = eqx.field(static=True)
+    pixel_scale: float = eqx.field(static=True)
+    normalise: bool = eqx.field(static=True)
+
+    def __init__(self, occulter, focal_length, npixels, pixel_scale, defocus1=0., defocus2=0., normalise=False):
+        self.layers = {"occulter": occulter}
+        self.focal_length = np.asarray(focal_length, float)
+        self.defocus1 = np.asarray(defocus1, float)
+        self.defocus2 = np.asarray(defocus2, float)
+        self.npixels = npixels
+        self.pixel_scale = pixel_scale
+        self.normalise = normalise
+
+    def mask(self):
+        """Wavelength-independent occulter mask (so it can be hoisted out of the wavelength loop)."""
+        return self.layers["occulter"].mask(self.npixels, self.pixel_scale)
+
+    def apply_mask(self, wavefront, mask):
+        u, xs, lam, f = wavefront.phasor, wavefront.xs, wavefront.wavelength, self.focal_length
+        xo = (np.arange(self.npixels) - (self.npixels - 1) / 2) * self.pixel_scale
+        M1 = compose_abcd([abcd_fraunhofer(f), abcd_free_space(self.defocus1)])
+        M2 = compose_abcd([abcd_free_space(self.defocus2), abcd_fraunhofer(f)])
+        u_res = lct_kernel_prop(mask * lct_kernel_prop(u, *lct_kernels(xs, xo, lam, M1)), *lct_kernels(xo, xs, lam, M2))
+        c = (self.defocus1 + self.defocus2) / f**2
+        u_dir = -np.flip(u, (0, 1)) * np.exp(-1j*np.pi*c*(xs[None, :]**2 + xs[:, None]**2)/lam)
+        wf = wavefront.set(phasor=u_dir - u_res)
+        if self.normalise:
+            return wf.normalise()
+        return wf
+
+    def __call__(self, wavefront):
+        return self.apply_mask(wavefront, self.mask())
+
+
 class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
-    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., turboklip=None):
+    """NICMOSCoronagraph with Fresnel (ABCD) propagation through the occulter, so the occulter (defocus1/2)
+    and detector (defocus3) can be out of focus. Same layer names and parameter paths as NICMOSCoronagraph
+    (incl. "prop1" for the final propagation, so fnumber sets its focal length). The occulter is a
+    FresnelFastObstruction (defocus1/2 are its "occulter.defocus1/2") around an EllipticalOcculter
+    (occulter_ellipticity = (e1, e2), not occulter_coeffs).
+    amplitude, turboklip, amp_klip, n_nodes : as NICMOSCoronagraph.
+    """
+    n_nodes: int | None = eqx.field(static=True)
+
+    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., turboklip=None, amp_klip=None, amplitude=False, n_nodes=None):
         diameter = 3.
         layers = [
-            ("primary",HSTMainAperture(transformation=dl.CoordTransform(rotation=np.pi/4), softening=2)),
+            ("primary",HSTMainAperture(transformation=DistortedCoordTransform(rotation=np.pi/4), softening=2)),
 
             ("primary_tilt", dl.Tilt(angles=(0.,0.))),
 
             ("primary_opd", dl.FourierBasis(wf_npixels, n_modes=n_modes)),
         ]
 
+        if amplitude:
+            layers += [("primary_amp", FourierAmplitude(wf_npixels, n_modes=n_modes))]
+
         if turboklip:
             layers += [
                 ("primary_klip", TransformedFourierBasis(wf_npixels, n_modes, turboklip)),
             ]
-        
+
+        if amp_klip:
+            layers += [("primary_amp_klip", TransformedFourierAmplitude(wf_npixels, n_modes, amp_klip))]
+
         layers += [
-            ("primary_low", dl.AberratedAperture(
-                    dl.layers.CircularAperture(1.2),
+            ("primary_low", ScanAberratedAperture(
+                    dl.layers.CircularAperture(1.2,transformation=DistortedCoordTransform(frame=np.pi/4, translation=np.zeros(2)),),
                     noll_inds=np.arange(5,5+n_zernikes),
                     coefficients = np.zeros(n_zernikes),
-                    # transformation = dl.CoordTransform(rotation=0.),
                 )),
 
             ("flip", dl.Flip(axes=(0,1))),
 
+            ("occulter", FresnelFastObstruction(EllipticalOcculter(dlu.arcsec2rad(0.3)*24*2.4), 24*2.4, 256, 1.5e-6)),
 
-            ("prop1", dl.FFTPropagator(
-                [
-                    ("ThinLens", dl.ABCDConjugatePlane(24*2.4)),
-                    ("FreeSpace", dl.ABCDFreeSpace(0.)),
-                ],
-                dl.PadSpec(pad=2, crop=1)
-            )),
+            ("cold_mask",   NIC2ColdMask(transformation=DistortedCoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=2, normalise=False)),
 
-            ("occulter", CLIMBOcculter(dlu.arcsec2rad(0.3)*24*2.4, np.zeros(1), np.zeros(1), invert=True)),
-
-            ("prop2", dl.FFTPropagator(
-                [
-                    ("FreeSpace", dl.ABCDFreeSpace(0.)),
-                    ("ThinLens", dl.ABCDConjugatePlane(24*2.4)),
-                ],
-                dl.PadSpec(pad=1, crop=1)#d=40e-6*psf_npixels/wf_npixels)
-            )),
-
-            ("resize", dl.Resize(wf_npixels)),
-
-            ("cold_mask",   NIC2ColdMask(transformation=dl.CoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=2)),
-
-            ("cold_mask_opd", dl.AberratedAperture(
-                    dl.layers.CircularAperture(1.2, transformation=dl.CoordTransform(translation=np.asarray((-0.05, -0.05)))),
-                    noll_inds=np.arange(5,20),
-                    coefficients = np.zeros(15),
+            ("cold_mask_opd", ScanAberratedAperture(
+                    # rotation as the mask's, so cold_mask_distortion acts in the same frame even if cold_mask_rot is unset
+                    dl.layers.CircularAperture(1.2, transformation=DistortedCoordTransform(translation=np.asarray((-0.05, -0.05)), rotation=np.pi/4)),
+                    noll_inds=np.arange(4,20),
+                    coefficients = np.zeros(1),
                 )),
 
             ("cold_mask_tilt", dl.Tilt(angles=(0.,0.))),
 
-            ("prop3", dl.MFTPropagator(
+            ("prop1", dl.MFTPropagator(
                 [
                     ("ThinLens", dl.ABCDConjugatePlane(45.7*2.4)),
                     ("FreeSpace", dl.ABCDFreeSpace(0.)),
@@ -576,7 +715,17 @@ class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
         ]
 
         super().__init__(wf_npixels, diameter, layers)
+        self.n_nodes = n_nodes
 
+    def propagate(self, wavelengths, offset=None, weights=None, return_wf=False, return_psf=False):
+        if return_wf or not self.n_nodes:
+            return super().propagate(wavelengths, offset, weights, return_wf, return_psf)
+        wavelengths = np.atleast_1d(wavelengths)
+        weights = np.ones_like(wavelengths) / len(wavelengths) if weights is None else np.atleast_1d(weights)
+        offset = np.zeros(2) if offset is None else np.asarray(offset)
+        mono = lambda wl: (lambda wf: (wf.psf, wf.pixel_scale))(self.propagate_mono(wl, offset, return_wf=True))
+        psf, ps = hermite_propagate(mono, wavelengths, weights, self.n_nodes)
+        return dl.PSF(psf, ps) if return_psf else psf
 
 
 class NICMOSOptics(dl.AngularOpticalSystem):
