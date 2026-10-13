@@ -58,7 +58,7 @@ oversample = 4
 nwavels = 200
 npoly=8
 
-n_modes = 45
+n_modes = 48
 n_zernikes = 50
 
 # Fresnel occulter (defocus1/2 at the occulter, defocus3 at the detector), elliptical occulter with an edge glint ring;
@@ -131,7 +131,7 @@ class PlanetFit(ModelFit):
 # Same visit at two rolls (ORIENTAT -147.4 and -117.5 deg), three exposures each; the spectrum and planets are keyed
 # by target, so all six share them
 exposures_single = [
-    exposure_from_file(ddir + f'{root}_clc_calf.fits', PlanetFit(spectrum_basis, "F160W", len(planets)), crop=wid, extra_bad=None, flatcorr=flatdir)
+    exposure_from_file(ddir + f'{root}_clc_calf.fits', PlanetFit(spectrum_basis, "F160W", len(planets)), crop=wid, extra_bad=None, hole_margin=0.3)
     for root in 
         [
             "n4qs09akq", "n4qs09anq", #"n4qs09aoq", 
@@ -164,8 +164,8 @@ params = {
     "bias": {},
     "occulter_radius": 0.8,
     "occulter_ellipticity": np.zeros(2),   # (e1, e2); major axis at atan2(e2, e1)/2 from the occulter-plane x axis
-    "occulter_glint": np.zeros((5, 2)),    # (re, im) Fourier coefficients (g0, g1 cos/sin, g2 cos/sin) of the edge ring
-    "occulter_glint_width": 3.,            # um in the occulter plane
+    # "occulter_glint": np.zeros((5, 2)),    # (re, im) Fourier coefficients (g0, g1 cos/sin, g2 cos/sin) of the edge ring
+    # "occulter_glint_width": 3.,            # um in the occulter plane
     "fnumber": 45.7,
     "anisotropy": 1.+1e-5,
 
@@ -247,8 +247,8 @@ things = {
 
     "occulter_radius": sgd(g*1., 0),
     "occulter_ellipticity": sgd(g*3, 300),
-    "occulter_glint": sgd(g*15, 400),
-    "occulter_glint_width": sgd(g*5, 600),   # smaller: width and amplitude trade off (ring area ~ g w)
+    # "occulter_glint": sgd(g*15, 400),
+    # "occulter_glint_width": sgd(g*5, 600),   # smaller: width and amplitude trade off (ring area ~ g w)
 
     "secondary_radius": sgd(g*1., 0),
     "spider_width": sgd(g*1., 0),
@@ -289,7 +289,7 @@ things_start = {
 
     "occulter_radius": sgd(g*1., 120),
     # in stage 1 too, so stage 2's preconditioner (computed once) sees a nonzero glint and can move its width
-    "occulter_glint": sgd(g*0.1, 300),
+    # "occulter_glint": sgd(g*0.1, 300),
 
     "outer_radius": sgd(g*0.1, 120),
     "secondary_radius": sgd(g*0.1, 120),

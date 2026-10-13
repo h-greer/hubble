@@ -116,7 +116,28 @@ class InjectedExposure(Exposure):
         self.orient = 0.
         self.hdr = None
 
-def exposure_from_file(fname, fit, extra_bad=None, crop=None, flatcorr=None):
+NIC2_HOLE_RADIUS = 0.3   # arcsec, NIC2 coronagraphic hole radius (NICMOS Instrument Handbook). The smooth patch in the
+                         # LAPLACE hole flats is larger (~0.48") and is not the hole edge.
+
+
+def hole_mask(shape, centre, radius, pixel_scales):
+    """Pixels whose centre lies within `radius` (arcsec) of `centre` = (x, y) (numpy pixel coordinates of an image of
+    `shape`). `pixel_scales` = (x, y) arcsec per pixel, so the slightly rectangular NIC2 pixels give a circle on the sky."""
+    if radius <= 0:
+        raise ValueError(f"hole mask radius must be positive, got {radius}")
+    yy, xx = onp.indices(shape)
+    return onp.hypot((xx - centre[0])*pixel_scales[0], (yy - centre[1])*pixel_scales[1]) <= radius
+
+
+def exposure_from_file(fname, fit, extra_bad=None, crop=None, flatcorr=None, hole_margin=None):
+    """Load a calibrated NICMOS exposure, optionally cropped about the coronagraph aperture.
+
+    hole_margin : if given, mask every pixel within NIC2_HOLE_RADIUS + hole_margin (arcsec) of the hole centre, i.e.
+                  the hole plus `hole_margin` beyond its edge (whose pixels are dominated by pixelation and jitter).
+                  The centre is the NIC2-CORON aperture reference point (TARSIAFX, TARSIAFY), used as 0-indexed numpy
+                  (x, y): the nominal hole position, which matches the centre of the contemporaneous hole flats' hole
+                  region to 0.1 px. Applied on the full detector before cropping, so it follows the hole wherever it
+                  lands in each crop. Replaces flatcorr's hole map (both may be given; the masks are OR-ed)."""
 
     hdr = fits.getheader(fname, ext=0)
     image_hdr = fits.getheader(fname, ext=1)
@@ -135,6 +156,15 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None, flatcorr=None):
         hole_map = (np.abs((holeflat[:,1:]-holeflat[:,:-1]))[:-1,:]<thresh) & (np.abs((holeflat[1:,:]-holeflat[:-1,:]))[:,:-1]<thresh)
 
         detector_mask = detector_mask.at[200:229, 60:89].set(hole_map)
+
+    if hole_margin is not None:
+        if hdr.get("APERTURE", "").strip() != "NIC2-CORON":
+            raise ValueError(f"{fname}: hole_margin needs a NIC2-CORON exposure, got APERTURE={hdr.get('APERTURE')}")
+        if "TARSIAFX" not in hdr or "TARSIAFY" not in hdr:
+            raise KeyError(f"{fname}: no TARSIAFX/TARSIAFY in the primary header; cannot place the hole mask")
+        centre = (float(hdr["TARSIAFX"]), float(hdr["TARSIAFY"]))
+        scales = [float(sc.to_value("arcsec")) for sc in WCS(image_hdr).proj_plane_pixel_scales()]   # (x, y)
+        detector_mask = detector_mask | np.asarray(hole_mask(data.shape, centre, NIC2_HOLE_RADIUS + hole_margin, scales))
 
     bad = np.asarray((err==0.0) | (info&0b1111111111 != 0) | detector_mask)
     err = np.where(bad, np.nan, np.asarray(err, dtype=float))
