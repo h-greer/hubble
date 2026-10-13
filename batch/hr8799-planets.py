@@ -52,7 +52,7 @@ os.makedirs(out, exist_ok=True)
 
 # %%
 wf_wid = 512
-wid = 80
+wid = 64
 oversample = 4
 
 nwavels = 200
