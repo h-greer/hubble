@@ -102,9 +102,9 @@ class StopGradPointSource(dl.PointSource):
 class PlanetFit(ModelFit):
     """Star plus point-source planets. The cold mask lateral position (shift) and its tilt (a pupil-plane Tilt
     initialised from each exposure's own TARSIAFX/Y header, i.e. pointing), cold-mask OPD and defocus can differ between
-    exposures; the high-order wavefront (primary_opd) is shared by all exposures; low-order Zernikes stay per exposure."""
+    exposures; the high-order wavefront (primary_opd) and low-order Zernikes are per exposure."""
     PARAM_KEYS = ModelFit.PARAM_KEYS | {"spectrum": "target", "cold_mask_shift": "exposure", "cold_mask_tilt": "exposure",
-                                        "primary_opd": "global", "planet_offsets": "target", "planet_fluxes": "target",
+                                        "primary_opd": "exposure", "planet_offsets": "target", "planet_fluxes": "target",
                                         "cold_mask_opd": "exposure", "defocus3": "exposure"}
 
     def __init__(self, spectrum_basis, filter, n_planets):
@@ -143,7 +143,7 @@ exposures_single = [
 params = {
     "spectrum": {},
     "primary_opd": {},
-    "primary_amp": {},
+    # "primary_amp": {},
     "primary_low": {},
     "primary_tilt": {},
     "cold_mask_opd": {},
@@ -192,7 +192,7 @@ for idx, exp in enumerate(exposures_single):
     ])*0.075
 
     params["primary_opd"][exp.fit.get_key(exp, "primary_opd")] = np.zeros((n_modes, n_modes))
-    params["primary_amp"][exp.fit.get_key(exp, "primary_amp")] = np.zeros((n_modes, n_modes))
+    # params["primary_amp"][exp.fit.get_key(exp, "primary_amp")] = np.zeros((n_modes, n_modes))
     params["primary_low"][exp.fit.get_key(exp, "primary_low")] = np.zeros((n_zernikes))
     params["cold_mask_opd"][exp.fit.get_key(exp, "cold_mask_opd")] = np.zeros(16).at[0].set(120.)
 
@@ -225,7 +225,7 @@ things = {
     "primary_opd": adam(2e-2, 50),
     # Delayed until well after the phase (primary_opd starts at 50), so the phase is fitted first
     # and the phase/amplitude degeneracy is avoided
-    "primary_amp": adam(2e-2, 150),
+    # "primary_amp": adam(2e-2, 150),
 
     "spectrum": sgd(g*1, 0),
     "primary_tilt": sgd(g*1., 0),
