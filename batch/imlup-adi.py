@@ -63,7 +63,7 @@ npoly=8
 # ~3.22" (x) and ~3.19" (y) from the star. Fourier mode k of primary_opd puts a speckle at k lambda / 3 m (the 3 m
 # wavefront array), so reaching them at the blue end of F160W (1.40 um) needs k ~ 33.5; k_max = n_modes // 2 = 37
 # adds ~2 lambda/D for the PSF wings of speckles just outside the crop
-n_modes = 75
+n_modes = 50
 n_zernikes = 50
 
 resolved_wid = 60#*2
@@ -90,7 +90,7 @@ class ResolvedFit(PointResolvedFit):
     defocus can differ between exposures; the high-order wavefront (primary_opd) is per visit (shared by the
     exposures of one roll); low-order Zernikes stay per exposure."""
     PARAM_KEYS = PointResolvedFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure",
-                                                "primary_opd": "visit", "cold_mask_opd": "exposure",
+                                                "primary_opd": "global", "cold_mask_opd": "exposure",
                                                 "defocus3": "exposure"}
 
 
