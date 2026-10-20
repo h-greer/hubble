@@ -64,7 +64,7 @@ npoly=8
 # spans x 70.6-75.1, y 209.7-213.4, so the farthest crop edge is ~2.69" (x) from the star. Fourier mode k of primary_opd puts a
 # speckle at k lambda / 3 m (the 3 m wavefront array): k ~ 28 at 1.40 um (29.5 at 1.33 um, the blue end of the grid);
 # k_max = n_modes // 2 = 31 adds ~2 lambda/D for the PSF wings of speckles just outside the crop
-n_modes = 63
+n_modes = 48
 n_zernikes = 50
 
 # Fresnel occulter (defocus1/2 at the occulter, defocus3 at the detector), elliptical occulter; the PSF is Hermite-interpolated
