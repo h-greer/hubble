@@ -315,7 +315,7 @@ opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_sta
 
 losses, params_history = optimise_new(
     opt_params, model_single, exposures_single, things_start, 500,
-    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4))
+    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
 
 # %%
 plt.figure(figsize=(10,10))
@@ -334,7 +334,7 @@ opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 losses, params_history = optimise_new(
     opt_params, model_single, exposures_single, things, 2000,
-    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4))
+    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
 
 # %%
 plt.figure(figsize=(10,10))

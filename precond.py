@@ -69,6 +69,10 @@ def _regulariser_curvature(params, exposures):
     if "resolved" not in params:
         return out.params
     for e in exposures:
+        if hasattr(e.fit, "n_share"):  # GPResolvedFit: prior 0.5*|z|^2/n_share has curvature 1/n_share
+            path = e.fit.map_param(e, "resolved")
+            out = out.set(path, out.get(path) + 1/e.fit.n_share)
+            continue
         reg = getattr(e.fit, "regulariser", None)
         if reg is None:
             continue
@@ -80,22 +84,47 @@ def _regulariser_curvature(params, exposures):
     return out.params
 
 
-def _indices(params, exact_blocks, exact_max_size):
-    """Flat (ravel_pytree order) indices (exact, quadrature) as int32 arrays.
+def get_keys(exposures, name):
+    """Per exposure, the key of dict parameter `name` it reads (None if get_key cannot say)."""
+    def key(e):
+        try:
+            return e.fit.get_key(e, name)
+        except Exception:
+            return None
+    return [key(e) for e in exposures]
 
-    exact: every entry of the blocks in exact_blocks, plus every leaf of size <= exact_max_size.
-    quadrature: the `quadrature` block (always handled by the Hessian).
+
+def leaf_users(exposures, name, k):
+    """Indices of the exposures that read leaf params[name][k] (k None: a non-dict parameter).
+    Shared by every exposure when k is None, some get_key fails, or nobody matches."""
+    everyone = tuple(range(len(exposures)))
+    if k is None:
+        return everyone
+    keys = get_keys(exposures, name)
+    users = tuple(i for i, kk in enumerate(keys) if kk == k)
+    return users if users and None not in keys else everyone
+
+
+def _indices(params, exposures, exact_blocks, exact_max_size):
+    """(exact_groups, quad_idx): flat (ravel_pytree order) int32 indices.
+
+    exact: every entry of the blocks in exact_blocks, plus every leaf of size <= exact_max_size,
+    grouped as ((users, idx), ...) by the exposures that read them (`leaf_users`), so a column is
+    only pushed through those exposures.  quadrature: the `quadrature` block (handled by the Hessian).
     """
-    exact, quad, start = [], [], 0
-    for k in sorted(params):  # ravel_pytree flattens dicts in sorted-key order
-        for leaf in jtu.tree_leaves(params[k]):
-            idx = range(start, start + int(np.size(leaf)))
-            if k == "quadrature":
-                quad += idx
-            elif k in exact_blocks or len(idx) <= exact_max_size:
-                exact += idx
-            start += len(idx)
-    return onp.asarray(exact, dtype=onp.int32), onp.asarray(quad, dtype=onp.int32)
+    exact, quad, start = {}, [], 0
+    for name in sorted(params):  # ravel_pytree flattens dicts in sorted-key order
+        val = params[name]
+        for k, v in sorted(val.items()) if isinstance(val, dict) else [(None, val)]:
+            users = leaf_users(exposures, name, k)
+            for leaf in jtu.tree_leaves(v):
+                idx = range(start, start + int(np.size(leaf)))
+                if name == "quadrature":
+                    quad += idx
+                elif name in exact_blocks or len(idx) <= exact_max_size:
+                    exact.setdefault(users, []).extend(idx)
+                start += len(idx)
+    return tuple((u, onp.asarray(i, dtype=onp.int32)) for u, i in exact.items()), onp.asarray(quad, dtype=onp.int32)
 
 
 def _map_tangents(fn, x, idx, batch_size):
@@ -117,14 +146,6 @@ def _hessian_entries(x, unravel, exposures, model, idx, batch_size):
     return _map_tangents(lambda v, i: jax.jvp(grad, (x,), (v,))[1][i], x, idx, batch_size)
 
 
-def _gn_entries(x, fs, idx, batch_size):
-    """Exact GN_kk = sum_e |df_e/dtheta_k|^2 at flat indices idx, from one jvp per exposure each."""
-    def gn(v, i):
-        return sum(np.sum(jax.jvp(f, (x,), (v,))[1] ** 2) for f in fs)
-
-    return _map_tangents(gn, x, idx, batch_size)
-
-
 def _finish(flat, unravel):
     # Non-finite entries stay NaN (never 0: C=0 would freeze that parameter and get cached);
     # precond_cache refuses to cache non-finite diagonals and precond_from_diag imputes them.
@@ -142,8 +163,9 @@ def _hessian_core(params, exposures, model, idx, batch_size):
 
 
 @eqx.filter_jit
-def _gn_core(params, exposures, model, key, exact_idx, quad_idx, n_probes, probe_batch, chunk):
-    """GN diagonal; n_probes == 0 means everything is in exact_idx (no Hutchinson part)."""
+def _gn_core(params, exposures, model, key, exact_groups, quad_idx, n_probes, probe_batch, chunk):
+    """GN diagonal; n_probes == 0 means everything is in exact_groups (no Hutchinson part).
+    exact_groups: ((exposure indices, flat indices), ...), the indices are traced, the users static."""
     params = _f64(params)
     x, unravel = ravel_pytree(params)
     fs = _weighted_images(x, unravel, exposures, model)
@@ -159,8 +181,9 @@ def _gn_core(params, exposures, model, key, exact_idx, quad_idx, n_probes, probe
             keys = jr.split(jr.fold_in(key, ei), n_probes)
             gn = gn + jax.lax.map(probe, keys, batch_size=min(int(probe_batch), n_probes)).mean(0)
 
-    if exact_idx.shape[0] > 0:
-        gn = gn.at[exact_idx].set(_gn_entries(x, fs, exact_idx, chunk))
+    for users, idx in exact_groups:  # exact GN_kk: one jvp per k, only through the exposures that read it
+        gn_k = lambda v, i: sum(np.sum(jax.jvp(fs[e], (x,), (v,))[1] ** 2) for e in users)
+        gn = gn.at[idx].set(_map_tangents(gn_k, x, idx, chunk))
 
     if quad_idx.shape[0] > 0:  # non-quadratic in the error model: |H_kk| instead
         h = _hessian_entries(x, unravel, exposures, model, quad_idx, chunk)
@@ -179,7 +202,7 @@ def hessian_diag(params: dict, exposures: list, model, batch_size: int = 16) -> 
 
 def gn_diag_exact(params: dict, exposures: list, model, chunk: int = 16) -> dict:
     """Exact GN diagonal (+ regulariser curvature): one jvp per parameter, `chunk` at a time."""
-    exact, quad = _indices(params, tuple(params), 0)
+    exact, quad = _indices(params, exposures, tuple(params), 0)
     return _gn_core(params, exposures, model, jr.key(0), exact, quad, 0, 1, int(chunk))
 
 
@@ -192,7 +215,7 @@ def gn_diag_probe(params: dict, exposures: list, model, n_probes: int = 32,
     One vjp per exposure, `probe_batch` probes at a time. Probes are noisy for small blocks, so
     leaves of size <= exact_max_size and all of `exact_blocks` use exact jvps (`chunk` at a time).
     """
-    exact, quad = _indices(params, tuple(exact_blocks), int(exact_max_size))
+    exact, quad = _indices(params, exposures, tuple(exact_blocks), int(exact_max_size))
     return _gn_core(params, exposures, model, key, exact, quad, int(n_probes), int(probe_batch), int(chunk))
 
 

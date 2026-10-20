@@ -1,12 +1,14 @@
 """
 Disk cache + per-exposure splitting for preconditioner diagonals.
 
-The estimators live in `precond.DIAG_METHODS`; this module decides which exposures each parameter
-leaf needs, runs the estimator on the smallest loss that contains them, and caches every block.
+The estimators live in `precond.DIAG_METHODS`; this module groups the parameter leaves by the
+exposures that read them and caches every group (block). On any miss the estimator runs once on the
+full loss (a sum over exposures, so each block's entries only see its own exposures) and every
+missing block is filled from that one call.
 
 For a leaf params[name][k], the "users" are the exposures e with e.fit.get_key(e, name) == k.
-One user: the leaf is exposure-specific and is computed from that exposure's loss alone.  Several
-users: it is shared and computed on exactly that exposure set.  No users, get_key failing, or a
+One user: the leaf is exposure-specific (only that exposure's loss depends on it).  Several
+users: it is shared by exactly that exposure set.  No users, get_key failing, or a
 top-level (non-dict) parameter: shared by all exposures.  Leaves with the same users form a block,
 and a block is one cache entry.
 
@@ -18,7 +20,6 @@ they are within `value_tol` (scale-aware, see `_distance`); otherwise it is reco
 import os
 import re
 import json
-import copy
 import hashlib
 import inspect
 import tempfile
@@ -32,7 +33,7 @@ import jax.tree_util as jtu
 import precond
 from models import ModelParams
 
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 DEFAULT_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "tmp_precond_cache")
 
 # Source files that define the loss: editing any of them invalidates the cache.
@@ -111,26 +112,12 @@ def _leaf(p, name, k):
     return p[name] if k is None else p[name][k]
 
 
-def _get_key(e, name):
-    try:
-        return e.fit.get_key(e, name)
-    except Exception:
-        return None  # unknown -> treated as shared by all
-
-
 def _group_leaves(p, exposures, per_exposure):
-    """{frozenset(user exposure idx): [(name, key or None), ...]} in params order."""
-    everyone = frozenset(range(len(exposures)))
+    """{users (exposure idx tuple): [(name, key or None), ...]} in params order."""
     groups = {}
     for name, val in p.items():
-        if not isinstance(val, dict):
-            groups.setdefault(everyone, []).append((name, None))
-            continue
-        keys = [_get_key(e, name) for e in exposures]
-        for k in val:
-            users = frozenset(i for i, kk in enumerate(keys) if kk == k)
-            if not per_exposure or None in keys or not users:
-                users = everyone
+        for k in (val if isinstance(val, dict) else [None]):
+            users = precond.leaf_users(exposures, name, k) if per_exposure else tuple(range(len(exposures)))
             groups.setdefault(users, []).append((name, k))
     return groups
 
@@ -142,7 +129,7 @@ def _relevant_leaves(mp, es):
         if not isinstance(val, dict):
             rel.append((name, None))
             continue
-        keys = [_get_key(e, name) for e in es]
+        keys = precond.get_keys(es, name)
         rel += [(name, k) for k in val if None in keys or k in keys]
     return rel
 
@@ -173,7 +160,7 @@ def _distance(x, x0, sizes, atols):
 
 
 # ------------------------------------------------------------------ disk IO
-def _write_entry(path, leaves, arrays, values, sizes, atols):
+def _write_entry(path, arrays, values, sizes, atols):
     # write-then-rename so concurrent readers/writers never see a partial file
     os.makedirs(os.path.dirname(path), exist_ok=True)
     payload = {f"leaf_{i}": a for i, a in enumerate(arrays)}
@@ -198,50 +185,8 @@ def _read_entry(path, n_leaves):
         return None  # missing, corrupt, or from an older format
 
 
-# ------------------------------------------------------------------ canonicalisation
-def _canonical_exposures(es):
-    """Copies of `es` with static fields that do not affect the loss replaced by placeholders, so
-    jit sees the same static structure for different exposures of equal shape (else every exposure
-    recompiles).  `target` -> "t{m}" by first appearance, so shared targets still share get_key keys."""
-    targets, out = {}, []
-    for j, e in enumerate(es):
-        c = copy.copy(e)
-        object.__setattr__(c, "filename", f"e{j}")
-        object.__setattr__(c, "target", targets.setdefault(e.target, f"t{len(targets)}"))
-        for f, v in (("mjd", "0"), ("exptime", "0"), ("wcs", None), ("hdr", None)):
-            if hasattr(c, f):
-                object.__setattr__(c, f, v)
-        out.append(c)
-    return out
-
-
-def _canonical_diag_call(diag_fn, sub, es, model, kw):
-    """Run diag_fn on exposures with canonical names and params dict keys renamed to match
-    (model.params restricted to what `es` read), then map the result back to the original keys."""
-    ces = _canonical_exposures(es)
-    table = {}  # name -> {original key: canonical key}
-    for name, val in model.params.items():
-        if isinstance(val, dict):
-            for e, c in zip(es, ces):
-                ko, kc = _get_key(e, name), _get_key(c, name)
-                if ko is not None and kc is not None:
-                    table.setdefault(name, {})[ko] = kc
-
-    def rename(p, table, drop=False):
-        out = {}
-        for n, v in p.items():
-            m = table.get(n)
-            out[n] = {m.get(k, k): x for k, x in v.items() if k in m or not drop} if isinstance(v, dict) and m else v
-        return out
-
-    cmodel = model.set("params", rename(model.params, table, drop=True))
-    d = diag_fn(rename(sub, table), ces, cmodel, **kw)
-    return rename(dict(d), {n: {v: k for k, v in m.items()} for n, m in table.items()})
-
-
-# ------------------------------------------------------------------ public API
 def get_diag(params, exposures, model, method="gn_probe", cache_dir=DEFAULT_CACHE_DIR,
-             per_exposure=True, refresh=False, match="values", value_tol=0.03, verbose=False,
+             per_exposure=True, per_block=False, refresh=False, match="values", value_tol=0.03, verbose=False,
              **method_kwargs):
     """
     Diagonal preconditioner statistics for `params` (dict or ModelParams, a subset of model.params).
@@ -249,6 +194,9 @@ def get_diag(params, exposures, model, method="gn_probe", cache_dir=DEFAULT_CACH
     method        "hessian" | "gn_exact" | "gn_probe" (precond.DIAG_METHODS); kwargs go to it.
     cache_dir     None disables the disk cache.
     per_exposure  split into per-exposure / shared blocks (module doc); False: one block.
+    per_block     False: fill every missing block from one estimator call on all params and exposures (fewest
+                  compilations, but ~1.6-2x the memory). True: one call per missing block, on its leaves and
+                  the exposures that read them (less memory; one compilation per distinct block).
     refresh       recompute every block and overwrite its entry.
     match         "values": reuse an entry only if the relevant parameters are within value_tol
                   (`_distance`); "structure": reuse whenever model/data/structure match.
@@ -272,9 +220,9 @@ def get_diag(params, exposures, model, method="gn_probe", cache_dir=DEFAULT_CACH
                                e.fit) for e in exposures]
 
     groups = _group_leaves(p, exposures, per_exposure)
-    out = {}
-    for users in sorted(groups, key=lambda s: (len(s), sorted(s))):
-        leaves, es = groups[users], [exposures[i] for i in sorted(users)]
+    out, full = {}, None
+    for users in sorted(groups, key=lambda s: (len(s), s)):
+        leaves, es = groups[users], [exposures[i] for i in users]
         arrays, status = None, "nocache"
         if cache_dir is not None:
             rel = _relevant_leaves(mp, es)
@@ -297,22 +245,22 @@ def get_diag(params, exposures, model, method="gn_probe", cache_dir=DEFAULT_CACH
                 if status == "stale":
                     arrays = None
         if arrays is None:
-            sub = {}
-            for n, k in leaves:
-                if k is None:
-                    sub[n] = p[n]
-                else:
-                    sub.setdefault(n, {})[k] = p[n][k]
-            d = _canonical_diag_call(diag_fn, sub, es, model, method_kwargs)
+            if per_block:     # this block's leaves through its own exposures only
+                sub = {}
+                for n, k in leaves:
+                    sub.update({n: p[n]} if k is None else {n: {**sub.get(n, {}), k: p[n][k]}})
+                d = diag_fn(sub, es, model, **method_kwargs)
+            else:             # every block from one call: the loss is a sum over exposures
+                d = full = full if full is not None else diag_fn(p, exposures, model, **method_kwargs)
             arrays = [onp.asarray(_leaf(d, n, k), dtype=onp.float64) for n, k in leaves]
             if cache_dir is not None:
                 if all(onp.all(onp.isfinite(a)) for a in arrays):
                     diags = dict(zip(leaves, arrays))
-                    _write_entry(path, leaves, arrays, values, sizes, [_atol(n, diags.get((n, k))) for n, k in rel])
+                    _write_entry(path, arrays, values, sizes, [_atol(n, diags.get((n, k))) for n, k in rel])
                 else:
                     status += "+nonfinite-not-cached"
         if verbose:
-            print(f"[precond_cache] exposures={sorted(users)} {status} leaves={[n for n, _ in leaves]}")
+            print(f"[precond_cache] exposures={users} {status} leaves={[n for n, _ in leaves]}")
         for (n, k), a in zip(leaves, arrays):
             if k is None:
                 out[n] = np.asarray(a)
