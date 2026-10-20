@@ -596,7 +596,7 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
         one = lambda s, st, wl, w: s._one_wavelength(st, wl, w)
         if self.remat:
             one = eqx.filter_checkpoint(one)
-        if n_nodes:
+        if n_nodes and wavelengths.size > n_nodes:     # with <= n_nodes wavelengths the direct sum is exact and cheaper
             psf, ps = hermite_propagate(lambda wl: one(self, static, wl, 1.), wavelengths, weights, n_nodes, self.wl_batch)
             return dl.PSF(psf, ps) if return_psf else psf
         if self.wl_batch is None:
@@ -724,7 +724,9 @@ class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
     def propagate(self, wavelengths, offset=None, weights=None, return_wf=False, return_psf=False, n_nodes=None):
         """n_nodes : overrides self.n_nodes for this call (e.g. fewer knots for faint off-axis sources)."""
         n_nodes = self.n_nodes if n_nodes is None else n_nodes
-        if return_wf or not n_nodes:
+        # with <= n_nodes wavelengths (e.g. a single-wavelength resolved source) the direct sum is exact and cheaper,
+        # and Hermite needs >= 2 distinct knots
+        if return_wf or not n_nodes or np.size(wavelengths) <= n_nodes:
             return super().propagate(wavelengths, offset, weights, return_wf, return_psf)
         wavelengths = np.atleast_1d(wavelengths)
         weights = np.ones_like(wavelengths) / len(wavelengths) if weights is None else np.atleast_1d(weights)

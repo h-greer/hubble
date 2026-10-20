@@ -52,20 +52,29 @@ from datetime import datetime, timedelta
 
 # %%
 wf_wid = 512
-wid = 80
+wid = 64
 oversample = 4
 
-nwavels = 20
-npoly=6
+pad = 2      # model 2 extra detector pixels on each side, cropped after resampling (see NICMOSDetector)
 
-n_modes = 45
-n_zernikes = 30
+nwavels = 200
+npoly=8
 
-optics = NICMOSCoronagraph(wf_wid, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, amplitude=True)
+# The 64 px crop (about detector pixel (75, 212)) spans x 43-106, y 180-243; across the calibrators the hole (TARSIAFX/Y)
+# spans x 70.6-75.1, y 209.7-213.4, so the farthest crop edge is ~2.69" (x) from the star. Fourier mode k of primary_opd puts a
+# speckle at k lambda / 3 m (the 3 m wavefront array): k ~ 28 at 1.40 um (29.5 at 1.33 um, the blue end of the grid);
+# k_max = n_modes // 2 = 31 adds ~2 lambda/D for the PSF wings of speckles just outside the crop
+n_modes = 63
+n_zernikes = 50
 
-detector = NICMOSDetector(oversample, wid)
+# Fresnel occulter (defocus1/2 at the occulter, defocus3 at the detector), elliptical occulter; the PSF is Hermite-interpolated
+# between 20 knot wavelengths across the 200-wavelength spectrum. No pupil amplitude map
+optics = NICMOSFresnelCoronagraph(wf_wid, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, n_nodes=20, pad=pad)
+# optics = NICMOSFresnelCoronagraph(wf_wid, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, n_nodes=20, amplitude=True, pad=pad)
 
-vects = np.load("../data/iterative_spectrum_basis_F160W.npy")[:,:npoly]
+detector = NICMOSDetector(oversample, wid, pad=pad)
+
+vects = np.load(f"../data/iterative_spectrum_basis_F160W_{nwavels}.npy")[:,:npoly]
 assert vects.shape == (nwavels, npoly)
 spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 
@@ -104,19 +113,23 @@ print(index, target, visit[0]["simbad_main_id"], visit[0]["date_obs"], [r["rootn
 out = f"calibrator-joint/{index}-{target}"
 os.makedirs(out, exist_ok=True)
 
-flatdirs = {
-    "DD1": '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL/NICMOS-LAPL-DD1/HOLEFLATS/',
-    "DD2": '../data/NICMOS-LAPL-DD2/LAPL_HOLEFLATS_DD2/',
-}
+# Superseded by hole_margin (hole mask from the TARSIAFX/Y header, per exposure, so valid for both DD1 and DD2)
+# flatdirs = {
+#     "DD1": '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL/NICMOS-LAPL-DD1/HOLEFLATS/',
+#     "DD2": '../data/NICMOS-LAPL-DD2/LAPL_HOLEFLATS_DD2/',
+# }
 
 # The cold mask lateral position (shift) and its tilt (a pupil-plane Tilt initialised from each exposure's own
-# TARSIAFX/Y header, i.e. pointing) can differ between exposures; rotation, shear, scale and opd stay global
+# TARSIAFX/Y header, i.e. pointing), cold-mask OPD and defocus can differ between exposures; rotation, shear, scale and
+# distortion stay global. The high-order wavefront (primary_opd) is per visit (shared by the exposures of one visit, whose
+# residuals differ by only ~1.3 sigma); low-order Zernikes stay per exposure
 class PerExposureColdMaskFit(SinglePointFit):
-    PARAM_KEYS = SinglePointFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure"}
+    PARAM_KEYS = SinglePointFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure",
+                                              "primary_opd": "visit", "cold_mask_opd": "exposure", "defocus3": "exposure"}
 
 # The spectrum is keyed by target, so all exposures of the visit share it
 exposures_single = [
-    exposure_from_file("../" + r["file_path"], PerExposureColdMaskFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, flatcorr=flatdirs[r["delivery"]])
+    exposure_from_file("../" + r["file_path"], PerExposureColdMaskFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, hole_margin=0.3)
     for r in visit
 ]
 
@@ -124,7 +137,7 @@ exposures_single = [
 params = {
     "spectrum": {},
     "primary_opd": {},
-    "primary_amp": {},
+    # "primary_amp": {},
     "primary_low": {},
     "primary_tilt": {},
     "cold_mask_opd": {},
@@ -133,13 +146,17 @@ params = {
     "cold_mask_rot": {},
     "cold_mask_shear": {},
     "cold_mask_scale": {},
+    "cold_mask_distortion": {},
+    "defocus1": {},
+    "defocus2": {},
+    "defocus3": {},
     "primary_rot": {},
     "primary_shear": {},
-    "jitter": {},
+    # "jitter": {},
 
     "bias": {},
     "occulter_radius": 0.8,
-    "occulter_coeffs": np.zeros(2)+1e-3,
+    "occulter_ellipticity": np.zeros(2),   # (e1, e2); major axis at atan2(e2, e1)/2 from the occulter-plane x axis
     "fnumber": 45.7,
     "anisotropy": 1.+1e-5,
 
@@ -150,6 +167,9 @@ params = {
     "primary_secondary": 0.330*1.2,
     "primary_outer": 1.2,
     "primary_pad": 0.065*1.2,
+    "secondary_shift": np.zeros(2),        # cm, spider-aligned frame; ~1 cm expected from the 7.4' field offset
+    "primary_distortion": np.zeros((2, 7)),  # fraction of the 1.2 m radius at the edge
+    "distortion": np.zeros((2, 7)),        # detector-plane polynomial distortion
 }
 
 
@@ -163,7 +183,7 @@ for idx, exp in enumerate(exposures_single):
     ])*0.075
 
     params["primary_opd"][exp.fit.get_key(exp, "primary_opd")] = np.zeros((n_modes, n_modes))
-    params["primary_amp"][exp.fit.get_key(exp, "primary_amp")] = np.zeros((n_modes, n_modes))
+    # params["primary_amp"][exp.fit.get_key(exp, "primary_amp")] = np.zeros((n_modes, n_modes))
     params["primary_low"][exp.fit.get_key(exp, "primary_low")] = np.zeros((n_zernikes))
     params["cold_mask_opd"][exp.fit.get_key(exp, "cold_mask_opd")] = np.zeros(16).at[0].set(120.)
 
@@ -175,7 +195,10 @@ for idx, exp in enumerate(exposures_single):
     params["primary_shear"][exp.fit.get_key(exp, "primary_shear")] = np.asarray([0.,0.])
 
     params["bias"][exp.fit.get_key(exp, "bias")] = 0.
-    params["jitter"][exp.fit.get_key(exp, "jitter")] = 7. # mas; gradient vanishes at 0
+    for k in ("defocus1", "defocus2", "defocus3"):
+        params[k][exp.fit.get_key(exp, k)] = 0.
+    params["cold_mask_distortion"][exp.fit.get_key(exp, "cold_mask_distortion")] = np.zeros((2, 7))
+    # params["jitter"][exp.fit.get_key(exp, "jitter")] = 7. # mas; gradient vanishes at 0
 
 
 model_single = set_array(NICMOSModel(exposures_single, params, optics, detector))
@@ -192,12 +215,15 @@ things = {
     "primary_opd": adam(2e-2, 50),
     # Delayed until well after the phase (primary_opd starts at 50), so the phase is fitted first
     # and the phase/amplitude degeneracy is avoided
-    "primary_amp": adam(2e-2, 150),
+    # "primary_amp": adam(2e-2, 150),
 
     "spectrum": sgd(g*1, 0),
     "primary_tilt": sgd(g*1., 0),
     "cold_mask_tilt": sgd(g*1, 0),
     "cold_mask_opd": sgd(g*1., 0),
+
+    "defocus1": sgd(g*1, 0),
+    "defocus2": sgd(g*1, 0),
 
     "bias": sgd(g*3, 0),
     "cold_mask_shift": sgd(g*1, 0),
@@ -205,20 +231,24 @@ things = {
     "primary_rot": sgd(g*3., 0),
 
     "primary_low": sgd(g*1, 0),
-    "jitter": sgd(g*1, 100),
+    # "jitter": sgd(g*1, 100),
 
     "cold_mask_scale": sgd(g*1, 0),
+    "cold_mask_distortion": sgd(g*3, 0),
 
     "occulter_radius": sgd(g*1., 0),
-    "occulter_coeffs": adam(2e-2, 300),
+    "occulter_ellipticity": sgd(g*3, 300),
 
     "secondary_radius": sgd(g*1., 0),
     "spider_width": sgd(g*1., 0),
     "primary_spider": sgd(g*1., 0),
     "primary_secondary": sgd(g*1., 0),
+    "secondary_shift": sgd(g*1, 0),
+    "primary_distortion": sgd(g*3, 0),
 
     "fnumber": sgd(g*1., 0),
     "anisotropy": sgd(g*1., 0),
+    "distortion": sgd(g*1, 0),
 }
 
 things_start = {
@@ -226,6 +256,9 @@ things_start = {
     "primary_tilt": sgd(g*5., 15.),
     "cold_mask_tilt": sgd(g*1., 0),
     "cold_mask_opd": sgd(g*0.1, 40),
+
+    "defocus1": sgd(g*1, 60),
+    "defocus2": sgd(g*10, 60),
 
     "bias": sgd(g*3, 50),
     "cold_mask_shift": sgd(g*0.3, 70),
@@ -235,6 +268,7 @@ things_start = {
     "primary_low": sgd(g*2., 150),
 
     "cold_mask_shear": sgd(g*0.1, 100),
+    "cold_mask_distortion": sgd(g*0.1, 150),
 
     "primary_shear": sgd(g*1, 100),
 
@@ -247,6 +281,8 @@ things_start = {
     "primary_secondary": sgd(g*0.1, 120),
     "primary_pad": sgd(g*0.1, 120),
     "primary_outer": sgd(g*0.1, 120),
+    "secondary_shift": sgd(g*0.3, 120),
+    "primary_distortion": sgd(g*0.1, 150),
 
     "fnumber": sgd(g*1., 200),
     "anisotropy": sgd(g*2., 200),
@@ -260,7 +296,7 @@ opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_sta
 
 losses, params_history = optimise_new(
     opt_params, model_single, exposures_single, things_start, 500,
-    precond_method="gn_exact", precond_kwargs=dict(chunk=16))
+    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
 
 # %%
 plt.figure(figsize=(10,10))
@@ -280,7 +316,7 @@ opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 losses, params_history = optimise_new(
     opt_params, model_single, exposures_single, things, 2000,
-    precond_method="gn_probe", precond_kwargs=dict(n_probes=32))
+    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
 
 # %%
 plt.figure(figsize=(10,10))
@@ -292,19 +328,19 @@ plot_params(params_history, groups, xw = 5, save=f"{out}/params")
 plot_comparison_detailed(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, wf_size=wf_wid, percentile=99, save=f"{out}/comparison")
 
 # %%
-# Recovered amplitude where both the primary and the cold mask transmit, as in "Pupil x Cold Mask"
-model = ModelParams(params_history[-1]).inject(model_single)
-exp = exposures_single[0]
-optics = exp.fit.update_optics(model, exp)
+# # Recovered amplitude where both the primary and the cold mask transmit, as in "Pupil x Cold Mask"
+# model = ModelParams(params_history[-1]).inject(model_single)
+# exp = exposures_single[0]
+# optics = exp.fit.update_optics(model, exp)
 
-coords = dlu.pixel_coords(wf_wid, optics.diameter)
-primary = optics.primary.transmission(coords, 2.4/wf_wid)
-cold_mask = optics.cold_mask.transmission(coords, 2.4/wf_wid)
-amp = 100*(np.exp(optics.primary_amp.eval_basis()) - 1)
+# coords = dlu.pixel_coords(wf_wid, optics.diameter)
+# primary = optics.primary.transmission(coords, 2.4/wf_wid)
+# cold_mask = optics.cold_mask.transmission(coords, 2.4/wf_wid)
+# amp = 100*(np.exp(optics.primary_amp.eval_basis()) - 1)
 
-fig, ax = plt.subplots(figsize=(10, 10), layout='compressed')
-_signed_panel(ax, np.where(primary*cold_mask < .5, np.nan, amp), "Pupil x Cold Mask Amplitude", label="Amplitude (%)", percentile=99)
-fig.savefig(f"{out}/amplitude.png")
+# fig, ax = plt.subplots(figsize=(10, 10), layout='compressed')
+# _signed_panel(ax, np.where(primary*cold_mask < .5, np.nan, amp), "Pupil x Cold Mask Amplitude", label="Amplitude (%)", percentile=99)
+# fig.savefig(f"{out}/amplitude.png")
 
 # %%
 # Recovered stellar spectrum (before the filter) and the detected (filtered) spectrum
@@ -321,7 +357,7 @@ fig.savefig(f"{out}/spectrum.png")
 
 # %%
 np.save(f"{out}/params_amp.npy", params_history[-1])
-print({k: float(np.abs(v)) for k, v in ModelParams(params_history[-1]).get("jitter").items()}, "mas")
+# print({k: float(np.abs(v)) for k, v in ModelParams(params_history[-1]).get("jitter").items()}, "mas")
 
 # %%
 # Machine-readable fit diagnostics (a dict, loaded with np.load(..., allow_pickle=True).item()), for assessing
@@ -356,8 +392,8 @@ for exp, r in zip(exposures_single, visit):
         "all": stats(z), "halo": stats(np.where(halo, z, np.nan)), "wings": stats(np.where(halo, np.nan, z)),
         "flux_ratio": float(np.nansum(np.where(exp.bad, np.nan, im))/np.nansum(exp.data)),
         "frac_bad": float(np.mean(exp.bad)),
-        "jitter_mas": float(np.abs(final.get(exp.fit.map_param(exp, "jitter")))),
-        **{p: get(p) for p in ["primary_tilt", "cold_mask_tilt", "cold_mask_shift", "bias"]},
+        # "jitter_mas": float(np.abs(final.get(exp.fit.map_param(exp, "jitter")))),
+        **{p: get(p) for p in ["primary_tilt", "cold_mask_tilt", "cold_mask_shift", "bias", "defocus1", "defocus2"]},
         "primary_opd_rms_nm": float(np.std(final.get(exp.fit.map_param(exp, "primary_opd")))),
         "primary_low_rms_nm": float(np.std(final.get(exp.fit.map_param(exp, "primary_low")))),
     })
