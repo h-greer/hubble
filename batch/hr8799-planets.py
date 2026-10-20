@@ -102,9 +102,10 @@ class StopGradPointSource(dl.PointSource):
 class PlanetFit(ModelFit):
     """Star plus point-source planets. The cold mask lateral position (shift) and its tilt (a pupil-plane Tilt
     initialised from each exposure's own TARSIAFX/Y header, i.e. pointing), cold-mask OPD and defocus can differ between
-    exposures; the high-order wavefront (primary_opd) and low-order Zernikes are per exposure."""
+    exposures; the high-order wavefront (primary_opd) is per visit (shared by the exposures of one roll, whose
+    residuals differ by only ~1.3 sigma); low-order Zernikes stay per exposure."""
     PARAM_KEYS = ModelFit.PARAM_KEYS | {"spectrum": "target", "cold_mask_shift": "exposure", "cold_mask_tilt": "exposure",
-                                        "primary_opd": "exposure", "planet_offsets": "target", "planet_fluxes": "target",
+                                        "primary_opd": "visit", "planet_offsets": "target", "planet_fluxes": "target",
                                         "cold_mask_opd": "exposure", "defocus3": "exposure"}
 
     def __init__(self, spectrum_basis, filter, n_planets):

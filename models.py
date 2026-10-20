@@ -307,6 +307,7 @@ class ModelFit(zdx.Base):
             raise ValueError(f"Parameter {param} has no key")
         match self.PARAM_KEYS[param]:
             case "exposure": return exposure.key
+            case "visit": return exposure.key[:6]     # rootname ipppssoot: n4qs09akq -> n4qs09 (instrument, programme, visit)
             case "target": return f"{exposure.target}_{exposure.filter}"
             case "global": return "global"
 
