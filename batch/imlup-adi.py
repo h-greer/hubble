@@ -86,7 +86,7 @@ ddir = '../data/data/'
 
 class ResolvedFit(PointResolvedFit):
     """Star plus resolved disc (PointResolvedFit), with hr8799-planets' PlanetFit keys: the cold mask lateral
-    position (shift), its tilt (initialised from each exposure's TARSIAFX/Y, i.e. pointing), cold-mask OPD and
+    position (shift), its tilt (initialised from the era's approximate hole offset, models.hole_tilt), cold-mask OPD and
     defocus can differ between exposures; the high-order wavefront (primary_opd) is per visit (shared by the
     exposures of one roll); low-order Zernikes stay per exposure."""
     PARAM_KEYS = PointResolvedFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure",
@@ -154,10 +154,7 @@ for idx, exp in enumerate(exposures_single):
 
     # star pointing within the hole: target-specific (IM Lup's own value; hr8799-planets' would put the star ~18 px off)
     params["primary_tilt"][exp.fit.get_key(exp, "primary_tilt")] = np.array([-0.75, -0.05])*0.075
-    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = np.array([
-        np.array(exp.hdr["TARSIAFY"],dtype=float) - (256-44),
-        np.array(exp.hdr["TARSIAFX"],dtype=float) - (256-181),
-    ])*0.075
+    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = hole_tilt(exp)
 
     params["primary_opd"][exp.fit.get_key(exp, "primary_opd")] = np.zeros((n_modes, n_modes))
     # params["primary_amp"][exp.fit.get_key(exp, "primary_amp")] = np.zeros((n_modes, n_modes))

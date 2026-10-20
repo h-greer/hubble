@@ -113,10 +113,7 @@ for idx, exp in enumerate(exposures_single):
     params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set((np.nansum(exp.data)/nwavels)*210)
 
     params["primary_tilt"][exp.fit.get_key(exp, "primary_tilt")] = np.array([-0.05, -0.75])*0.075
-    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = np.array([
-        np.array(exp.hdr["TARSIAFY"],dtype=float) - (256-44),
-        np.array(exp.hdr["TARSIAFX"],dtype=float) - (256-181),
-    ])*0.075
+    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = hole_tilt(exp)
 
     params["primary_opd"][exp.fit.get_key(exp, "primary_opd")] = np.zeros((n_modes, n_modes))
     params["primary_amp"][exp.fit.get_key(exp, "primary_amp")] = np.zeros((n_modes, n_modes))

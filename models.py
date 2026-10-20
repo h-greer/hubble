@@ -129,6 +129,20 @@ def hole_mask(shape, centre, radius, pixel_scales):
     return onp.hypot((xx - centre[0])*pixel_scales[0], (yy - centre[1])*pixel_scales[1]) <= radius
 
 
+CROP_CENTRE = (256-181, 256-44)   # detector pixel (x, y) the crop is cut about, the same for every exposure
+
+# Approximate hole position relative to the crop centre, (x, y) detector px, per era: the hole sat further to -x
+# before the NICMOS Cryocooler (NCS, installed March 2002, MJD 52334)
+HOLE_OFFSET = {"pre-ncs": (-4., -1.), "ncs": (-1.5, -1.5)}
+NCS_MJD = 52334.
+
+
+def hole_tilt(exp, scale=0.075):
+    """Initial cold_mask_tilt (x, y), arcsec, from the era's approximate hole offset (dLux Tilt angles are (x, y))."""
+    era = "pre-ncs" if exp.mjd < NCS_MJD else "ncs"
+    return np.array(HOLE_OFFSET[era])*scale
+
+
 def exposure_from_file(fname, fit, extra_bad=None, crop=None, flatcorr=None, hole_margin=None):
     """Load a calibrated NICMOS exposure, optionally cropped about the coronagraph aperture.
 
@@ -186,7 +200,7 @@ def exposure_from_file(fname, fit, extra_bad=None, crop=None, flatcorr=None, hol
 
     if crop:
         w = WCS(image_hdr)
-        centre = SkyCoord(w.pixel_to_world(256-181,256-44), unit='deg')
+        centre = CROP_CENTRE   # detector pixel (x, y); a pixel->sky->pixel round trip can shift the crop by 1 px
         data = Cutout2D(data, centre, crop, wcs=w).data
         err = Cutout2D(err, centre, crop, wcs=w).data
         info = Cutout2D(info, centre, crop, wcs=w).data

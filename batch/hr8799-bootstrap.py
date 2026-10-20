@@ -73,8 +73,8 @@ spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 ddir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL/NICMOS-LAPL-DD1/LAPL_DATA/contemp_flats/repaired/'
 flatdir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL/NICMOS-LAPL-DD1/HOLEFLATS/'
 
-# The cold mask lateral position (shift) and its tilt (a pupil-plane Tilt initialised from each exposure's own
-# TARSIAFX/Y header, i.e. pointing) can differ between exposures; rotation, shear, scale and opd stay global.
+# The cold mask lateral position (shift) and its tilt (a pupil-plane Tilt initialised from the era's
+# approximate hole offset, models.hole_tilt) can differ between exposures; rotation, shear, scale and opd stay global.
 # The high-order wavefront (primary_opd) is shared by both rolls; low-order Zernikes stay per exposure
 class PerExposureColdMaskFit(SinglePointFit):
     PARAM_KEYS = SinglePointFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure", "primary_opd": "global"}
@@ -142,10 +142,7 @@ for idx, exp in enumerate(exposures_single):
     params["spectrum"][exp.fit.get_key(exp, "spectrum")] = (np.zeros(npoly)).at[0].set((np.nansum(exp.data)/nwavels)*100) # matches the data flux at initialisation
 
     params["primary_tilt"][exp.fit.get_key(exp, "primary_tilt")] = np.array([-0.05, -0.75])*0.075
-    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = np.array([
-        np.array(exp.hdr["TARSIAFY"],dtype=float) - (256-44),
-        np.array(exp.hdr["TARSIAFX"],dtype=float) - (256-181),
-    ])*0.075
+    params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = hole_tilt(exp)
 
     params["primary_opd"][exp.fit.get_key(exp, "primary_opd")] = np.zeros((n_modes, n_modes))
     params["primary_amp"][exp.fit.get_key(exp, "primary_amp")] = np.zeros((n_modes, n_modes))
