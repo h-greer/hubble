@@ -129,7 +129,7 @@ class PerExposureColdMaskFit(SinglePointFit):
 
 # The spectrum is keyed by target, so all exposures of the visit share it
 exposures_single = [
-    exposure_from_file("../" + r["file_path"], PerExposureColdMaskFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, hole_margin=0.3)
+    exposure_from_file("../" + r["file_path"], PerExposureColdMaskFit(spectrum_basis, "F160W"), crop=wid, extra_bad=None, hole_margin=0.1)
     for r in visit
 ]
 

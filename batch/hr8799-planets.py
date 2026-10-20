@@ -232,7 +232,7 @@ things = {
     "cold_mask_opd": sgd(g*1., 0),
 
     "defocus1": sgd(g*1, 0),
-    "defocus2": sgd(g*1, 0),
+    "defocus2": sgd(g*5, 0),
 
     "bias": sgd(g*3, 0),
     "cold_mask_shift": sgd(g*1, 0),
@@ -245,7 +245,7 @@ things = {
     "cold_mask_distortion": sgd(g*3, 0),
 
     "occulter_radius": sgd(g*1., 0),
-    "occulter_ellipticity": sgd(g*3, 300),
+    # "occulter_ellipticity": sgd(g*3, 300),
     # "occulter_glint": sgd(g*15, 400),
     # "occulter_glint_width": sgd(g*5, 600),   # smaller: width and amplitude trade off (ring area ~ g w)
 
