@@ -473,12 +473,14 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
     amp_klip  : file of log-amplitude modes (mean, modes) for a "primary_amp_klip" layer.
     n_nodes   : None -> propagate every wavelength. int k -> Hermite-interpolate the PSF between k knot wavelengths
                 (spectra.hermite_propagate; ~9 knots on-axis for ~2e-4 accuracy, independent of the fine grid).
+    pad       : model the PSF `pad` detector pixels wider on each side than psf_npixels, for a
+                NICMOSDetector(oversample, psf_npixels, pad=pad), which crops it back after resampling.
     """
     wl_batch: int | None = eqx.field(static=True)
     remat: bool = eqx.field(static=True)
     n_nodes: int | None = eqx.field(static=True)
 
-    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., turboklip=None, amp_klip=None, wl_batch=None, remat=False, amplitude=False, n_nodes=None):
+    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., turboklip=None, amp_klip=None, wl_batch=None, remat=False, amplitude=False, n_nodes=None, pad=0):
         diameter = 3.
         layers = [
             ("primary",HSTMainAperture(transformation=DistortedCoordTransform(rotation=np.pi/4), softening=5)),
@@ -537,7 +539,7 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
 
             ("cold_mask_tilt", dl.Tilt(angles=(0.,0.))),
             
-            ("prop1", dl.MFT(psf_npixels*oversample, focal_length=45.7*2.4, pixel_scale=40e-6/oversample)),
+            ("prop1", dl.MFT((psf_npixels + 2*pad)*oversample, focal_length=45.7*2.4, pixel_scale=40e-6/oversample)),
         ]
 
         super().__init__(wf_npixels, diameter, layers)
@@ -660,11 +662,11 @@ class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
     (incl. "prop1" for the final propagation, so fnumber sets its focal length). The occulter is a
     FresnelFastObstruction (defocus1/2 are its "occulter.defocus1/2") around an EllipticalOcculter
     (occulter_ellipticity = (e1, e2), not occulter_coeffs).
-    amplitude, turboklip, amp_klip, n_nodes : as NICMOSCoronagraph.
+    amplitude, turboklip, amp_klip, n_nodes, pad : as NICMOSCoronagraph.
     """
     n_nodes: int | None = eqx.field(static=True)
 
-    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., turboklip=None, amp_klip=None, amplitude=False, n_nodes=None):
+    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., turboklip=None, amp_klip=None, amplitude=False, n_nodes=None, pad=0):
         diameter = 3.
         layers = [
             ("primary",HSTMainAperture(transformation=DistortedCoordTransform(rotation=np.pi/4), softening=2)),
@@ -712,7 +714,7 @@ class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
                     ("ThinLens", dl.ABCDConjugatePlane(45.7*2.4)),
                     ("FreeSpace", dl.ABCDFreeSpace(0.)),
                 ],
-                dl.CoordSpec(n=psf_npixels*oversample, d=40e-6/oversample)
+                dl.CoordSpec(n=(psf_npixels + 2*pad)*oversample, d=40e-6/oversample)
             )),
         ]
 

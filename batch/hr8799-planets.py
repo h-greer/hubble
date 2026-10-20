@@ -54,6 +54,7 @@ os.makedirs(out, exist_ok=True)
 wf_wid = 512
 wid = 64
 oversample = 4
+pad = 2      # model 2 extra detector pixels on each side, cropped after resampling (see NICMOSDetector)
 
 nwavels = 200
 npoly=8
@@ -63,10 +64,10 @@ n_zernikes = 50
 
 # Fresnel occulter (defocus1/2 at the occulter, defocus3 at the detector), elliptical occulter with an edge glint ring;
 # the PSF is Hermite-interpolated between 20 knot wavelengths across the 200-wavelength spectrum. No pupil amplitude map
-optics = NICMOSFresnelCoronagraph(wf_wid, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, n_nodes=20)
+optics = NICMOSFresnelCoronagraph(wf_wid, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, n_nodes=20, pad=pad)
 # optics = NICMOSFresnelCoronagraph(wf_wid, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, n_nodes=20, amplitude=True)
 
-detector = NICMOSDetector(oversample, wid)
+detector = NICMOSDetector(oversample, wid, pad=pad)
 
 vects = np.load(f"../data/iterative_spectrum_basis_F160W_{nwavels}.npy")[:,:npoly]
 assert vects.shape == (nwavels, npoly)

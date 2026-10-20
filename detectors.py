@@ -22,7 +22,7 @@ def interp(image, knot_coords, sample_coords, method="linear", fill=0.0):
 class Resample(dl.layers.detector_layers.DetectorLayer):
     """Resamples the oversampled PSF through a rotation, an anisotropy and a polynomial distortion
     (dl.DistortedCoords; its linear terms duplicate the rotation, anisotropy and plate scale and are kept at zero by
-    ModelFit). Coordinates span [-1, 1] across the image, so an order-k term's coefficient is its shift at the edge
+    ModelFit). Coordinates span [-1, 1] across the (padded, see NICMOSDetector) image, so an order-k term's coefficient is its shift at the edge
     in units of the half-width (0.01 = 0.4 detector px for an 80 px crop). The map takes detector coordinates to
     model-image coordinates; the image is sampled there and scaled by |det J| of the map, which conserves flux."""
     rotation: float
@@ -52,13 +52,16 @@ class Resample(dl.layers.detector_layers.DetectorLayer):
 
 
 class NICMOSDetector(dl.LayeredDetector):
-    def __init__(self: dl.LayeredDetector, oversample, wid):
-        super().__init__(
-            [
-                #("pixel_response",dl.layers.ApplyPixelResponse(np.ones((wid*oversample,wid*oversample)))),
-                # ("jitter", dl.layers.ApplyJitter(sigma=7/43*oversample)),
-                ("resample", Resample(anisotropy=1.)),
-                ("downsample", dl.layers.Downsample(oversample)),
-                ("bias", dl.layers.AddConstant(value=0.0)),
-            ]
-        )
+    """pad : the optics model a PSF `pad` detector pixels wider on each side than the data (psf_npixels = wid + 2 pad),
+    so Resample never samples beyond the modelled image (it zero-fills there); Resize crops back to wid at the end."""
+    def __init__(self: dl.LayeredDetector, oversample, wid, pad=0):
+        layers = [
+            #("pixel_response",dl.layers.ApplyPixelResponse(np.ones((wid*oversample,wid*oversample)))),
+            # ("jitter", dl.layers.ApplyJitter(sigma=7/43*oversample)),
+            ("resample", Resample(anisotropy=1.)),
+            ("downsample", dl.layers.Downsample(oversample)),
+            ("bias", dl.layers.AddConstant(value=0.0)),
+        ]
+        if pad:
+            layers.append(("crop", dl.layers.Resize(wid)))
+        super().__init__(layers)
