@@ -185,9 +185,10 @@ model_single = set_array(NICMOSModel(exposures_single, params, optics, detector)
 params = ModelParams(params)
 
 # %%
-# Initial star flux. The image is linear in the star's spectrum coefficients, so scale them by the weighted
-# least-squares amplitude of the star's image against the data minus the (unchanged) initial disc, over the unmasked
-# pixels of every exposure (the spectrum is keyed by target, so one amplitude is shared by all exposures)
+# Initial star flux. The image is linear in the star's spectrum coefficients, so scale them to match the total flux of
+# the data minus the (unchanged) initial disc over the unmasked pixels of every exposure (the spectrum is keyed by
+# target, so one amplitude is shared by all exposures). Not a chi^2 fit: with the initial (wrong) speckle pattern the
+# 1/err^2 weights favour the faint outer pixels and give ~x1.8 where the flux needs ~x5
 render = eqx.filter_jit(lambda m, e: e.fit(m, e))
 
 def images(p):
@@ -198,9 +199,8 @@ p0 = params.params
 star = images(p0 | {"resolved": jax.tree.map(lambda r: np.full_like(r, -30.), p0["resolved"])})   # disc off
 disc = images(p0 | {"spectrum": jax.tree.map(np.zeros_like, p0["spectrum"])})                      # star off (eps flux)
 
-w = [np.where(e.bad, 0., 1/e.err**2) for e in exposures_single]
-dot = lambda a, b: sum(np.nansum(wi*ai*bi) for wi, ai, bi in zip(w, a, b))
-c_star = dot(star, [np.nan_to_num(e.data) - d for e, d in zip(exposures_single, disc)]) / dot(star, star)
+c_star = sum(np.nansum(np.where(e.bad, 0., e.data - d)) for e, d in zip(exposures_single, disc)) / \
+         sum(np.nansum(np.where(e.bad, 0., s)) for e, s in zip(exposures_single, star))
 print(f"initial star flux scaling: x{float(c_star):.3g}")
 
 params = ModelParams(p0 | {"spectrum": jax.tree.map(lambda s: s*c_star, p0["spectrum"])})
