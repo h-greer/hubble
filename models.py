@@ -598,8 +598,8 @@ class InterpolatedResolvedSource(dl.sources.Source):
 
     def model(self, optics, return_wf=False, return_psf=False):
         final = optics.layers["prop1"]
-        N, d = (final.spec.n, final.spec.d) if hasattr(final, "spec") else (final.npixels, final.pixel_scale)
-        ps = d / final.focal_length   # output grid, radians / pixel
+        N, dx = (final.spec.n, final.spec.d) if hasattr(final, "spec") else (final.npixels, final.pixel_scale)
+        ps = dx / final.focal_length   # output grid, radians / pixel
         wid = self.distribution.shape[0]
         R, TH = dlu.pixel_coords(wid, pixel_scale=self.pitch, polar=True)
         TH = TH + self.roll
@@ -622,7 +622,7 @@ class InterpolatedResolvedSource(dl.sources.Source):
             image += np.sum(jax.lax.map(self._anchor_image(optics, pos[outer], d[outer], N, ps),
                                         (self.anchors(), W), batch_size=self.batch_size), axis=0)
         if return_psf:
-            return dl.PSF(image, d)
+            return dl.PSF(image, dx)
         return image
 
     def _anchor_image(self, optics, pos, d, N, ps):
