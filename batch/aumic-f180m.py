@@ -185,6 +185,27 @@ model_single = set_array(NICMOSModel(exposures_single, params, optics, detector)
 params = ModelParams(params)
 
 # %%
+# Initial star flux. The image is linear in the star's spectrum coefficients, so scale them by the weighted
+# least-squares amplitude of the star's image against the data minus the (unchanged) initial disc, over the unmasked
+# pixels of every exposure (the spectrum is keyed by target, so one amplitude is shared by all exposures)
+render = eqx.filter_jit(lambda m, e: e.fit(m, e))
+
+def images(p):
+    m = ModelParams(p).inject(model_single)
+    return [render(m, e) for e in exposures_single]
+
+p0 = params.params
+star = images(p0 | {"resolved": jax.tree.map(lambda r: np.full_like(r, -30.), p0["resolved"])})   # disc off
+disc = images(p0 | {"spectrum": jax.tree.map(np.zeros_like, p0["spectrum"])})                      # star off (eps flux)
+
+w = [np.where(e.bad, 0., 1/e.err**2) for e in exposures_single]
+dot = lambda a, b: sum(np.nansum(wi*ai*bi) for wi, ai, bi in zip(w, a, b))
+c_star = dot(star, [np.nan_to_num(e.data) - d for e, d in zip(exposures_single, disc)]) / dot(star, star)
+print(f"initial star flux scaling: x{float(c_star):.3g}")
+
+params = ModelParams(p0 | {"spectrum": jax.tree.map(lambda s: s*c_star, p0["spectrum"])})
+
+# %%
 plot_comparison_detailed(model_single, params, exposures_single, percentile=99, wf_size=wf_wid, save=f"{out}/initial-comparison")
 
 # %%
