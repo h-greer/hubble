@@ -57,7 +57,7 @@ oversample = 4
 pad = 2      # model 2 extra detector pixels on each side, cropped after resampling (see NICMOSDetector)
 
 nwavels = 200
-npoly=3
+npoly=1
 
 # The 64 px crop (centre detector pixel (75, 212)) holds the July 2004 hole (TARSIAFX/Y ~ (74.96, 211.66)) within ~0.5 px
 # of its centre, so its farthest edges are ~32.5 px ~ 2.46" from the star. Fourier mode k of primary_opd puts a speckle at
