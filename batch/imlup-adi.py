@@ -71,7 +71,9 @@ regulariser = np.array([0.02, 0.4])
 
 # Fresnel occulter (defocus1/2 at the occulter, defocus3 at the detector), elliptical occulter with an edge glint ring;
 # the PSF is Hermite-interpolated between 20 knot wavelengths across the 200-wavelength spectrum. No pupil amplitude map.
-# The resolved disc (CursedResolvedSource, one wavelength) is propagated directly, not through the Hermite knots
+# The resolved disc (one wavelength, propagated directly, not through the Hermite knots) is an InterpolatedResolvedSource:
+# exact PSFs within 0.6" (148 pixels) and 36 anchor PSFs beyond (rings 0.6-2.2", 6 angles), 184 renders instead of
+# 60^2 = 3600, ~0.4% rms of the exact image outside the hole mask on this geometry
 optics = NICMOSFresnelCoronagraph(wf_wid, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, n_nodes=20, pad=pad)
 # optics = NICMOSFresnelCoronagraph(wf_wid, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, n_nodes=20, amplitude=True, pad=pad)
 
@@ -97,7 +99,8 @@ class ResolvedFit(PointResolvedFit):
 # Two rolls (visits 11 and 12, ORIENTAT -121.6 and -151.5 deg), two exposures each, so the per-visit wavefront is
 # shared by two exposures; the spectrum and disc are keyed by target, so all exposures share them
 exposures_single = [
-    exposure_from_file(ddir + f'{root}_m_clc_calf.fits', ResolvedFit(spectrum_basis, "F160W", wid=resolved_wid, regulariser=regulariser),
+    exposure_from_file(ddir + f'{root}_m_clc_calf.fits', ResolvedFit(spectrum_basis, "F160W", wid=resolved_wid, regulariser=regulariser,
+                                                                     resolved_source="interp"),
                        crop=wid, extra_bad=None, hole_margin=0.3)
     for root in
         [
