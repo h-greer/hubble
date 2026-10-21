@@ -530,10 +530,13 @@ class InterpolatedResolvedSource(dl.sources.Source):
     Hybrid: pixels with radius < exact_radius (arcsec) are propagated exactly, one PSF each, because the PSF
     varies too fast there for interpolation. Radius does not depend on roll, so these pixels are a static set;
     the anchor rings then start at exact_radius (no centre anchor). exact_radius=0 gives pure interpolation.
+    With the defaults on a 64 px (+2 pad) Fresnel crop: 0.46% rms of the exact image outside a 0.6" hole mask for
+    an edge-on disc, with 148 exact + 36 anchor renders. Anchors near the window edge are clipped and lose flux
+    when shifted inward, so keep the outer ring ~0.35" inside the edge; the PSF varies too fast inside ~0.6".
 
-    Assumes the last layer of `optics` is the MFT onto the detector grid (NICMOSCoronagraph's "prop1"), whose
-    npixels / pixel_scale / focal_length define the grid; a source offset (x, y) moves the PSF by (y, x)
-    pixels about the grid centre (N - 1) / 2. Source positions are rolled as in CursedResolvedSource.
+    Assumes the last layer of `optics`, "prop1", propagates onto the detector grid: a dl.MFT (NICMOSCoronagraph;
+    npixels / pixel_scale / focal_length) or a dl.MFTPropagator (NICMOSFresnelCoronagraph; spec.n / spec.d /
+    focal_length, including any pad); a source offset (x, y) moves the PSF by (y, x) pixels about the grid centre (N - 1) / 2. Source positions are rolled as in CursedResolvedSource.
     """
     distribution: Array
     position: Array
@@ -547,7 +550,7 @@ class InterpolatedResolvedSource(dl.sources.Source):
     exact_radius: float = eqx.field(static=True)
 
     def __init__(self, distribution, pitch, position=np.zeros(2), roll=0.,
-                 anchor_radii=(0.1, 0.2, 0.3, 0.4, 0.5, 0.65, 0.85, 1.1, 1.5, 2.2), n_angular=8,
+                 anchor_radii=(0.1, 0.2, 0.3, 0.4, 0.5, 0.7, 0.85, 1.1, 1.6, 2.2), n_angular=6,
                  include_centre=True, grad_optics=False, batch_size=4, exact_radius=0.6, **kwargs):
         self.distribution = distribution
         self.pitch = float(pitch)
@@ -595,7 +598,8 @@ class InterpolatedResolvedSource(dl.sources.Source):
 
     def model(self, optics, return_wf=False, return_psf=False):
         final = optics.layers["prop1"]
-        N, ps = final.npixels, final.pixel_scale / final.focal_length   # output grid, radians / pixel
+        N, d = (final.spec.n, final.spec.d) if hasattr(final, "spec") else (final.npixels, final.pixel_scale)
+        ps = d / final.focal_length   # output grid, radians / pixel
         wid = self.distribution.shape[0]
         R, TH = dlu.pixel_coords(wid, pixel_scale=self.pitch, polar=True)
         TH = TH + self.roll
@@ -618,7 +622,7 @@ class InterpolatedResolvedSource(dl.sources.Source):
             image += np.sum(jax.lax.map(self._anchor_image(optics, pos[outer], d[outer], N, ps),
                                         (self.anchors(), W), batch_size=self.batch_size), axis=0)
         if return_psf:
-            return dl.PSF(image, final.pixel_scale)
+            return dl.PSF(image, d)
         return image
 
     def _anchor_image(self, optics, pos, d, N, ps):
