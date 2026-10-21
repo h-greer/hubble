@@ -22,29 +22,11 @@ def get_filter(file):
     return final
 
 
-filter_files = {
-    'F170M': get_filter("../data/HST_NICMOS1.F170M.dat")[120:-180],
-    'F095N': get_filter("../data/HST_NICMOS1.F095N.dat"),
-    'F145M': get_filter("../data/HST_NICMOS1.F145M.dat"),
-    'F165M': get_filter("../data/HST_NICMOS1.F165M.dat"),
-    'F190N': get_filter("../data/HST_NICMOS1.F190N.dat")[40:220],
-    'F164N': get_filter("../data/HST_NICMOS1.F164N.dat")[60:220],
-    'F166N': get_filter("../data/HST_NICMOS1.F166N.dat")[60:220],
-    'F108N': get_filter("../data/HST_NICMOS1.F108N.dat")[40:140],
-    'F187N': get_filter("../data/HST_NICMOS1.F187N.dat")[50:210],
-    'F090M': get_filter("../data/HST_NICMOS1.F090M.dat"),
-    'F110W': get_filter("../data/HST_NICMOS1.F110W.dat"),#[80:-150],
-    'F110M': get_filter("../data/HST_NICMOS1.F110M.dat"),
-    'F160W': get_filter("../data/HST_NICMOS1.F160W.dat"),
-    'POL0S': get_filter("../data/HST_NICMOS1.POL0S.dat"),
-    'POL240S': get_filter("../data/HST_NICMOS1.POL240S.dat"),
-    'POL120S': get_filter("../data/HST_NICMOS1.POL120S.dat"),
-
-    'F215N': get_filter("../data/HST_NICMOS2.F215N.dat"),
-    'F171M': get_filter("../data/HST_NICMOS2.F171M.dat"),
-    'F207M': get_filter("../data/HST_NICMOS2.F207M.dat"),
-    'F180M': get_filter("../data/HST_NICMOS2.F180M.dat"),
-}
+# The complete NIC2 filter set, from SVO (HST/NICMOS2.<filter>). Unlike the NIC1 curves used previously,
+# none have long low-throughput wings (all exceed 1e-3 of peak within ~50 rows of each end), so none are trimmed
+NIC2_FILTERS = ['F110W', 'F160W', 'F165M', 'F171M', 'F180M', 'F187N', 'F187W', 'F190N', 'F204M', 'F205W',
+                'F207M', 'F212N', 'F215N', 'F216N', 'F222M', 'F237M', 'POL0L', 'POL120L', 'POL240L']
+filter_files = {f: get_filter(f"../data/HST_NICMOS2.{f}.dat") for f in NIC2_FILTERS}
 
 def filter_integrate(wl_array, throughput_array, nwavels, norm=False):
     
