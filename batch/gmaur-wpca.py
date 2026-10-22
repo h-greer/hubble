@@ -96,7 +96,12 @@ exposures_single = [
                        WavefrontPCAResolvedFit(spectrum_basis, filt, wid=resolved_wid, regulariser=regulariser,
                                                resolved_source="interp"),
                        crop=wid, extra_bad=None, hole_margin=0.3)
-    for root in ["n9p511wzq", "n9p511x0q", "n9p510kxq", "n9p510kyq"]
+    for root in [
+        "n9p511wzq", 
+        # "n9p511x0q", 
+        "n9p510kxq", 
+        # "n9p510kyq"
+        ]
 ]
 
 # %%
