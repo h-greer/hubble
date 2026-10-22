@@ -49,7 +49,7 @@ def plot_params(models, groups, xw = 4, save=False):
         fig.savefig(f"{save}.png")
 
 
-def plot_comparison(model, params, exposures, quadrature=False, save=False, graticule=False, percentile=100, wf_size=512, klip=False):
+def plot_comparison(model, params, exposures, quadrature=False, save=False, graticule=False, percentile=100, wf_size=512):
     """2x3 diagnostic per exposure: observed and recovered image, pupil and cold mask OPD, residual
     z-score map and its histogram against a Gaussian."""
     model = params.inject(model)
@@ -73,8 +73,8 @@ def plot_comparison(model, params, exposures, quadrature=False, save=False, grat
 
         # OPDs in nm, blanked where the aperture does not transmit
         primary_opd = optics.primary_opd.eval_basis() + optics.primary_low.eval_basis(coords)
-        if klip:
-            primary_opd += optics.primary_klip.eval_basis()
+        if "primary_wpca" in optics.layers:
+            primary_opd += optics.primary_wpca.eval_basis()
         pupils = [
             (axs[0, 1], optics.primary, primary_opd, "Recovered Pupil"),
             (axs[1, 1], optics.cold_mask, optics.cold_mask_opd.eval_basis(coords), "Recovered Cold Mask"),
@@ -118,7 +118,7 @@ def _signed_panel(ax, im, title, percentile=100, label=None, bad='k'):
     _panel(ax, im, title, 'bwr', -lim, lim, label, bad)
 
 
-def plot_comparison_detailed(model, params, exposures, quadrature=False, save=False, percentile=100, wf_size=512, klip=False):
+def plot_comparison_detailed(model, params, exposures, quadrature=False, save=False, percentile=100, wf_size=512):
     """3x3 diagnostic per exposure. Rows: observed / recovered image and occulter; pupil, cold mask
     and the combined pupil the beam sees; the recovered primary amplitude (percent, blank without a
     primary_amp layer) then residuals in z-score and DN/s."""
@@ -141,8 +141,8 @@ def plot_comparison_detailed(model, params, exposures, quadrature=False, save=Fa
         primary = optics.primary.transmission(coords, 2.4/wf_size)
         cold_mask = optics.cold_mask.transmission(coords, 2.4/wf_size)
         primary_opd = optics.primary_opd.eval_basis() + optics.primary_low.eval_basis(coords)
-        if klip:
-            primary_opd += optics.primary_klip.eval_basis()
+        if "primary_wpca" in optics.layers:
+            primary_opd += optics.primary_wpca.eval_basis()
         cold_mask_opd = optics.cold_mask_opd.eval_basis(coords)
 
         pupils = [
@@ -154,7 +154,7 @@ def plot_comparison_detailed(model, params, exposures, quadrature=False, save=Fa
             _signed_panel(ax, np.where(support < .5, np.nan, opd*1e9), title, label="OPD (nm)")
 
         # Fractional amplitude variation on the primary, summed over whichever amplitude screens the optics has
-        amp_layers = [optics.layers[k] for k in ("primary_amp", "primary_amp_klip") if k in optics.layers]
+        amp_layers = [optics.layers[k] for k in ("primary_amp", "primary_amp_wpca") if k in optics.layers]
         if amp_layers:
             amp = 100*(np.exp(sum(layer.eval_basis() for layer in amp_layers)) - 1)
             _signed_panel(axs[2, 0], np.where(primary < .5, np.nan, amp), "Recovered Amplitude",

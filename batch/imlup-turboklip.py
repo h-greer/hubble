@@ -57,7 +57,7 @@ n_zernikes = 50
 
 resolved_wid = 60
 
-optics = NICMOSCoronagraph(512, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, turboklip="../data/turboklip.npz")
+optics = NICMOSCoronagraph(512, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, wavefront_pca="../data/turboklip.npz")
 
 detector = NICMOSDetector(oversample, wid)
 
@@ -83,7 +83,7 @@ exposures_single = [
 
 params = {
     "spectrum": {},
-    "primary_klip": {},
+    "primary_wpca": {},
     "primary_low": {},
     "primary_tilt": {},
     "cold_mask_tilt": {},
@@ -98,7 +98,7 @@ for idx, exp in enumerate(exposures_single):
     params["primary_tilt"][exp.fit.get_key(exp, "primary_tilt")] = np.array([-0.75, 0.05])*0.075
     params["cold_mask_tilt"][exp.fit.get_key(exp, "cold_mask_tilt")] = hole_tilt(exp)
 
-    params["primary_klip"][exp.fit.get_key(exp, "primary_klip")] = np.zeros(7)
+    params["primary_wpca"][exp.fit.get_key(exp, "primary_wpca")] = np.zeros(7)
     params["primary_low"][exp.fit.get_key(exp, "primary_low")] = np.zeros(n_zernikes)
 
     params["bias"][exp.fit.get_key(exp, "bias")] = 0.
@@ -131,7 +131,7 @@ things_start = {
 
     "primary_low": sgd(g*0.05, 70),
     "cold_mask_opd": sgd(g*1., 70),
-    "primary_klip": sgd(g*2, 100),
+    "primary_wpca": sgd(g*2, 100),
 
     "resolved": adam(3e-2, 150),
 }
@@ -148,7 +148,7 @@ losses, params_history = optimise_new_resolved(
 
 # %%
 plot_params(params_history, list(things_start.keys()), xw = 3, save="imlup-params")
-plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="imlup-comparison", percentile=99, klip=True)
+plot_comparison(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False, save="imlup-comparison", percentile=99)
 
 # %%
 params_history[-1]

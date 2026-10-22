@@ -469,8 +469,8 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
                   (sequential; with remat=True the reverse pass only holds k wavelengths of residuals).
     remat    : jax.checkpoint the per-wavelength propagation (only useful together with wl_batch).
     amplitude : add a Fourier log-amplitude screen "primary_amp" after primary_opd.
-    turboklip : file of OPD modes (mean, modes) for a "primary_klip" layer.
-    amp_klip  : file of log-amplitude modes (mean, modes) for a "primary_amp_klip" layer.
+    wavefront_pca : file of OPD modes (mean, modes) for a "primary_wpca" layer (the wavefront PCA basis).
+    amplitude_pca : file of log-amplitude modes (mean, modes) for a "primary_amp_wpca" layer.
     n_nodes   : None -> propagate every wavelength. int k -> Hermite-interpolate the PSF between k knot wavelengths
                 (spectra.hermite_propagate; ~9 knots on-axis for ~2e-4 accuracy, independent of the fine grid).
     pad       : model the PSF `pad` detector pixels wider on each side than psf_npixels, for a
@@ -480,7 +480,7 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
     remat: bool = eqx.field(static=True)
     n_nodes: int | None = eqx.field(static=True)
 
-    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., turboklip=None, amp_klip=None, wl_batch=None, remat=False, amplitude=False, n_nodes=None, pad=0):
+    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., wavefront_pca=None, amplitude_pca=None, wl_batch=None, remat=False, amplitude=False, n_nodes=None, pad=0):
         diameter = 3.
         layers = [
             ("primary",HSTMainAperture(transformation=DistortedCoordTransform(rotation=np.pi/4), softening=5)),
@@ -493,13 +493,13 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
         if amplitude:
             layers += [("primary_amp", FourierAmplitude(wf_npixels, n_modes=n_modes))]
 
-        if turboklip:
+        if wavefront_pca:
             layers += [
-                ("primary_klip", TransformedFourierBasis(wf_npixels, n_modes, turboklip)),
+                ("primary_wpca", TransformedFourierBasis(wf_npixels, n_modes, wavefront_pca)),
             ]
 
-        if amp_klip:
-            layers += [("primary_amp_klip", TransformedFourierAmplitude(wf_npixels, n_modes, amp_klip))]
+        if amplitude_pca:
+            layers += [("primary_amp_wpca", TransformedFourierAmplitude(wf_npixels, n_modes, amplitude_pca))]
         
         layers += [
             ("primary_low", ScanAberratedAperture(
@@ -662,11 +662,11 @@ class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
     (incl. "prop1" for the final propagation, so fnumber sets its focal length). The occulter is a
     FresnelFastObstruction (defocus1/2 are its "occulter.defocus1/2") around an EllipticalOcculter
     (occulter_ellipticity = (e1, e2), not occulter_coeffs).
-    amplitude, turboklip, amp_klip, n_nodes, pad : as NICMOSCoronagraph.
+    amplitude, wavefront_pca, amplitude_pca, n_nodes, pad : as NICMOSCoronagraph.
     """
     n_nodes: int | None = eqx.field(static=True)
 
-    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., turboklip=None, amp_klip=None, amplitude=False, n_nodes=None, pad=0):
+    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., wavefront_pca=None, amplitude_pca=None, amplitude=False, n_nodes=None, pad=0):
         diameter = 3.
         layers = [
             ("primary",HSTMainAperture(transformation=DistortedCoordTransform(rotation=np.pi/4), softening=2)),
@@ -679,13 +679,13 @@ class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
         if amplitude:
             layers += [("primary_amp", FourierAmplitude(wf_npixels, n_modes=n_modes))]
 
-        if turboklip:
+        if wavefront_pca:
             layers += [
-                ("primary_klip", TransformedFourierBasis(wf_npixels, n_modes, turboklip)),
+                ("primary_wpca", TransformedFourierBasis(wf_npixels, n_modes, wavefront_pca)),
             ]
 
-        if amp_klip:
-            layers += [("primary_amp_klip", TransformedFourierAmplitude(wf_npixels, n_modes, amp_klip))]
+        if amplitude_pca:
+            layers += [("primary_amp_wpca", TransformedFourierAmplitude(wf_npixels, n_modes, amplitude_pca))]
 
         layers += [
             ("primary_low", ScanAberratedAperture(

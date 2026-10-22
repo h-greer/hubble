@@ -249,8 +249,8 @@ def _no_piston(x):
 OPTICS_PARAMS = [
     ("primary_opd", ["primary_opd.coefficients"], lambda x: _no_piston(_nm(x))),
     ("primary_amp", ["primary_amp.coefficients"], lambda x: _no_piston(x*AMP_UNIT)),
-    ("primary_klip", ["primary_klip.coefficients"], lambda x: x),
-    ("primary_amp_klip", ["primary_amp_klip.coefficients"], lambda x: x),
+    ("primary_wpca", ["primary_wpca.coefficients"], lambda x: x),
+    ("primary_amp_wpca", ["primary_amp_wpca.coefficients"], lambda x: x),
     ("primary_low", ["primary_low.coefficients"], _nm),
     ("primary_tilt", ["primary_tilt.angles"], dlu.arcsec2rad),
     ("cold_mask_tilt", ["cold_mask_tilt.angles"], dlu.arcsec2rad),
@@ -302,9 +302,9 @@ class ModelFit(zdx.Base):
     # Parameter -> how its leaves are keyed in the model params: "exposure" (one per exposure),
     # "target" (one per target and filter) or "global" (shared by all exposures). Subclasses extend it.
     PARAM_KEYS = {
-        "primary_low": "exposure", "primary_tilt": "exposure", "primary_klip": "exposure", "bias": "exposure",
+        "primary_low": "exposure", "primary_tilt": "exposure", "primary_wpca": "exposure", "bias": "exposure",
         "defocus1": "exposure", "defocus2": "exposure",
-        "primary_amp_klip": "global",
+        "primary_amp_wpca": "global",
         "primary_opd": "exposure", "primary_amp": "global", "primary_rot": "global",
         "primary_shear": "global",
         "cold_mask_opd": "global", "cold_mask_tilt": "global", "cold_mask_shift": "global",
