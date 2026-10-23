@@ -174,13 +174,13 @@ things_start = {
 things = {k: sgd(g*1, 0) for k in things_start} | {
     "bias": sgd(g*3, 0),
     "primary_wpca": sgd(g*5, 0),
-    "resolved": adam(3e-2, 1200),
+    "resolved": adam(3e-2, 0),
 }
 
 # %%
 opt_params = set_array({k: v for k, v in params.params.items() if k in things_start})
 losses, params_history = optimise_new(
-    opt_params, model_single, exposures_single, things_start, 500,
+    opt_params, model_single, exposures_single, things_start, 1000,
     precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
 
 plt.figure(figsize=(10, 10))
@@ -198,7 +198,7 @@ orig_params = params.params | params_history[-1]
 opt_params = set_array({k: orig_params[k] for k in orig_params if k in things})
 
 losses, params_history = optimise_new_resolved(
-    opt_params, model_single, exposures_single, things, 2000,
+    opt_params, model_single, exposures_single, things, 500,
     precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
 
 plt.figure(figsize=(10, 10))
