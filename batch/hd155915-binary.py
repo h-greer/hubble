@@ -12,7 +12,7 @@
 # companion's separation, PA and contrast, marginalised over all fitted parameters (the calibrator optics are fixed,
 # so the errors are conditional on them).
 #
-# Usage: python hd155915-binary.py [rootname ...]   (default: n918b1e5q, one exposure at roll 35.3 deg)
+# Usage: python hd155915-binary.py [rootname ...]   (default: n918b1e5q and n918b2ebq, one 192 s exposure at each roll)
 import sys
 sys.path.insert(0, '..')
 import os
@@ -137,9 +137,11 @@ spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 
 ddir = '../data/NICMOS-LAPL-DD2/LAPL_DATA_DD2/comtemp_flats-DD2/'
 
-# One exposure at one roll by default. The visit: roll 35.3 deg = n918b1e5q, e6q, e7q (192 s), e8q (288 s);
-# roll 65.2 deg = n918b2ebq, ecq, edq (192 s), eeq (288 s)
-roots = sys.argv[1:] or ["n918b1e5q"]
+# One exposure at each roll by default, so B rotates with the sky between them while static speckles do not. The
+# visit: roll 35.3 deg = n918b1e5q, e6q, e7q (192 s), e8q (288 s); roll 65.2 deg = n918b2ebq, ecq, edq (192 s), eeq (288 s).
+# The rolls are separate HST visits, so each gets its own primary_wpca (keyed by visit); the star spectrum and the
+# companion are keyed by target and shared
+roots = sys.argv[1:] or ["n918b1e5q", "n918b2ebq"]
 load = lambda fit: [exposure_from_file(ddir + f'{root}_o_clc_calf.fits', fit, crop=wid, extra_bad=None, hole_margin=0.1)
                     for root in roots]
 exposures = {"binary": load(WavefrontPCABinaryFit(spectrum_basis, "F160W")),
@@ -278,46 +280,62 @@ print("\n".join(lines)); open(f"{out}/model_comparison.txt", "w").write("\n".joi
 
 
 # %%
-# 9-panel comparison per exposure:
-#   data | single-star model | data - single-star model
-#   data | binary model      | data - binary model
-#   data | binary primary only (the binary fit with contrast 0) | data - primary only (B's signal + residual)
-# Stretch as plotting.plot_comparison: columns 1-2 quarter-power with one shared limit, column 3 bwr with one symmetric
-# limit for all rows. Masked pixels black on images, white on residuals. Dashed circle:
-# the 0.3" hole about TARSIAFX/Y; cross: B's fitted offset from the hole centre via the exposure WCS (the star sits
-# within ~1 px of the hole centre, so this marker is approximate)
+# 9-panel comparison per exposure, in the style of notebooks/gl164.ipynb (origin/main, cell 34):
+#   rows: Single | Binary | Binary Primary (the binary fit with contrast 0); columns: Exposure | Model | Residual
+# Images on a 1/8-power stretch with one limit for every image panel; residuals as z-scores on bwr, clipped at the 99th
+# percentile of |z| over all three rows; masked pixels black; horizontal colourbars under the bottom row. Grey
+# crosshairs mark the primary (solid) and the secondary (dashed) at the model's own positions: the sub-pixel peak of
+# each source rendered with the occulter shrunk to nothing.
 mb = results["binary"]["final"].inject(results["binary"]["model"])
 ms = results["single"]["final"].inject(results["single"]["model"])
+
+
+def subpixel_peak(im):
+    j, i = numpy.unravel_index(numpy.nanargmax(im), im.shape)
+    j, i = numpy.clip(j, 1, im.shape[0] - 2), numpy.clip(i, 1, im.shape[1] - 2)
+    f = lambda a0, a1, a2: 0.5*(a0 - a2)/(a0 - 2*a1 + a2)
+    return i + f(im[j, i-1], im[j, i], im[j, i+1]), j + f(im[j-1, i], im[j, i], im[j+1, i])
+
+
+def cross(ax, xy, color, ls, gx=4):
+    ax.vlines(xy[0], xy[1] - gx, xy[1] + gx, color=color, linestyle=ls, lw=3)
+    ax.hlines(xy[1], xy[0] - gx, xy[0] + gx, color=color, linestyle=ls, lw=3)
+
+
+no_occ = lambda m: m.set("occulter_radius", np.asarray(1e-4))
 for e_b, e_s in zip(exposures["binary"], exposures["single"]):
-    data = numpy.where(numpy.asarray(e_b.bad), numpy.nan, numpy.asarray(e_b.data))
-    im_s, im_b = numpy.asarray(render(ms, e_s)), numpy.asarray(render(mb, e_b))
-    im_p = numpy.asarray(render(mb.set(e_b.fit.map_param(e_b, "companion_contrast"), np.asarray(0.)), e_b))
-    rows = [("single star", im_s), ("binary", im_b), ("binary primary only", im_p)]
-    # As plotting.plot_comparison: images on a quarter-power stretch with one colour limit (the max over the data and
-    # every model image), residuals on bwr symmetric about zero; masked pixels black on images, white on residuals
-    stretch = lambda a: numpy.where(numpy.isfinite(data), a, numpy.nan)**0.25
-    smax = max(numpy.nanmax(stretch(data)), *[numpy.nanmax(stretch(m_)) for _, m_ in rows])
-    rmax = numpy.nanpercentile(numpy.abs(numpy.concatenate([(data - m_).ravel() for _, m_ in rows])), 99)
+    mp = mb.set(e_b.fit.map_param(e_b, "companion_contrast"), np.asarray(0.))   # binary fit, primary only
+    prim = numpy.asarray(render(no_occ(mp), e_b))
+    star_b, comp_b = subpixel_peak(prim), subpixel_peak(numpy.asarray(render(no_occ(mb), e_b)) - prim)
+    star_s = subpixel_peak(numpy.asarray(render(no_occ(ms), e_s)))
+    rows = [("Single", numpy.asarray(render(ms, e_s)), [(star_s, "0.45", "-")]),
+            ("Binary", numpy.asarray(render(mb, e_b)), [(star_b, "0.45", "-"), (comp_b, "0.45", "--")]),
+            ("Binary Primary", numpy.asarray(render(mp, e_b)), [(star_b, "0.45", "-"), (comp_b, "0.45", "--")])]
+
+    data = numpy.asarray(e_b.data)
+    cropped_frame = data**0.125
+    ivm = 6e-1
+    vm = max(numpy.nanmax(cropped_frame), *[numpy.nanmax(f_**0.125) for _, f_, _ in rows])
+    resids = [(data - f_)/numpy.asarray(e_b.err) for _, f_, _ in rows]
+    rlim = numpy.nanpercentile(numpy.abs(numpy.concatenate([r_.ravel() for r_ in resids])), 99)
     img_cmap = matplotlib.colormaps["inferno"].copy(); img_cmap.set_bad("k", 1)
-    res_cmap = matplotlib.colormaps["bwr"].copy(); res_cmap.set_bad("w", 1)
-    x0, y0 = CROP_CENTRE[0] - wid//2, CROP_CENTRE[1] - wid//2
-    hx, hy = float(e_b.hdr["TARSIAFX"]) - x0, float(e_b.hdr["TARSIAFY"]) - y0
-    east, north = numpy.asarray(results["binary"]["final"].get(e_b.fit.map_param(e_b, "companion_offset")))
-    sky = e_b.wcs.pixel_to_world(float(e_b.hdr["TARSIAFX"]), float(e_b.hdr["TARSIAFY"]))
-    bx, by = [float(v) for v in e_b.wcs.world_to_pixel(sky.spherical_offsets_by(east*u.arcsec, north*u.arcsec))]
-    bx, by = bx - x0, by - y0
-    fig, axs = plt.subplots(3, 3, figsize=(19, 17), layout="constrained")
-    for i, (name, m_) in enumerate(rows):
-        for j, (img, title, kw) in enumerate([(stretch(data), "data", dict(cmap=img_cmap, vmin=0, vmax=smax)),
-                                              (stretch(m_), name, dict(cmap=img_cmap, vmin=0, vmax=smax)),
-                                              (numpy.where(numpy.isfinite(data), data - m_, numpy.nan), f"data - {name}",
-                                               dict(cmap=res_cmap, vmin=-rmax, vmax=rmax))]):
-            a = axs[i, j]; h = a.imshow(img, **kw); a.set_title(title, fontsize=18); a.set_xticks([]); a.set_yticks([])
-            a.add_patch(plt.Circle((hx, hy), 0.3/0.0756, fill=False, color="w" if j < 2 else "k", lw=1, ls="--"))
-            a.plot(bx, by, "+", color="c" if j < 2 else "g", ms=14, mew=2)
-            if i == 2:
-                fig.colorbar(h, ax=axs[:, j], shrink=0.6, location="bottom", label="(DN/s)$^{1/4}$" if j < 2 else "DN/s")
-    fig.suptitle(f"HD 155915 {e_b.key} (ORIENTAT {e_b.orient:.1f}): single star vs binary", fontsize=20)
+    res_cmap = matplotlib.colormaps["bwr"].copy(); res_cmap.set_bad("k", 1)
+
+    fig, axs = plt.subplots(3, 3, figsize=(20, 20), layout="compressed")
+    for i, ((name, f_, marks), r_) in enumerate(zip(rows, resids)):
+        cd = axs[i, 0].imshow(cropped_frame, vmin=ivm, vmax=vm, cmap=img_cmap)
+        tl = axs[i, 1].imshow(f_**0.125, vmin=ivm, vmax=vm, cmap=img_cmap)
+        rs = axs[i, 2].imshow(r_, cmap=res_cmap, vmin=-rlim, vmax=rlim)
+        axs[i, 0].set_ylabel(name)
+        for a in axs[i]:
+            for xy, c, ls in marks:
+                cross(a, xy, c, ls)
+            a.set_xticks([]); a.set_yticks([])
+    plt.colorbar(cd, ax=axs[2, 0], orientation="horizontal", label=r"$\sqrt[8]{\text{ADU}}$")
+    plt.colorbar(tl, ax=axs[2, 1], orientation="horizontal", label=r"$\sqrt[8]{\text{ADU}}$")
+    plt.colorbar(rs, ax=axs[2, 2], orientation="horizontal", label="z-score")
+    for j, lab in enumerate(["Exposure", "Model", "Residual"]):
+        axs[0, j].xaxis.set_label_position("top"); axs[0, j].set_xlabel(lab)
     fig.savefig(f"{out}/model_comparison_{e_b.key}.png", dpi=72); plt.close(fig)
 
 
