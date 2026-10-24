@@ -399,3 +399,25 @@ for exp, r in zip(exposures_single, visit):
 np.save(f"{out}/diagnostics.npy", diag)
 np.save(f"{out}/losses.npy", np.asarray(losses))
 np.save(f"{out}/losses_stage1.npy", np.asarray(losses_start))
+
+# %%
+# optimistix L-BFGS polish (fitting.optimise_optimistix) of the stage-2 fit, over the same fitted parameters. The
+# preconditioner is stage 2's (gn_probe), recomputed at the stage-2 point: the per-exposure primary_opd makes exact
+# Gauss-Newton columns expensive here. Stops at steps below atol (~sigma units) or after n_optx steps; a blow-up or a
+# worse end point falls back to the stage-2 values. Outputs carry an "optx" suffix; params_amp.npy and
+# diagnostics.npy above stay the stage-2 results.
+n_optx = 500
+x3, optx_info = optimise_optimistix(params_history[-1], model, exposures_single, max_steps=n_optx, return_info=True,
+                                    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
+final_optx = ModelParams(x3)
+model_optx = final_optx.inject(model_single)
+np.save(f"{out}/params_amp_optx.npy", x3)
+plot_comparison_detailed(model, final_optx, exposures_single, quadrature=False, wf_size=wf_wid, percentile=99, save=f"{out}/comparison-optx")
+
+lines = [f"optimistix: {optx_info['result']} after {optx_info['num_steps']} steps; loss {optx_info['loss_start']:.1f} -> "
+         f"{optx_info['loss_end']:.1f} (stage 2 final {losses[-1]:.1f})" + (f"; frozen {optx_info['frozen']}" if optx_info["frozen"] else "")]
+for exp, d in zip(exposures_single, diag["exposures"]):
+    z = np.where(exp.bad, np.nan, (exp.data - exp.fit(model_optx, exp))/exp.err)
+    np.save(f"{out}/z_optx_{exp.key}.npy", z)
+    lines.append(f"{exp.key}: chi2_red {stats(z)['chi2_red']:.3f} (stage 2 {d['all']['chi2_red']:.3f})")
+print("\n".join(lines)); open(f"{out}/optx.txt", "w").write("\n".join(lines) + "\n")
