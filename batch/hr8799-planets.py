@@ -387,7 +387,7 @@ np.save(f"{out}/params_amp.npy", params_history[-1])
 # preconditioner is stage 2's (gn_probe), recomputed at the stage-2 point: the per-exposure primary_opd makes exact
 # Gauss-Newton columns expensive here. Stops at steps below atol (~sigma units) or after n_optx steps; a blow-up or a
 # worse end point falls back to the stage-2 values. Outputs carry an "optx" suffix, separate from those above.
-n_optx = 500
+n_optx = 2048
 x2 = params_history[-1]
 model_optx = ModelParams(x2).inject(model_single)
 x3, optx_info = optimise_optimistix(x2, model_optx, exposures_single, max_steps=n_optx, return_info=True,
