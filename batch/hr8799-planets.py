@@ -381,3 +381,32 @@ fig.savefig(f"{out}/spectrum.png")
 # %%
 np.save(f"{out}/params_amp.npy", params_history[-1])
 
+
+# %%
+# optimistix L-BFGS polish (fitting.optimise_optimistix) of the stage-2 fit, over the same fitted parameters. The
+# preconditioner is stage 2's (gn_probe), recomputed at the stage-2 point: the per-exposure primary_opd makes exact
+# Gauss-Newton columns expensive here. Stops at steps below atol (~sigma units) or after n_optx steps; a blow-up or a
+# worse end point falls back to the stage-2 values. Outputs carry an "optx" suffix, separate from those above.
+n_optx = 500
+x2 = params_history[-1]
+model_optx = ModelParams(x2).inject(model_single)
+x3, optx_info = optimise_optimistix(x2, model_optx, exposures_single, max_steps=n_optx, return_info=True,
+                                    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
+final_optx = ModelParams(x3)
+np.save(f"{out}/params_amp_optx.npy", x3)
+plot_comparison_detailed(model_optx, final_optx, exposures_single, quadrature=False, wf_size=wf_wid, percentile=99, save=f"{out}/comparison-optx")
+
+lines = [f"optimistix: {optx_info['result']} after {optx_info['num_steps']} steps; loss {optx_info['loss_start']:.1f} -> "
+         f"{optx_info['loss_end']:.1f} (stage 2 final {losses[-1]:.1f})" + (f"; frozen {optx_info['frozen']}" if optx_info["frozen"] else "")]
+for name, (east, north), flux in zip(planets, final_optx.get(f"planet_offsets.{key}"), final_optx.get(f"planet_fluxes.{key}")):
+    sep, pa = np.hypot(east, north), np.rad2deg(np.arctan2(east, north)) % 360
+    lines.append(f"{name}: east {east:.3f}\" north {north:.3f}\" (sep {sep:.3f}\", PA {pa:.1f} deg), flux {flux:.1f} DN/s")
+print("\n".join(lines)); open(f"{out}/optx.txt", "w").write("\n".join(lines) + "\n")
+
+spectrum = exp.fit.source.point.spectrum.set("basis_weights", final_optx.get(exp.fit.map_param(exp, "spectrum")))
+fig, axs = plt.subplots(1, 2, figsize=(20, 8), layout='compressed')
+axs[0].plot(wavels, spectrum.spec_weights())
+axs[0].set(xlabel="Wavelength (um)", ylabel="Relative flux", title="Stellar spectrum (optimistix)")
+axs[1].plot(wavels, spectrum.weights)
+axs[1].set(xlabel="Wavelength (um)", ylabel="Normalised weight", title="Detected spectrum (optimistix)")
+fig.savefig(f"{out}/spectrum-optx.png")

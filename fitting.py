@@ -151,9 +151,9 @@ class ParamsHistory:
         return f"ParamsHistory(n_steps={self._n}, n_params={self._buf.shape[1]})"
 
 
-def _get_C(params, model, exposures, use_c, ones, precond_method, precond_kwargs):
+def _get_C(params, model, exposures, use_c, ones, precond_method, precond_kwargs, damping=1e-3):
     """Diagonal preconditioner pytree: `use_c` if given (pytree or flat vector), else
-    from precond_cache.get_precond, with C = 1 for the params named in `ones`."""
+    from precond_cache.get_precond (with `damping`), with C = 1 for the params named in `ones`."""
     if use_c is not False and use_c is not None:
         if isinstance(use_c, dict):
             return use_c
@@ -165,7 +165,8 @@ def _get_C(params, model, exposures, use_c, ones, precond_method, precond_kwargs
 
     ones = [k for k in ones if k in params]
     sub = {k: v for k, v in params.items() if k not in ones}
-    C = dict(get_precond(sub, exposures, model, method=precond_method, **(precond_kwargs or {}))) if sub else {}
+    C = dict(get_precond(sub, exposures, model, method=precond_method, damping=damping,
+                         **(precond_kwargs or {}))) if sub else {}
     C.update({k: jax.tree.map(np.ones_like, params[k]) for k in ones})
     return {k: C[k] for k in params}
 
@@ -251,22 +252,96 @@ def optimise_new(params, model, exposures, optimisers, epochs, use_c=False, retu
                                  history_dtype=history_dtype, progress=progress)
 
 
-def optimise_optimistix(params, model, exposures, use_c=False, precond_method="gn_probe",
-                        precond_kwargs=None, max_steps=1024, rtol=1e-6, atol=1e-6):
-    """optimistix LBFGS on u, with params = x0 + sqrt(C) * u and C the diagonal
-    preconditioner (see optimise_new). Returns the optimised params dict."""
+def _safe_loss(params, exposures, model):
+    """Sum of -log L over unmasked pixels, or +inf if any model pixel is non-finite.
+
+    loss_fn's nansum drops non-finite pixels, so a blown-up model scores *lower* (an all-NaN
+    image scores 0) and a line search / best-so-far tracker accepts it. Here a blow-up costs
+    +inf, so the step is rejected. Every model pixel is checked, masked ones included, since
+    gauss_log_likelihood zeroes masked pixels (hiding a NaN there, whose gradient is still NaN).
+    Implements ModelFit.loglike without the quadrature term or the resolved regulariser."""
+    mdl = params.inject(model)
+    total, ok = 0., True
+    for e in exposures:
+        psf = e.fit(mdl, e)
+        ok = ok & np.all(np.isfinite(psf))
+        im = gauss_log_likelihood(np.where(np.isfinite(psf), psf, 0.), (e.data, e.err, e.bad))
+        total = total + np.sum(im)
+    return np.where(ok & np.isfinite(total), total, np.inf)
+
+
+def optimise_optimistix(params, model, exposures, use_c=False, precond_method="gn_exact",
+                        precond_kwargs=None, precond_damping=1e-3, max_steps=1024, rtol=1e-9,
+                        atol=1e-2, history_length=10, step_init=None, verbose=False,
+                        return_info=False):
+    """optimistix L-BFGS on u, with params = x0 + sqrt(C) * u and C the diagonal
+    preconditioner (see optimise_new).
+
+    C defaults to the exact Gauss-Newton diagonal (gn_exact, one jvp per parameter, cached
+    by precond_cache; chunk=1 unless precond_kwargs say otherwise), so u is in units of ~1
+    conditional sigma and `atol` is the step size (in sigma) at which to stop. Use
+    precond_method="gn_probe" (precond_kwargs=dict(n_probes=...)) when n_params is too large
+    for exact columns. L-BFGS is matrix-free: it keeps 2 * history_length vectors and applies
+    the inverse Hessian by the two-loop recursion (use_inverse=True), so memory is set by the
+    gradient (use the optics' remat / wl_batch options at production size).
+
+    A non-finite model costs +inf (see _safe_loss), so blow-ups are rejected. step_init < 1
+    shortens the first line-search trial (default: the full -grad step). verbose=True prints
+    the loss and step size each step from inside the compiled loop.
+
+    Returns the optimised params dict (and an info dict if return_info). If the solve ends
+    non-finite or worse than the start, warns and returns the start; if it did not converge,
+    warns and returns the best point found. Not for fits with `quadrature` or `resolved`
+    params, whose loss _safe_loss does not reproduce.
+    """
+    for k in ("quadrature", "resolved"):
+        if k in params:
+            raise NotImplementedError(f"optimise_optimistix: '{k}' is not supported by _safe_loss; "
+                                      "use optimise_new / optimise_new_resolved")
+    if not jax.config.x64_enabled:
+        warnings.warn("optimise_optimistix: x64 is disabled; L-BFGS curvature pairs lose precision in float32")
+
     x0 = _as_float(dict(params))
-    C = _get_C(x0, model, exposures, use_c, (), precond_method, precond_kwargs)
+    if precond_kwargs is None and precond_method == "gn_exact":
+        precond_kwargs = dict(chunk=1)       # lowest memory, same result
+    C = _get_C(x0, model, exposures, use_c, (), precond_method, precond_kwargs, precond_damping)
     S = jax.tree.map(lambda c, x: np.sqrt(np.asarray(c, x.dtype)), C, x0)
+    frozen = [k for k, s in S.items() if any(bool(np.any(l == 0)) for l in jax.tree.leaves(s))]
+    if frozen:
+        warnings.warn(f"optimise_optimistix: C = 0 (no curvature) for entries of {frozen}; they will not move")
+
     # x0 and S are passed as args (not closed over) so they are traced, not baked in
     def scale(u, x0, S):
         return jax.tree.map(lambda x, s, v: x + s * v, x0, S, u)
 
     def scaled_loss(u, args):
         exposures, model, x0, S = args
-        return loss_fn(ModelParams(scale(u, x0, S)), exposures, model)
+        return _safe_loss(ModelParams(scale(u, x0, S)), exposures, model)
 
-    solver = optx.BestSoFarMinimiser(optx.LBFGS(rtol=rtol, atol=atol))
-    sol = optx.minimise(scaled_loss, solver, jax.tree.map(np.zeros_like, x0), (exposures, model, x0, S),
-                        max_steps=max_steps, throw=False)
-    return scale(sol.value, x0, S)
+    def printer(**kw):
+        jax.debug.print("loss {f} (last accepted {fa}), step size {s}", f=kw["loss_this_step"][1],
+                        fa=kw["loss_last_accepted_step"][1], s=kw["step_size"][1])
+
+    lbfgs = optx.LBFGS(rtol=rtol, atol=atol, history_length=history_length,
+                       verbose=printer if verbose else False)
+    if step_init is not None:
+        lbfgs = eqx.tree_at(lambda s: s.search, lbfgs, optx.BacktrackingArmijo(step_init=step_init))
+    solver = optx.BestSoFarMinimiser(lbfgs)
+
+    args = (exposures, model, x0, S)
+    u0 = jax.tree.map(np.zeros_like, x0)
+    f0 = float(scaled_loss(u0, args))
+    sol = optx.minimise(scaled_loss, solver, u0, args, max_steps=max_steps, throw=False)
+    f1 = float(scaled_loss(sol.value, args))
+    out = scale(sol.value, x0, S)
+    info = dict(result=str(sol.result), num_steps=int(sol.stats["num_steps"]), loss_start=f0,
+                loss_end=f1, frozen=frozen)
+
+    finite = all(bool(np.all(np.isfinite(l))) for l in jax.tree.leaves(out))
+    if not (finite and onp.isfinite(f1) and f1 <= f0):
+        warnings.warn(f"optimise_optimistix failed ({info}); returning the starting params")
+        out = x0
+    elif sol.result != optx.RESULTS.successful:
+        warnings.warn(f"optimise_optimistix did not converge ({info['result']} after {info['num_steps']} "
+                      "steps); returning the best point found")
+    return (out, info) if return_info else out
