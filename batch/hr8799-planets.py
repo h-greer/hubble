@@ -79,8 +79,10 @@ flatdir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/L
 
 # Planets: point sources with a flat spectrum (filter throughput only), at sky offsets (east, north; arcsec) and fluxes
 # (DN/s, same convention as the star's flux) keyed by target, so all exposures share them. Initialised at the
-# Soummer et al. 2011 1998 positions and roughly the expected F160W fluxes
-planets = {"b": (1.738, 54.7, 25.), "c": (0.966, 300., 50.)}  # separation ("), PA (deg), flux (DN/s)
+# Soummer et al. 2011 1998 positions and roughly the expected F160W fluxes. d (549 +/- 28 mas, PA 166 +/- 3 deg) starts at
+# the mean of their two roll count rates (71.2 +/- 34.8 and 63.2 +/- 16.5 DN/s); at 0.55" it is only fitted because
+# hole_margin = 0.1 (mask radius 0.4") leaves its PSF core unmasked
+planets = {"b": (1.738, 54.7, 25.), "c": (0.966, 300., 50.), "d": (0.549, 166., 67.)}  # separation ("), PA (deg), flux (DN/s)
 planet_offsets = np.array([[sep*np.sin(np.deg2rad(pa)), sep*np.cos(np.deg2rad(pa))] for sep, pa, _ in planets.values()])
 planet_fluxes = np.array([f for *_, f in planets.values()])
 
@@ -133,7 +135,7 @@ class PlanetFit(ModelFit):
 # Same visit at two rolls (ORIENTAT -147.4 and -117.5 deg), three exposures each; the spectrum and planets are keyed
 # by target, so all six share them
 exposures_single = [
-    exposure_from_file(ddir + f'{root}_clc_calf.fits', PlanetFit(spectrum_basis, "F160W", len(planets)), crop=wid, extra_bad=None, hole_margin=0.3)
+    exposure_from_file(ddir + f'{root}_clc_calf.fits', PlanetFit(spectrum_basis, "F160W", len(planets)), crop=wid, extra_bad=None, hole_margin=0.1)
     for root in 
         [
             "n4qs09akq", "n4qs09anq", #"n4qs09aoq", 
