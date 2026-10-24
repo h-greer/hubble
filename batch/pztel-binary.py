@@ -201,7 +201,7 @@ def initial_params(exps, binary):
 # drift slowly in the calibrator fits (cold_mask_tilt, cold_mask_opd, defocus1) and for the companion offset; the
 # drift diagnostic printed at the end shows which (if any) still need raising
 g = 5e-2
-n_stage1, n_stage2 = 300, 3000
+n_stage1, n_stage2 = 1000, 3000
 precond = dict(precond_method="gn_exact", precond_kwargs=dict(chunk=1))   # every fitted leaf is small: exact GN, forward mode only
 
 things_start = {
