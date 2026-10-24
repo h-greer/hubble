@@ -406,7 +406,7 @@ np.save(f"{out}/losses_stage1.npy", np.asarray(losses_start))
 # Gauss-Newton columns expensive here. Stops at steps below atol (~sigma units) or after n_optx steps; a blow-up or a
 # worse end point falls back to the stage-2 values. Outputs carry an "optx" suffix; params_amp.npy and
 # diagnostics.npy above stay the stage-2 results.
-n_optx = 500
+n_optx = 2048
 x3, optx_info = optimise_optimistix(params_history[-1], model, exposures_single, max_steps=n_optx, return_info=True,
                                     precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
 final_optx = ModelParams(x3)
