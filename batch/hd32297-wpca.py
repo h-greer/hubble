@@ -51,12 +51,16 @@ npoly = 8
 
 # Wavefront PCA basis of the calibrator-joint fits (notebooks/calibrator-pca.ipynb): the mean high-order wavefront plus
 # n_wpca unit-norm modes (in nm per unit coefficient), as Fourier coefficients on the fits' grid, with the primary_low span removed. The high-order
-# wavefront is restricted to this basis (primary_opd stays zero and is not fitted). The basis was fitted in F160W on a
-# 48 x 48 grid (k_max = 24), so in F110W it reaches only ~1.5" (0.9 um) to ~1.8" (1.1 um), short of the crop edges (~2.6")
+# wavefront is restricted to this basis in stages 1-2 (primary_opd stays zero). The basis was fitted in F160W on a
+# 48 x 48 grid (k_max = 24; the layer takes its grid from the file), so in F110W it reaches only ~1.5" (0.9 um) to ~1.8"
+# (1.1 um), short of the crop edges (~2.5")
 wpca_file = "../data/wavefront_pca.npz"
 wpca = np.load(wpca_file)
 n_wpca = wpca["modes"].shape[0]
-n_modes = int(round(wpca["mean"].size**0.5))
+# High-order wavefront for stage 3 (primary_opd, on its own grid): the 64 px crop's farthest edge is ~2.5" from the star
+# (hole at TARSIAFX/Y ~ (73.9, 210.8)), which at the blue end of F110W (~0.8 um) needs k ~ 46; k_max = n_modes // 2 = 48
+# adds ~2 lambda/D for the PSF wings of speckles just outside the crop
+n_modes = 97
 n_zernikes = 50
 
 resolved_wid = 56   # 56 x 0.0864" = 4.84", the 64 px (4.84") crop
@@ -80,10 +84,12 @@ ddir = '../data/NICMOS-LAPL-DD2/LAPL_DATA_DD2/comtemp_flats-DD2/'
 class WavefrontPCAResolvedFit(PointResolvedFit):
     """Star plus resolved disc, with calibrator-joint's per-exposure keys (cold mask shift, tilt and OPD, detector
     defocus); the wavefront PCA coefficients are per visit, like primary_opd in calibrator-joint. One stellar spectrum
-    for all exposures (global), as is the disc (keyed by target)."""
+    for all exposures (global), as is the disc (keyed by target). The stage-3 high-order wavefront (primary_opd) is
+    global: both rolls are from the same day, and a per-visit (= per-roll) one could absorb each roll's disc light."""
     PARAM_KEYS = PointResolvedFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure",
                                                 "primary_wpca": "visit", "cold_mask_opd": "exposure",
-                                                "defocus3": "exposure", "spectrum": "global"}
+                                                "defocus3": "exposure", "spectrum": "global",
+                                                "primary_opd": "global"}
 
 
 # HD 32297 F110W, 224 s, programme 10177 (DD2): two rolls 29 deg apart on the same day, three exposures each (two used per
@@ -108,7 +114,7 @@ exposures_single = [
 optical_params = np.load("../data/calibrator_optical_params.npy", allow_pickle=True)[()]
 per_exposure_init = [k for k in ["cold_mask_shift", "cold_mask_opd", "defocus1", "defocus2", "defocus3"] if k in optical_params]
 
-params = {k: {} for k in ["spectrum", "primary_wpca", "primary_low", "primary_tilt", "cold_mask_tilt", "bias",
+params = {k: {} for k in ["spectrum", "primary_wpca", "primary_opd", "primary_low", "primary_tilt", "cold_mask_tilt", "bias",
                           "defocus3", "resolved"] + per_exposure_init}
 for exp in exposures_single:
     key = lambda k: exp.fit.get_key(exp, k)
@@ -117,6 +123,7 @@ for exp in exposures_single:
     params["cold_mask_tilt"][key("cold_mask_tilt")] = hole_tilt(exp)
     params["primary_wpca"][key("primary_wpca")] = np.zeros(n_wpca)              # 0: the calibrators' mean wavefront
     params["primary_low"][key("primary_low")] = np.zeros(n_zernikes)
+    params["primary_opd"][key("primary_opd")] = np.zeros((n_modes, n_modes))   # fitted in stage 3 only
     params["bias"][key("bias")] = 0.
     params["defocus3"][key("defocus3")] = 0.
     for k in per_exposure_init:
@@ -224,9 +231,42 @@ np.save(f"{out}/params_amp.npy", params_history[-1])
 
 
 # %%
-# optimistix L-BFGS polish (fitting.optimise_optimistix) of the stage-2 fit, over the same fitted parameters including the
-# disc, which keeps C = 1 as in stage 2. The preconditioner is stage 2's (gn_probe), recomputed at the stage-2 point. Stops
-# at steps below atol (~sigma units) or after n_optx steps; a blow-up or a worse end point falls back to the stage-2 values.
+# Stage 3: a free high-order wavefront (primary_opd, global) on top of the wavefront PCA, fitted jointly with everything in
+# stage 2 including the disc, from the stage-2 values. It targets the pupil-fixed radial streaks the PCA basis cannot reach
+# (k > 24, i.e. beyond ~1.5-1.8" in F110W). Outputs carry a "-hi" suffix; the optimistix polish below starts from here.
+things_hi = things | {"primary_opd": adam(2e-2, 50), "resolved": adam(3e-2, 0)}
+
+model_single = ModelParams(params_history[-1]).inject(model_single)
+orig_params = orig_params | params_history[-1]
+opt_params = set_array({k: orig_params[k] for k in orig_params if k in things_hi})
+
+losses, params_history = optimise_new_resolved(
+    opt_params, model_single, exposures_single, things_hi, 1000,
+    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
+
+plt.figure(figsize=(10, 10))
+plt.plot(losses)
+plt.savefig(f"{out}/losses-hi.png")
+print("final loss (stage 3)", losses[-1])
+
+plot_params(params_history, list(things_hi), xw=5, save=f"{out}/params-hi")
+plot_comparison_detailed(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False,
+                         wf_size=wf_wid, percentile=99, save=f"{out}/comparison-hi")
+
+disc_hi = params_history[-1]["resolved"][key]
+np.save(f"{out}/hd32297-hi.npy", disc_hi)
+for name, im in (("hd32297-hi", 10**disc_hi), ("hd32297-hi-log", disc_hi)):
+    plt.figure(figsize=(10, 10))
+    plt.imshow(im)
+    plt.colorbar()
+    plt.savefig(f"{out}/{name}.png")
+np.save(f"{out}/params_amp_hi.npy", params_history[-1])
+
+
+# %%
+# optimistix L-BFGS polish (fitting.optimise_optimistix) of the stage-3 fit, over the same fitted parameters including the
+# disc, which keeps C = 1 as in stages 2-3. The preconditioner is gn_probe, recomputed at the stage-3 point. Stops
+# at steps below atol (~sigma units) or after n_optx steps; a blow-up or a worse end point falls back to the stage-3 values.
 # Outputs carry an "optx" suffix, separate from those above.
 n_optx = 2048
 x2 = params_history[-1]
@@ -238,7 +278,7 @@ plot_comparison_detailed(model_optx, ModelParams(x3), exposures_single, quadratu
                          save=f"{out}/comparison-optx")
 
 line = (f"optimistix: {optx_info['result']} after {optx_info['num_steps']} steps; loss {optx_info['loss_start']:.1f} -> "
-        f"{optx_info['loss_end']:.1f} (stage 2 final {losses[-1]:.1f})" + (f"; frozen {optx_info['frozen']}" if optx_info["frozen"] else ""))
+        f"{optx_info['loss_end']:.1f} (stage 3 final {losses[-1]:.1f})" + (f"; frozen {optx_info['frozen']}" if optx_info["frozen"] else ""))
 print(line); open(f"{out}/optx.txt", "w").write(line + "\n")
 
 disc_optx = x3["resolved"][key]

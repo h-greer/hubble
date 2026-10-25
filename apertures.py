@@ -367,21 +367,24 @@ AMP_UNIT = 2*np.pi*1e-9/1.87e-6
 
 class TransformedFourierBasis(dl.OpticalLayer):
     """OPD from a mean plus a linear combination of modes, all Fourier coefficients (e.g. from a PCA) in units of
-    `scale` (1e-9: nm)."""
+    `scale` (1e-9: nm). The Fourier grid (n_modes x n_modes) is set by the basis file: `mean` holds n_modes**2
+    coefficients and `modes` one row of n_modes**2 per mode."""
     mean: Array
     modes: Array
     coefficients: Array
     kernels: tuple[Array, Array]
-    n_modes: Array
+    n_modes: int = eqx.field(static=True)
     scale: float = eqx.field(static=True)
 
-    def __init__(self, npix, n_modes, basisfile, scale=1e-9):
+    def __init__(self, npix, basisfile, scale=1e-9):
         basis = np.load(basisfile)
         self.mean = basis["mean"]
         self.modes = basis["modes"]
-        self.n_modes = n_modes
+        self.n_modes = int(round(self.mean.size**0.5))
+        if self.n_modes**2 != self.mean.size or self.modes.shape[1] != self.mean.size:
+            raise ValueError(f"{basisfile}: mean {self.mean.shape} and modes {self.modes.shape} are not a square Fourier grid")
         self.scale = scale
-        self.kernels = dlu.fourier_kernels((n_modes,n_modes), (npix,npix))
+        self.kernels = dlu.fourier_kernels((self.n_modes, self.n_modes), (npix, npix))
         self.coefficients = np.zeros(self.modes.shape[0])
     
     def eval_basis(self):
@@ -395,8 +398,8 @@ class TransformedFourierBasis(dl.OpticalLayer):
 class TransformedFourierAmplitude(TransformedFourierBasis):
     """Log-amplitude counterpart of TransformedFourierBasis (mean and modes in units of AMP_UNIT)."""
 
-    def __init__(self, npix, n_modes, basisfile):
-        super().__init__(npix, n_modes, basisfile, scale=AMP_UNIT)
+    def __init__(self, npix, basisfile):
+        super().__init__(npix, basisfile, scale=AMP_UNIT)
 
     def __call__(self, wavefront):
         return wavefront * np.exp(self.eval_basis())
@@ -469,6 +472,7 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
                   (sequential; with remat=True the reverse pass only holds k wavelengths of residuals).
     remat    : jax.checkpoint the per-wavelength propagation (only useful together with wl_batch).
     amplitude : add a Fourier log-amplitude screen "primary_amp" after primary_opd.
+    n_modes   : Fourier grid (n_modes x n_modes) of primary_opd and primary_amp. The PCA layers take theirs from their files.
     wavefront_pca : file of OPD modes (mean, modes) for a "primary_wpca" layer (the wavefront PCA basis).
     amplitude_pca : file of log-amplitude modes (mean, modes) for a "primary_amp_wpca" layer.
     n_nodes   : None -> propagate every wavelength. int k -> Hermite-interpolate the PSF between k knot wavelengths
@@ -495,11 +499,11 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
 
         if wavefront_pca:
             layers += [
-                ("primary_wpca", TransformedFourierBasis(wf_npixels, n_modes, wavefront_pca)),
+                ("primary_wpca", TransformedFourierBasis(wf_npixels, wavefront_pca)),
             ]
 
         if amplitude_pca:
-            layers += [("primary_amp_wpca", TransformedFourierAmplitude(wf_npixels, n_modes, amplitude_pca))]
+            layers += [("primary_amp_wpca", TransformedFourierAmplitude(wf_npixels, amplitude_pca))]
         
         layers += [
             ("primary_low", ScanAberratedAperture(
@@ -662,7 +666,7 @@ class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
     (incl. "prop1" for the final propagation, so fnumber sets its focal length). The occulter is a
     FresnelFastObstruction (defocus1/2 are its "occulter.defocus1/2") around an EllipticalOcculter
     (occulter_ellipticity = (e1, e2), not occulter_coeffs).
-    amplitude, wavefront_pca, amplitude_pca, n_nodes, pad : as NICMOSCoronagraph.
+    n_modes, amplitude, wavefront_pca, amplitude_pca, n_nodes, pad : as NICMOSCoronagraph.
     """
     n_nodes: int | None = eqx.field(static=True)
 
@@ -681,11 +685,11 @@ class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
 
         if wavefront_pca:
             layers += [
-                ("primary_wpca", TransformedFourierBasis(wf_npixels, n_modes, wavefront_pca)),
+                ("primary_wpca", TransformedFourierBasis(wf_npixels, wavefront_pca)),
             ]
 
         if amplitude_pca:
-            layers += [("primary_amp_wpca", TransformedFourierAmplitude(wf_npixels, n_modes, amplitude_pca))]
+            layers += [("primary_amp_wpca", TransformedFourierAmplitude(wf_npixels, amplitude_pca))]
 
         layers += [
             ("primary_low", ScanAberratedAperture(
