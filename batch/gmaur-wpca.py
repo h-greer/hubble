@@ -224,3 +224,30 @@ for name, im in (("gmaur", 10**disc), ("gmaur-log", disc)):
 
 # %%
 np.save(f"{out}/params_amp.npy", params_history[-1])
+
+
+# %%
+# optimistix L-BFGS polish (fitting.optimise_optimistix) of the stage-2 fit, over the same fitted parameters including the
+# disc, which keeps C = 1 as in stage 2. The preconditioner is stage 2's (gn_probe), recomputed at the stage-2 point. Stops
+# at steps below atol (~sigma units) or after n_optx steps; a blow-up or a worse end point falls back to the stage-2 values.
+# Outputs carry an "optx" suffix, separate from those above.
+n_optx = 2048
+x2 = params_history[-1]
+model_optx = ModelParams(x2).inject(model_single)
+x3, optx_info = optimise_optimistix(x2, model_optx, exposures_single, max_steps=n_optx, return_info=True, ones=("resolved",),
+                                    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
+np.save(f"{out}/params_amp_optx.npy", x3)
+plot_comparison_detailed(model_optx, ModelParams(x3), exposures_single, quadrature=False, wf_size=wf_wid, percentile=99,
+                         save=f"{out}/comparison-optx")
+
+line = (f"optimistix: {optx_info['result']} after {optx_info['num_steps']} steps; loss {optx_info['loss_start']:.1f} -> "
+        f"{optx_info['loss_end']:.1f} (stage 2 final {losses[-1]:.1f})" + (f"; frozen {optx_info['frozen']}" if optx_info["frozen"] else ""))
+print(line); open(f"{out}/optx.txt", "w").write(line + "\n")
+
+disc_optx = x3["resolved"][key]
+np.save(f"{out}/gmaur-optx.npy", disc_optx)
+for name, im in (("gmaur-optx", 10**disc_optx), ("gmaur-optx-log", disc_optx)):
+    plt.figure(figsize=(10, 10))
+    plt.imshow(im)
+    plt.colorbar()
+    plt.savefig(f"{out}/{name}.png")

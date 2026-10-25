@@ -252,28 +252,10 @@ def optimise_new(params, model, exposures, optimisers, epochs, use_c=False, retu
                                  history_dtype=history_dtype, progress=progress)
 
 
-def _safe_loss(params, exposures, model):
-    """Sum of -log L over unmasked pixels, or +inf if any model pixel is non-finite.
-
-    loss_fn's nansum drops non-finite pixels, so a blown-up model scores *lower* (an all-NaN
-    image scores 0) and a line search / best-so-far tracker accepts it. Here a blow-up costs
-    +inf, so the step is rejected. Every model pixel is checked, masked ones included, since
-    gauss_log_likelihood zeroes masked pixels (hiding a NaN there, whose gradient is still NaN).
-    Implements ModelFit.loglike without the quadrature term or the resolved regulariser."""
-    mdl = params.inject(model)
-    total, ok = 0., True
-    for e in exposures:
-        psf = e.fit(mdl, e)
-        ok = ok & np.all(np.isfinite(psf))
-        im = gauss_log_likelihood(np.where(np.isfinite(psf), psf, 0.), (e.data, e.err, e.bad))
-        total = total + np.sum(im)
-    return np.where(ok & np.isfinite(total), total, np.inf)
-
-
 def optimise_optimistix(params, model, exposures, use_c=False, precond_method="gn_exact",
                         precond_kwargs=None, precond_damping=1e-3, max_steps=1024, rtol=1e-9,
                         atol=1e-2, history_length=10, step_init=None, verbose=False,
-                        return_info=False):
+                        return_info=False, ones=()):
     """optimistix L-BFGS on u, with params = x0 + sqrt(C) * u and C the diagonal
     preconditioner (see optimise_new).
 
@@ -285,26 +267,22 @@ def optimise_optimistix(params, model, exposures, use_c=False, precond_method="g
     the inverse Hessian by the two-loop recursion (use_inverse=True), so memory is set by the
     gradient (use the optics' remat / wl_batch options at production size).
 
-    A non-finite model costs +inf (see _safe_loss), so blow-ups are rejected. step_init < 1
+    A non-finite model costs +inf (see stats.gauss_log_likelihood), so blow-ups are rejected. step_init < 1
     shortens the first line-search trial (default: the full -grad step). verbose=True prints
     the loss and step size each step from inside the compiled loop.
 
     Returns the optimised params dict (and an info dict if return_info). If the solve ends
     non-finite or worse than the start, warns and returns the start; if it did not converge,
-    warns and returns the best point found. Not for fits with `quadrature` or `resolved`
-    params, whose loss _safe_loss does not reproduce.
+    warns and returns the best point found. ones : params with C = 1 (e.g. ("resolved",), as
+    optimise_new_resolved).
     """
-    for k in ("quadrature", "resolved"):
-        if k in params:
-            raise NotImplementedError(f"optimise_optimistix: '{k}' is not supported by _safe_loss; "
-                                      "use optimise_new / optimise_new_resolved")
     if not jax.config.x64_enabled:
         warnings.warn("optimise_optimistix: x64 is disabled; L-BFGS curvature pairs lose precision in float32")
 
     x0 = _as_float(dict(params))
     if precond_kwargs is None and precond_method == "gn_exact":
         precond_kwargs = dict(chunk=1)       # lowest memory, same result
-    C = _get_C(x0, model, exposures, use_c, (), precond_method, precond_kwargs, precond_damping)
+    C = _get_C(x0, model, exposures, use_c, ones, precond_method, precond_kwargs, precond_damping)
     S = jax.tree.map(lambda c, x: np.sqrt(np.asarray(c, x.dtype)), C, x0)
     frozen = [k for k, s in S.items() if any(bool(np.any(l == 0)) for l in jax.tree.leaves(s))]
     if frozen:
@@ -316,7 +294,7 @@ def optimise_optimistix(params, model, exposures, use_c=False, precond_method="g
 
     def scaled_loss(u, args):
         exposures, model, x0, S = args
-        return _safe_loss(ModelParams(scale(u, x0, S)), exposures, model)
+        return loss_fn(ModelParams(scale(u, x0, S)), exposures, model)
 
     def printer(**kw):
         jax.debug.print("loss {f} (last accepted {fa}), step size {s}", f=kw["loss_this_step"][1],

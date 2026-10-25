@@ -96,6 +96,7 @@ class InjectedExposure(Exposure):
         self.fit = fit
         self.mjd = 0.0
         self.wcs = None
+        self.orient = 0.      # set before the fit is evaluated: PointResolvedFit reads it (the disc's roll)
 
         gain = 3
 
@@ -113,7 +114,6 @@ class InjectedExposure(Exposure):
 
         self.exptime = t_exp
         self.pam = 0.
-        self.orient = 0.
         self.hdr = None
 
 NIC2_HOLE_RADIUS = 0.3   # arcsec, NIC2 coronagraphic hole radius (NICMOS Instrument Handbook). The smooth patch in the
