@@ -695,7 +695,7 @@ class PointResolvedFit(ModelFit):
 
         if "resolved" in model.params.keys():
             dist = self.get_distribution(model, exposure)
-            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + self.regulariser[0]* L2_loss(dist) +  self.regulariser[1]*TSV_loss(dist)
+            return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im) + self.regulariser[0]*L1_loss(dist) + self.regulariser[1]*TSV_loss(dist)   # regulariser = (L1, TSV) weights; L1 = total disc flux (dist > 0)
         
         return super().loglike(model, exposure, per_pix=per_pix, return_im=return_im)
 

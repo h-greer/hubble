@@ -60,7 +60,7 @@ n_wpca = wpca["modes"].shape[0]
 # High-order wavefront for stage 3 (primary_opd, on its own grid): the 64 px crop's farthest edge is ~2.5" from the star
 # (hole at TARSIAFX/Y ~ (73.9, 210.8)), which at the blue end of F110W (~0.8 um) needs k ~ 46; k_max = n_modes // 2 = 48
 # adds ~2 lambda/D for the PSF wings of speckles just outside the crop
-n_modes = 97
+n_modes = 70
 n_zernikes = 50
 
 resolved_wid = 56   # 56 x 0.0864" = 4.84", the 64 px (4.84") crop
@@ -83,11 +83,11 @@ ddir = '../data/NICMOS-LAPL-DD2/LAPL_DATA_DD2/comtemp_flats-DD2/'
 
 class WavefrontPCAResolvedFit(PointResolvedFit):
     """Star plus resolved disc, with calibrator-joint's per-exposure keys (cold mask shift, tilt and OPD, detector
-    defocus); the wavefront PCA coefficients are per visit, like primary_opd in calibrator-joint. One stellar spectrum
-    for all exposures (global), as is the disc (keyed by target). The stage-3 high-order wavefront (primary_opd) is
-    global: both rolls are from the same day, and a per-visit (= per-roll) one could absorb each roll's disc light."""
+    defocus) and wavefront PCA coefficients. One stellar spectrum for all exposures (global), as is the disc (keyed by
+    target). The stage-3 high-order wavefront (primary_opd) is global: both rolls are from the same day, and a per-visit
+    (= per-roll) one could absorb each roll's disc light; the low-dimensional PCA coefficients track per-exposure changes."""
     PARAM_KEYS = PointResolvedFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure",
-                                                "primary_wpca": "visit", "cold_mask_opd": "exposure",
+                                                "primary_wpca": "exposure", "cold_mask_opd": "exposure",
                                                 "defocus3": "exposure", "spectrum": "global",
                                                 "primary_opd": "global"}
 
@@ -264,27 +264,28 @@ np.save(f"{out}/params_amp_hi.npy", params_history[-1])
 
 
 # %%
+# Disabled for now: the optimistix polish below
 # optimistix L-BFGS polish (fitting.optimise_optimistix) of the stage-3 fit, over the same fitted parameters including the
 # disc, which keeps C = 1 as in stages 2-3. The preconditioner is gn_probe, recomputed at the stage-3 point. Stops
 # at steps below atol (~sigma units) or after n_optx steps; a blow-up or a worse end point falls back to the stage-3 values.
 # Outputs carry an "optx" suffix, separate from those above.
-n_optx = 2048
-x2 = params_history[-1]
-model_optx = ModelParams(x2).inject(model_single)
-x3, optx_info = optimise_optimistix(x2, model_optx, exposures_single, max_steps=n_optx, return_info=True, ones=("resolved",),
-                                    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
-np.save(f"{out}/params_amp_optx.npy", x3)
-plot_comparison_detailed(model_optx, ModelParams(x3), exposures_single, quadrature=False, wf_size=wf_wid, percentile=99,
-                         save=f"{out}/comparison-optx")
+# n_optx = 2048
+# x2 = params_history[-1]
+# model_optx = ModelParams(x2).inject(model_single)
+# x3, optx_info = optimise_optimistix(x2, model_optx, exposures_single, max_steps=n_optx, return_info=True, ones=("resolved",),
+#                                     precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
+# np.save(f"{out}/params_amp_optx.npy", x3)
+# plot_comparison_detailed(model_optx, ModelParams(x3), exposures_single, quadrature=False, wf_size=wf_wid, percentile=99,
+#                          save=f"{out}/comparison-optx")
 
-line = (f"optimistix: {optx_info['result']} after {optx_info['num_steps']} steps; loss {optx_info['loss_start']:.1f} -> "
-        f"{optx_info['loss_end']:.1f} (stage 3 final {losses[-1]:.1f})" + (f"; frozen {optx_info['frozen']}" if optx_info["frozen"] else ""))
-print(line); open(f"{out}/optx.txt", "w").write(line + "\n")
+# line = (f"optimistix: {optx_info['result']} after {optx_info['num_steps']} steps; loss {optx_info['loss_start']:.1f} -> "
+#         f"{optx_info['loss_end']:.1f} (stage 3 final {losses[-1]:.1f})" + (f"; frozen {optx_info['frozen']}" if optx_info["frozen"] else ""))
+# print(line); open(f"{out}/optx.txt", "w").write(line + "\n")
 
-disc_optx = x3["resolved"][key]
-np.save(f"{out}/hd32297-optx.npy", disc_optx)
-for name, im in (("hd32297-optx", 10**disc_optx), ("hd32297-optx-log", disc_optx)):
-    plt.figure(figsize=(10, 10))
-    plt.imshow(im)
-    plt.colorbar()
-    plt.savefig(f"{out}/{name}.png")
+# disc_optx = x3["resolved"][key]
+# np.save(f"{out}/hd32297-optx.npy", disc_optx)
+# for name, im in (("hd32297-optx", 10**disc_optx), ("hd32297-optx-log", disc_optx)):
+#     plt.figure(figsize=(10, 10))
+#     plt.imshow(im)
+#     plt.colorbar()
+#     plt.savefig(f"{out}/{name}.png")
