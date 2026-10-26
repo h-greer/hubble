@@ -101,11 +101,11 @@ exposures_single = [
                        crop=wid, extra_bad=None, hole_margin=0.3)
     for root in [
         "n4xj03v8q",
-        "n4xj03vcq",
-        "n4xj03vdq",
+        # "n4xj03vcq",
+        # "n4xj03vdq",
         "n4xj21e0q",
-        "n4xj21e4q",
-        "n4xj21e5q",
+        # "n4xj21e4q",
+        # "n4xj21e5q",
         ]
 ]
 
