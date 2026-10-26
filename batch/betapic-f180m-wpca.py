@@ -38,6 +38,7 @@ from models import *
 from stats import posterior
 from fitting import *
 from plotting import *
+from plotting import _signed_panel  # underscore names are not covered by `import *`
 from spectra import *
 
 out = "betapic-f180m-wpca"
@@ -65,7 +66,7 @@ n_modes = int(round(wpca["mean"].size**0.5))
 n_zernikes = 50
 
 resolved_wid = 56   # 56 x 0.0864" = 4.84", the 64 px (4.84") crop
-regulariser = np.array([0.02, 0.4])
+regulariser = np.array([0.2, 4.0])   # (L1, TSV) weights, 10x gmaur-wpca's: the outer disc map was unconstrained pixel noise
 
 # The calibrator-joint model: Fresnel occulter (defocus1/2 at the occulter, defocus3 at the detector), elliptical occulter,
 # Hermite interpolation between 6 knots across the 200-wavelength spectrum, no pupil amplitude map; plus the wavefront PCA.
@@ -105,11 +106,11 @@ exposures_single = [
                        crop=wid, extra_bad=None, hole_margin=0.3)
     for root in [
         "n4xj03v8q",
-        # "n4xj03vcq",
-        # "n4xj03vdq",
+        "n4xj03vcq",
+        "n4xj03vdq",
         "n4xj21e0q",
-        # "n4xj21e4q",
-        # "n4xj21e5q",
+        "n4xj21e4q",
+        "n4xj21e5q",
         ]
 ]
 
@@ -235,3 +236,47 @@ for name, im in (("betapic", 10**disc), ("betapic-log", disc)):
 np.save(f"{out}/params_amp.npy", params_history[-1])
 
 
+# %%
+# Residuals and the disc with the predicted positions of beta Pic b, c and d marked, as in hr8799-bootstrap. Sky
+# offsets (east, north; arcsec) at each visit: b and c from the Lacour et al. 2021 (A&A 654, L2) orbits (Table 2, RV + b
+# and c astrometry; Keplerian, reproducing their GRAVITY astrometry to ~1.5 mas); d from the Sutlieff & Bonse et al.
+# 2026 posterior modes (a 26.0 au, i 88.9, Omega 210.9, lambda 270 deg at 2010.0; circular, reproducing their
+# detections to <40 mas, <1 deg; its separation is poorly constrained, its PA is not). c is inside the hole at both epochs.
+# The star sits at the crop centre shifted by primary_tilt + cold_mask_tilt (arcsec) at the 40 um / (45.7 x 2.4 m) plate
+# scale (checked against out-of-hole renders to <0.4 px); the planets are offset from it through the exposure WCS. The
+# disc grid is in a fixed sky frame: row = centre + north / pitch, column = centre - east / pitch
+mark_r = 3
+planets = {
+    "n4xj03": {"b": (0.263, 0.431), "c": (0.029, 0.053), "d": (0.467, 0.743)},   # 1998-09-16
+    "n4xj21": {"b": (0.268, 0.439), "c": (0.043, 0.075), "d": (0.462, 0.734)},   # 1998-11-15
+}
+from astropy.coordinates import SkyCoord
+import astropy.units as u
+
+final = params.params | params_history[-1]
+model = ModelParams(final).inject(model_single)
+plate_scale = dlu.rad2arcsec(40e-6/(45.7*2.4))   # arcsec per detector pixel
+for exp in exposures_single:
+    star_xy = (wid - 1)/2 + (final["primary_tilt"][exp.key] + final["cold_mask_tilt"][exp.key])/plate_scale
+    star = SkyCoord(exp.hdr["RA_TARG"]*u.deg, exp.hdr["DEC_TARG"]*u.deg)
+    sxy = numpy.array(exp.wcs.world_to_pixel(star))
+    resid = exp.data - render(model, exp)
+    fig, axs = plt.subplots(1, 2, figsize=(20, 9), layout='compressed')
+    for ax, im, unit in zip(axs, [resid, resid/exp.err], ["DN/s", "z"]):
+        _signed_panel(ax, im, f"{exp.key} residual ({unit})", percentile=99, label=unit, bad='w')
+        for name, (east, north) in planets[exp.key[:6]].items():
+            x, y = star_xy + numpy.array(exp.wcs.world_to_pixel(star.spherical_offsets_by(east*u.arcsec, north*u.arcsec))) - sxy
+            ax.add_patch(matplotlib.patches.Circle((x, y), mark_r, fill=False, ec='g', lw=2))
+            ax.text(x + mark_r, y + mark_r, name, color='g', fontsize=24)
+    fig.savefig(f"{out}/planets-residual_{exp.key}.png")
+
+pitch = dlu.rad2arcsec(exposures_single[0].fit.source.resolved.pitch)
+centre = disc.shape[0]//2
+fig, ax = plt.subplots(figsize=(10, 9))
+fig.colorbar(ax.imshow(disc, origin='lower'), label='log10 brightness')
+for visit, col in zip(planets, ['c', 'm']):
+    for name, (east, north) in planets[visit].items():
+        r, cc = centre + north/pitch, centre - east/pitch
+        ax.add_patch(matplotlib.patches.Circle((cc, r), 2, fill=False, ec=col, lw=2))
+        ax.text(cc + 2, r + 2, f"{name} {visit}", color=col, fontsize=12)
+fig.savefig(f"{out}/planets-disc.png")
