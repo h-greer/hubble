@@ -91,7 +91,7 @@ class WavefrontPCAResolvedFit(PointResolvedFit):
     the disc (keyed by target)."""
     PARAM_KEYS = PointResolvedFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure",
                                                 "primary_wpca": "exposure", "cold_mask_opd": "exposure",
-                                                "defocus3": "exposure", "spectrum": "global"}
+                                                "defocus3": "exposure", "spectrum": "global", "primary_opd": "visit"}
 
 
 # Beta Pic (HD39060) F207M, programme 7835 (DD1), NIC2-CORON, 175.9 s each: two rolls 90 deg apart, four exposures each
@@ -222,6 +222,68 @@ print("final loss", losses[-1])
 plot_params(params_history, list(things), xw=5, save=f"{out}/params")
 plot_comparison_detailed(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False,
                          wf_size=wf_wid, percentile=99, save=f"{out}/comparison")
+
+# %%
+# Stage 3: as hr8799-planets' main stage, without the planets and with the disc: a per-visit high-order wavefront
+# (primary_opd, Fourier modes on top of the wavefront PCA, shared by the exposures of one roll; Adam, released after
+# 50 steps so the rest settles first) and every optical parameter, from the stage-2 state. primary_opd starts at zero
+# and is added to the model here, so stages 1 and 2 are unchanged
+stage3 = {
+    "primary_opd": adam(2e-2, 50),
+    "primary_wpca": sgd(g*5, 0),
+    "resolved": adam(3e-2, 0),
+
+    "spectrum": sgd(g*1, 0),
+    "primary_tilt": sgd(g*1., 0),
+    "cold_mask_tilt": sgd(g*1, 0),
+    "cold_mask_opd": sgd(g*1., 0),
+
+    "defocus1": sgd(g*1, 0),
+    "defocus2": sgd(g*5, 0),
+
+    "bias": sgd(g*3, 0),
+    "cold_mask_shift": sgd(g*1, 0),
+    "cold_mask_rot": sgd(g*1., 0.),
+    "primary_rot": sgd(g*3., 0),
+
+    "primary_low": sgd(g*1, 0),
+
+    "cold_mask_scale": sgd(g*1, 0),
+    "cold_mask_distortion": sgd(g*3, 0),
+
+    "occulter_radius": sgd(g*1., 0),
+
+    "secondary_radius": sgd(g*1., 0),
+    "spider_width": sgd(g*1., 0),
+    "primary_spider": sgd(g*1., 0),
+    "primary_secondary": sgd(g*1., 0),
+    "secondary_shift": sgd(g*1, 0),
+    "primary_distortion": sgd(g*3, 0),
+
+    "fnumber": sgd(g*1., 0),
+    "anisotropy": sgd(g*1., 0),
+    "distortion": sgd(g*1, 0),
+}
+
+stage2_params = orig_params | params_history[-1]
+primary_opd = {exp.fit.get_key(exp, "primary_opd"): np.zeros((n_modes, n_modes)) for exp in exposures_single}
+model_single = ModelParams(params_history[-1]).inject(model_single)
+model_single = model_single.set("params", dict(model_single.params) | {"primary_opd": primary_opd})
+opt_params = set_array({k: v for k, v in (stage2_params | {"primary_opd": primary_opd}).items() if k in stage3})
+
+losses, params_history = optimise_new_resolved(
+    opt_params, model_single, exposures_single, stage3, 2000,
+    mapped=True, precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=False, exact_max_size=32))
+
+plt.figure(figsize=(10, 10))
+plt.plot(losses)
+plt.savefig(f"{out}/stage3-losses.png")
+print("stage 3 final loss", losses[-1])
+
+plot_params(params_history, list(stage3), xw=5, save=f"{out}/stage3-params")
+plot_comparison_detailed(model_single, ModelParams(params_history[-1]), exposures_single, quadrature=False,
+                         wf_size=wf_wid, percentile=99, save=f"{out}/stage3-comparison")
+params = ModelParams(stage2_params | {"primary_opd": primary_opd})   # the planet section reads params | the final history
 
 # %%
 # Recovered disc (log10 surface brightness, keyed by target)
