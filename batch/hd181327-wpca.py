@@ -101,7 +101,7 @@ exposures_single = [
     exposure_from_file(ddir + f'{root}_m_clc_calf.fits',
                        WavefrontPCAResolvedFit(spectrum_basis, filt, wid=resolved_wid, regulariser=regulariser,
                                                resolved_source="interp"),
-                       crop=wid, extra_bad=None, hole_margin=0.1)
+                       crop=wid, extra_bad=None, hole_margin=0.3)
     for root in ["n8zu67d0q", "n8zu67d1q", #"n8zu67d2q", "n8zu67d3q",
                  "n8zu68d8q", "n8zu68d9q", #"n8zu68daq", "n8zu68dbq",
                  ]
