@@ -36,7 +36,7 @@ from fitting import *
 from plotting import *
 from spectra import *
 
-out = "betapic-f187n-wpca"
+out = "betapic-f180m-wpca"
 os.makedirs(out, exist_ok=True)
 
 # %%
@@ -45,15 +45,15 @@ wid = 64
 oversample = 4
 pad = 2      # model 2 extra detector pixels on each side, cropped after resampling (see NICMOSDetector)
 
-filt = "F187N"
-nwavels = 50
-n_nodes = 5     # Hermite-interpolate the PSF between 5 knot wavelengths across the narrow F187N band
-npoly = 1       # flux only: the spectral shape is the filter throughput
+filt = "F180M"
+nwavels = 200
+n_nodes = 6     # Hermite-interpolate the PSF between 6 knot wavelengths
+npoly = 2
 
 # Wavefront PCA basis of the calibrator-joint fits (notebooks/calibrator-pca.ipynb): the mean high-order wavefront plus
 # n_wpca unit-norm modes (in nm per unit coefficient), as Fourier coefficients on the fits' grid, with the primary_low span removed. The high-order
 # wavefront is restricted to this basis (primary_opd stays zero and is not fitted). The basis was fitted in F160W on a
-# 48 x 48 grid (k_max = 24), so at 1.87 um it reaches ~3.0", beyond the crop edges (~2.6")
+# 48 x 48 grid (k_max = 24), so at 1.8 um it reaches ~2.9", beyond the crop edges (~2.6")
 wpca_file = "../data/wavefront_pca.npz"
 wpca = np.load(wpca_file)
 n_wpca = wpca["modes"].shape[0]
@@ -64,15 +64,14 @@ resolved_wid = 56   # 56 x 0.0864" = 4.84", the 64 px (4.84") crop
 regulariser = np.array([0.02, 0.4])
 
 # The calibrator-joint model: Fresnel occulter (defocus1/2 at the occulter, defocus3 at the detector), elliptical occulter,
-# Hermite interpolation between 5 knots across the 50-wavelength spectrum, no pupil amplitude map; plus the wavefront PCA.
+# Hermite interpolation between 6 knots across the 200-wavelength spectrum, no pupil amplitude map; plus the wavefront PCA.
 # The disc (one wavelength, the filter centre, propagated directly) is an InterpolatedResolvedSource: exact PSFs within
 # 0.6" and 36 anchor PSFs beyond (rings 0.6-2.2", 6 angles), 184 renders instead of 56^2 = 3136
 optics = NICMOSFresnelCoronagraph(wf_wid, wid, oversample, n_modes=n_modes, n_zernikes=n_zernikes, n_nodes=n_nodes,
                                   wavefront_pca=wpca_file, pad=pad)
 detector = NICMOSDetector(oversample, wid, pad=pad)
 
-# No iterative spectrum basis exists for F187N; a flat basis leaves only the stellar flux free
-vects = numpy.ones((nwavels, npoly))
+vects = np.load(f"../data/iterative_spectrum_basis_{filt}_{nwavels}.npy")[:, :npoly]
 assert vects.shape == (nwavels, npoly)
 spectrum_basis = vects/np.sqrt(np.mean(vects**2, axis=0))
 
@@ -90,23 +89,23 @@ class WavefrontPCAResolvedFit(PointResolvedFit):
                                                 "defocus3": "exposure", "spectrum": "global"}
 
 
-# Beta Pic (HD39060) F187N, programme 7835 (DD1), NIC2-CORON, 2.03 s each: two rolls 90 deg apart, three exposures each.
+# Beta Pic (HD39060) F180M, programme 7835 (DD1), NIC2-CORON, 175.9 s each: two rolls 90 deg apart, three exposures each.
 # The disc is shared by both rolls, so roll diversity separates it from the pupil-fixed speckles; the wavefront is fitted
 # per exposure
-#   n4xj02 1998-09-16, ORIENTAT  29.5 deg
-#   n4xj20 1998-11-15, ORIENTAT 119.5 deg
+#   n4xj03 1998-09-16, ORIENTAT  29.5 deg
+#   n4xj21 1998-11-15, ORIENTAT 119.5 deg
 exposures_single = [
     exposure_from_file(ddir + f'{root}_cle_cal.fits',
                        WavefrontPCAResolvedFit(spectrum_basis, filt, wid=resolved_wid, regulariser=regulariser,
                                                resolved_source="interp"),
                        crop=wid, extra_bad=None, hole_margin=0.3)
     for root in [
-        "n4xj02r0q",
-        "n4xj02r1q",
-        "n4xj02r2q",
-        "n4xj20x6q",
-        "n4xj20x7q",
-        "n4xj20x8q",
+        "n4xj03v8q",
+        "n4xj03vcq",
+        "n4xj03vdq",
+        "n4xj21e0q",
+        "n4xj21e4q",
+        "n4xj21e5q",
         ]
 ]
 
