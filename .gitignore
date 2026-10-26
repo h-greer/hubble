@@ -176,3 +176,5 @@ data/NICMOS-LAPL-DD2
 data/NICMOS-LAPL-DD1
 data/tmp_precond_cache
 .vscode
+notebooks/*.md
+*.out

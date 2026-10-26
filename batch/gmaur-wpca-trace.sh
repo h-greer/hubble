@@ -22,6 +22,8 @@ mkdir -p $PROFILE_DIR $JAX_COMPILATION_CACHE_DIR
 # XLA dumps are many small files: local SSD during the job, archived to scratch afterwards
 export XLA_FLAGS="--xla_dump_to=$JOBFS/xla_dump --xla_dump_hlo_as_text"
 
+export EQX_ON_ERROR=nan   # equinox runtime checks return NaN instead of raising (cheaper tracing)
+
 python gmaur-wpca-trace.py
 
 tar -czf $PROFILE_DIR/xla_dump.tar.gz -C $JOBFS xla_dump
