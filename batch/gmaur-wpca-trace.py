@@ -52,11 +52,11 @@ jax.config.update("jax_explain_cache_misses", True)
 jax.config.update("jax_persistent_cache_min_compile_time_secs", 1.0)
 
 n_stage1, n_stage2 = 1000, 500
-n_trace = 20
+n_trace = 5
 
 prof_opts = jax.profiler.ProfileOptions()
 prof_opts.host_tracer_level = 2     # XLA compile/execute events on the host
-prof_opts.python_tracer_level = 1   # Python call stack, attributing compiles to the calling line
+prof_opts.python_tracer_level = 0   # off: the Python tracer buffered ~GBs in host RAM and the 20-epoch probe segfaulted
 
 
 def traced_probe(name, optimise, opt_params, model, optimisers):
@@ -65,7 +65,7 @@ def traced_probe(name, optimise, opt_params, model, optimisers):
     t0 = time.perf_counter()
     with jax.profiler.TraceAnnotation(name):
         _, hist = optimise(opt_params, model, exposures_single, optimisers, n_trace,
-                           precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
+                           precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True, exact_max_size=32))
         jax.block_until_ready(hist[-1])
     jax.profiler.stop_trace()
     print(f"{name} probe: {time.perf_counter() - t0:.1f} s for {n_trace} epochs (traced, incl. compilation)")
@@ -218,7 +218,7 @@ traced_probe("stage1", optimise_new, opt_params, model_single, things_start)
 t0 = time.perf_counter()
 losses, params_history = optimise_new(
     opt_params, model_single, exposures_single, things_start, n_stage1,
-    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
+    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True, exact_max_size=32))
 jax.block_until_ready(params_history[-1])
 print(f"stage 1: {time.perf_counter() - t0:.1f} s for {n_stage1} epochs")
 
@@ -243,7 +243,7 @@ print("traces saved to", prof_dir)
 t0 = time.perf_counter()
 losses, params_history = optimise_new_resolved(
     opt_params, model_single, exposures_single, things, n_stage2,
-    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
+    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True, exact_max_size=32))
 jax.block_until_ready(params_history[-1])
 print(f"stage 2: {time.perf_counter() - t0:.1f} s for {n_stage2} epochs")
 
