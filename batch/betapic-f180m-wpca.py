@@ -11,6 +11,10 @@ import os
 
 jax.config.update("jax_enable_x64", True)
 
+# Persistent compilation cache (directory from JAX_COMPILATION_CACHE_DIR, set in the .sh); cache every compile
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
+
 import zodiax as zdx
 import optax
 import equinox as eqx
@@ -145,7 +149,7 @@ def images(p):
     m = ModelParams(p).inject(model_single)
     return [render(m, e) for e in exposures_single]
 
-p0 = params.params
+p0 = set_array(params.params)   # float64 arrays (no python-float/weak-type leaves): render variants share one compile
 star = images(p0 | {"resolved": jax.tree.map(lambda r: np.full_like(r, -30.), p0["resolved"])})   # disc off
 disc = images(p0 | {"spectrum": jax.tree.map(np.zeros_like, p0["spectrum"])})                      # star off (eps flux)
 
@@ -186,7 +190,7 @@ things = {k: sgd(g*1, 0) for k in things_start} | {
 opt_params = set_array({k: v for k, v in params.params.items() if k in things_start})
 losses, params_history = optimise_new(
     opt_params, model_single, exposures_single, things_start, 1000,
-    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
+    mapped=True, precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=False, exact_max_size=32))
 
 plt.figure(figsize=(10, 10))
 plt.plot(losses)
@@ -204,7 +208,7 @@ opt_params = set_array({k: orig_params[k] for k in orig_params if k in things})
 
 losses, params_history = optimise_new_resolved(
     opt_params, model_single, exposures_single, things, 500,
-    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
+    mapped=True, precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=False, exact_max_size=32))
 
 plt.figure(figsize=(10, 10))
 plt.plot(losses)

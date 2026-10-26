@@ -731,6 +731,8 @@ class NICMOSModel(BaseModeller):
     detector: NICMOSDetector
 
     def __init__(self, exposures, params, optics, detector):
+        keys = [e.key for e in exposures]
+        assert len(set(keys)) == len(keys), "exposure keys (ROOTNAME) must be unique: per-exposure params are keyed by them"
         self.optics = optics
         self.detector = detector
         self.params = params

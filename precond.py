@@ -23,6 +23,7 @@ from jax.flatten_util import ravel_pytree
 
 from models import ModelParams, TSV_loss
 from fitting import loss_fn
+from batching import make_batch, gn_core_mapped
 
 LN10 = float(np.log(10.0))
 
@@ -170,10 +171,11 @@ def _gn_core(params, exposures, model, key, exact_groups, quad_idx, n_probes, pr
     x, unravel = ravel_pytree(params)
     fs = _weighted_images(x, unravel, exposures, model)
     gn = np.zeros_like(x)
+    lins = [jax.linearize(f, x) for f in fs]  # (out, jvp fn): each forward is traced once, shared by vjps and jvps
 
     if n_probes > 0:  # Hutchinson: GN_k = E_z[(J^T (z sqrt(w)))_k^2], z Rademacher over pixels
-        for ei, f in enumerate(fs):
-            out, vjp = jax.vjp(f, x)
+        for ei, (out, lin) in enumerate(lins):
+            vjp = jax.linear_transpose(lin, x)
 
             def probe(k, vjp=vjp, shape=out.shape):
                 return vjp(jr.rademacher(k, shape, dtype=x.dtype))[0] ** 2
@@ -182,7 +184,7 @@ def _gn_core(params, exposures, model, key, exact_groups, quad_idx, n_probes, pr
             gn = gn + jax.lax.map(probe, keys, batch_size=min(int(probe_batch), n_probes)).mean(0)
 
     for users, idx in exact_groups:  # exact GN_kk: one jvp per k, only through the exposures that read it
-        gn_k = lambda v, i: sum(np.sum(jax.jvp(fs[e], (x,), (v,))[1] ** 2) for e in users)
+        gn_k = lambda v, i: sum(np.sum(lins[e][1](v) ** 2) for e in users)
         gn = gn.at[idx].set(_map_tangents(gn_k, x, idx, chunk))
 
     if quad_idx.shape[0] > 0:  # non-quadratic in the error model: |H_kk| instead
@@ -194,29 +196,32 @@ def _gn_core(params, exposures, model, key, exact_groups, quad_idx, n_probes, pr
 
 
 # ----------------------------------------------------------------------------- public API
-def hessian_diag(params: dict, exposures: list, model, batch_size: int = 16) -> dict:
-    """|H_kk| of the full loss (incl. regulariser): n_params HVPs, `batch_size` at a time."""
+def hessian_diag(params: dict, exposures: list, model, batch_size: int = 16, mapped: bool = False) -> dict:
+    """|H_kk| of the full loss (incl. regulariser): n_params HVPs, `batch_size` at a time.
+    mapped: lax.map over stacked exposures (batching.py)."""
+    exposures = make_batch(exposures, model) if mapped else exposures
     n = sum(int(np.size(l)) for l in jtu.tree_leaves(params))
     return _hessian_core(params, exposures, model, onp.arange(n, dtype=onp.int32), int(batch_size))
 
 
-def gn_diag_exact(params: dict, exposures: list, model, chunk: int = 16) -> dict:
-    """Exact GN diagonal (+ regulariser curvature): one jvp per parameter, `chunk` at a time."""
+def gn_diag_exact(params: dict, exposures: list, model, chunk: int = 16, mapped: bool = False) -> dict:
+    """Exact GN diagonal (+ regulariser curvature): one jvp per parameter, `chunk` at a time. mapped: see hessian_diag."""
     exact, quad = _indices(params, exposures, tuple(params), 0)
-    return _gn_core(params, exposures, model, jr.key(0), exact, quad, 0, 1, int(chunk))
+    return (gn_core_mapped if mapped else _gn_core)(params, exposures, model, jr.key(0), exact, quad, 0, 1, int(chunk))
 
 
 def gn_diag_probe(params: dict, exposures: list, model, n_probes: int = 32,
                   probe_batch: int = 4, key=jr.key(0),
                   exact_blocks: tuple = ("cold_mask_opd",), exact_max_size: int = 64,
-                  chunk: int = 16) -> dict:
+                  chunk: int = 16, mapped: bool = False) -> dict:
     """Hutchinson estimate of the GN diagonal: mean over probes of (J^T (z sqrt(w)))^2.
 
     One vjp per exposure, `probe_batch` probes at a time. Probes are noisy for small blocks, so
-    leaves of size <= exact_max_size and all of `exact_blocks` use exact jvps (`chunk` at a time).
+    leaves of size <= exact_max_size and all of `exact_blocks` use exact jvps (`chunk` at a time). mapped: see hessian_diag.
     """
     exact, quad = _indices(params, exposures, tuple(exact_blocks), int(exact_max_size))
-    return _gn_core(params, exposures, model, key, exact, quad, int(n_probes), int(probe_batch), int(chunk))
+    return (gn_core_mapped if mapped else _gn_core)(params, exposures, model, key, exact, quad, int(n_probes),
+                                                    int(probe_batch), int(chunk))
 
 
 DIAG_METHODS = {"hessian": hessian_diag, "gn_exact": gn_diag_exact, "gn_probe": gn_diag_probe}

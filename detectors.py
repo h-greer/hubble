@@ -4,19 +4,28 @@ import jax.numpy as np
 import dLux as dl
 import dLux.utils as dlu
 import interpax as ipx
+from functools import cache
 
 """
 models for extra weird things that the NICMOS detector does that aren't in base dLux
 should be fitted to data first
 """
 
-def interp(image, knot_coords, sample_coords, method="linear", fill=0.0):
+def interp(image, knot_coords, sample_coords, method="linear", fill=0.0, **kwargs):
     xs, ys = knot_coords
     xpts, ypts = sample_coords.reshape(2, -1)
 
-    return ipx.interp2d(ypts, xpts, ys[:, 0], xs[0], image, method=method, extrap=fill).reshape(
+    return ipx.interp2d(ypts, xpts, ys[:, 0], xs[0], image, method=method, extrap=fill, **kwargs).reshape(
         sample_coords[0].shape
     )
+
+
+@cache
+def cubic2_deriv_matrix(n):
+    """Constant (n, n) D with D @ f = interpax's cubic2 df/dx on the pixel_coords(n, 2) grid; cached so jit/grad never
+    redo (or differentiate through) its tridiagonal solves."""
+    with jax.ensure_compile_time_eval():
+        return ipx.approx_df(dlu.pixel_coords(n, 2)[1][:, 0], np.eye(n), "cubic2", axis=0)
 
 
 class Resample(dl.layers.detector_layers.DetectorLayer):
@@ -45,7 +54,10 @@ class Resample(dl.layers.detector_layers.DetectorLayer):
         jac = jax.vmap(jax.jacfwd(point))(coords.reshape(2, -1).T)
         det = np.abs(np.linalg.det(jac)).reshape(coords.shape[1:])
         # TODO: Test different interpolation methods
-        return PSF.set("data", det*interp(PSF.data, coords, self.transform(coords), "cubic2"))
+        f = PSF.data
+        D = cubic2_deriv_matrix(f.shape[0]).astype(f.dtype)
+        fx = D @ f
+        return PSF.set("data", det*interp(f, coords, self.transform(coords), "cubic2", fx=fx, fy=f @ D.T, fxy=fx @ D.T))
 
     def __call__(self, PSF):
         return self.apply(PSF)

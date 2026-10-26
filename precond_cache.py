@@ -39,7 +39,7 @@ DEFAULT_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "da
 # Source files that define the loss: editing any of them invalidates the cache.
 _CODE_FILES = ["models.py", "stats.py", "apertures.py", "detectors.py", "spectra.py"]
 # Method kwargs that only change memory use, not the result.
-_MEMORY_KWARGS = {"batch_size", "chunk", "probe_batch"}
+_MEMORY_KWARGS = {"batch_size", "chunk", "probe_batch", "mapped"}
 
 # Length scale for a relevant leaf without a diagonal in the block; only the magnitude matters.
 DEFAULT_ATOL = {
