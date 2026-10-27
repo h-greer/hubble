@@ -365,7 +365,7 @@ things = {
     "distortion": sgd(g*1, 0),
 
     "resolved": adam(3e-2, 1200),
-    "contrast": sgd(g*1, 1200),
+    "contrast": adam(5e-3, 1200),
 }
 
 groups = list(things.keys())
