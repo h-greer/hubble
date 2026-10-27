@@ -87,13 +87,16 @@ ddir = '../data/NICMOS-LAPL-DD1/archive.stsci.edu/missions/hlsp/laplace/dd1/LAPL
 class SparcoFit(PointResolvedFit):
     """Star plus a resolved disc whose morphology is shared by all filters and rolls ("resolved", global: a log10 map,
     normalised to unit sum over its support) and whose flux in each filter is f_star 10^-c ("contrast", keyed by target
-    and filter). The disc has the star's spectrum ("spectrum", keyed by target and filter). Instrument keys as
-    imlup-adi's ResolvedFit: cold mask shift, tilt and OPD and detector defocus per exposure, the high-order wavefront
-    (primary_opd) shared by every exposure (it is in nm, so achromatic)."""
-    PARAM_KEYS = PointResolvedFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure",
-                                                "primary_opd": "global", "cold_mask_opd": "exposure",
-                                                "defocus3": "exposure",
-                                                "resolved": "global", "contrast": "target"}
+    and filter). The disc has the star's spectrum ("spectrum", keyed by target and filter). The high-order wavefront
+    (primary_opd, in nm, so achromatic) and the defocus after the occulter and at the detector are per visit, i.e. shared
+    by all filters within one roll; the low-order wavefront, pointing, cold mask shift, tilt and OPD, the defocus before
+    the occulter and the bias are per exposure; the instrument geometry (rotations, shears, scales, distortions) is global."""
+    PARAM_KEYS = PointResolvedFit.PARAM_KEYS | {
+        "primary_opd": "visit", "defocus2": "visit", "defocus3": "visit",
+        "primary_low": "exposure", "primary_tilt": "exposure",
+        "cold_mask_shift": "exposure", "cold_mask_tilt": "exposure", "cold_mask_opd": "exposure",
+        "defocus1": "exposure",
+        "resolved": "global", "contrast": "target"}
     support: Array
 
     def __init__(self, spectrum_basis, filter, wid, regulariser=np.zeros(2), support_radius=0.3, resolved_kwargs=None):
@@ -134,23 +137,23 @@ class SparcoFit(PointResolvedFit):
 # One exposure per filter per roll to start with; the rest are commented out. (Visits n4xj02 / n4xj20 are the 1.2 s
 # unocculted NIC2-FIX acquisitions and are not used.)
 roots = [
-    ("n4xj03usq", "F165M"),
-    # ("n4xj03uvq", "F165M"),
-    # ("n4xj03uwq", "F165M"),
-    # ("n4xj03uxq", "F165M"),
-    ("n4xj21dhq", "F165M"),
-    # ("n4xj21dkq", "F165M"),
-    # ("n4xj21dlq", "F165M"),
-    # ("n4xj21dmq", "F165M"),
+    # ("n4xj03usq", "F165M"),
+    # # ("n4xj03uvq", "F165M"),
+    # # ("n4xj03uwq", "F165M"),
+    # # ("n4xj03uxq", "F165M"),
+    # ("n4xj21dhq", "F165M"),
+    # # ("n4xj21dkq", "F165M"),
+    # # ("n4xj21dlq", "F165M"),
+    # # ("n4xj21dmq", "F165M"),
 
-    ("n4xj03v1q", "F171M"),
-    # ("n4xj03v4q", "F171M"),
-    # ("n4xj03v5q", "F171M"),
-    # ("n4xj03v6q", "F171M"),
-    ("n4xj21dpq", "F171M"),
-    # ("n4xj21dsq", "F171M"),
-    # ("n4xj21dtq", "F171M"),
-    # ("n4xj21duq", "F171M"),
+    # ("n4xj03v1q", "F171M"),
+    # # ("n4xj03v4q", "F171M"),
+    # # ("n4xj03v5q", "F171M"),
+    # # ("n4xj03v6q", "F171M"),
+    # ("n4xj21dpq", "F171M"),
+    # # ("n4xj21dsq", "F171M"),
+    # # ("n4xj21dtq", "F171M"),
+    # # ("n4xj21duq", "F171M"),
 
     ("n4xj03v8q", "F180M"),
     # ("n4xj03vcq", "F180M"),
