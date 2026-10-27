@@ -70,10 +70,17 @@ If a job is killed for memory, do not just raise the estimate: first shrink the 
 - Equivalence tests compare old vs new outputs (images, loglike, optics leaves) with exact equality or a
   stated tolerance, not just "it runs". To import a proposed copy of a module, put its directory first on
   `sys.path`, then the repo, and assert `module.__file__` points where you expect.
-- JAX 0.10.2 on this machine has two known miscompilations:
-  - jitted `jax.jvp` with compile-time-constant tangents is wrong: pass tangents as jit arguments;
-  - jitted reverse-mode gradients for `primary_rot`, `primary_shear` and `primary_spider` are wrong:
-    check those against forward mode (`plotting.model_jacobian`) or central finite differences.
+- JIT miscompilations reported on JAX 0.10.2 (jitted `jax.jvp` with compile-time-constant tangents; jitted
+  reverse-mode gradients for `primary_rot`, `primary_shear`, `primary_spider`) do NOT reproduce on JAX 0.11.2
+  (checked 2026-10-26): at wf 128 and at production size (betapic F207M: wf 512, crop 64, pad 2, oversample 4,
+  200 wavelengths / 6 nodes, Fresnel + wavefront PCA), jitted reverse == eager reverse == jitted forward to
+  <=4e-15, and constant vs traced jvp tangents agree exactly. Still pass tangents as jit arguments (harmless).
+- Gradient checks with a resolved disc: `InterpolatedResolvedSource` (models.py) stop-gradients its PSFs unless
+  `grad_optics=True` (by design: the disc does not constrain the optics). AD gradients w.r.t. optics parameters
+  therefore omit the disc image's dependence on the optics, while finite differences include it. With the
+  betapic disc on, AD vs FD for `primary_rot`/`shear`/`spider` differs by 2-60% at every wf size and optics
+  class; with the disc off (resolved = -30) they agree (rot 1e-7, spider 1e-4, shear within FD noise ~1e-2).
+  Compare optics gradients against FD with the disc off (or `grad_optics=True`), not against the full loss.
 
 ## Executing notebooks
 
