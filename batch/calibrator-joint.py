@@ -124,11 +124,12 @@ os.makedirs(out, exist_ok=True)
 # }
 
 # The cold mask lateral position (shift) and its tilt (a pupil-plane Tilt initialised from the era's
-# approximate hole offset, models.hole_tilt), cold-mask OPD and defocus can differ between exposures; rotation, shear, scale and
-# distortion stay global. The high-order wavefront (primary_opd) and low-order Zernikes are per exposure
+# approximate hole offset, models.hole_tilt), cold-mask OPD and all three defocus terms can differ between exposures;
+# rotation, shear, scale and distortion stay global. The high-order wavefront (primary_opd) and low-order Zernikes are per exposure
 class PerExposureColdMaskFit(SinglePointFit):
     PARAM_KEYS = SinglePointFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure",
-                                              "primary_opd": "exposure", "cold_mask_opd": "exposure", "defocus3": "exposure"}
+                                              "primary_opd": "exposure", "cold_mask_opd": "exposure",
+                                              "defocus1": "exposure", "defocus2": "exposure", "defocus3": "exposure"}
 
 # The spectrum is keyed by target, so all exposures of the visit share it
 exposures_single = [
