@@ -19,6 +19,35 @@ corners (~3-4.6x), so keep a margin of several `length` between the disc and the
 grid-averaged variance (edges included, constant mode removed), the variance at the centre is below it (~0.65-0.93
 sigma^2, less for larger length), which couples sigma and length somewhat.
 
+Polar (multipole) field, after virgil's MultipoleField (fields.py; "provisional" there): a log10 field on a polar
+(r, theta) grid in the deprojected disc plane, interpolated bilinearly onto the disc pixels,
+
+    log10 I = level + mean + P[ sigma * taper( L_r Z F_theta ) ],
+
+Z (n_r, n_theta) whitened, L_r the Cholesky factor of a radial Matern (nu_r in {1/2, 3/2, 5/2, inf}, length_r in
+disc-plane grid px), F_theta a circulant filter with the periodic Matern spectrum log S(m) = (-nu - 1/2) log1p((m
+length_theta)^2 / 2 nu) normalised to unit pointwise variance (length_theta in radians; at 2 rad ~30% of the variance
+is still in |m| >= 1, from ~4 rad the field is nearly axisymmetric), taper = tanh(r / spacing)^|m| on harmonic m
+(single-valued at r = 0), P the bilinear map from the polar grid onto the disc pixels (PolarGrid), set by the disc's
+geometry: cos_inc (cos of the inclination), pa (deg, the projected major axis from +y = rows towards +x = columns, in
+the disc grid's own frame; a flat disc's prior is unchanged by pa + 180) and the centre offset (dx, dy) in grid px.
+The geometry is a hyperparameter like sigma and the lengths: it sets the prior covariance, so it is chosen by the
+evidence on the same linear response (gp_evidence_grid_nd with linear / periodic axes), never by a MAP jointly with z
+or by a fit to a reference image. The radial grid is fixed in the disc plane (r_max, spacing, n_r independent of the
+geometry), so priors at different geometries share their latents and length_r its meaning; pixels beyond r_max (only
+at inclinations above PolarGrid's cover_inc) take the outermost ring's value.
+Unlike the DCT field no mode is removed, so `level` and the m = 0 part of the field share the overall level (the level
+prior separates them, so keep level_sd loose unless level_mu is trustworthy: a tight, mis-centred level prior is absorbed
+by the field and the evidence then prefers a larger sigma). A flat, thin disc: no flaring, phase function or brightness
+Jacobian; near edge on (inc >~ 80 deg) a thin disc's deprojection breaks down, so bound cos_inc away from 0. sigma is the rms at the polar nodes away from the centre (the taper lowers the m >= 1 variance within ~3
+spacings of r = 0); bilinear interpolation lowers it between nodes, so the pixel rms is ~0.75-0.9 sigma for length_r of
+1-4 spacings and ripples on the node lattice (as virgil's). length_r much below the node spacing is not identifiable
+(the pixels cannot see it): bound it below at ~the spacing.
+
+Both fields are linear in z, log10 I = level + mean + B z, which is all the machinery below uses (GPPrior / PolarPrior:
+field, field_T, congruence = B^T H B, field_matrix); the DCT applies B by fast transforms, the polar field as a dense
+matrix built once per hyperparameter point (geometry included).
+
 Hyperparameters. Never fit sigma / length by MAP jointly with z: in whitened coordinates a larger amplitude always lowers
 0.5 |z|^2, so the joint mode inflates the amplitude and over-fits modes the data do not constrain (Ensslin & Frommert 2011;
 virgil's fitting.py warns likewise). Instead, at fixed optics the detector image is linear in the disc d = 10**log10 I
@@ -34,12 +63,16 @@ verify_linear_response). Everything below then costs dense n x n linear algebra 
                       by a fraction of a nat per such direction, more for larger sigma: validate a sigma preference by
                       injection, or by sampling (gp-plan.md phase 3));
   gp_error_scale      per-exposure noise scale s_e (MacKay: stationary point of log Z in beta_e = 1 / s_e^2);
-  gp_evidence_grid    log-spaced (sigma, length) grid, warm-started, grown x2 while the optimum is on an edge, resumable;
-  gp_hyper_posterior  the grid as quadrature for p(sigma, length | data) under log-uniform hyperpriors (INLA-style);
+  gp_evidence_grid_nd grid over any hyperparameters, each axis log-spaced, linear or periodic (gp_evidence_grid: the DCT's
+                      (sigma, length)), warm-started, grown by a step while posterior mass sits on an edge, resumable;
+  local_axes          a local grid about a point, for refining / the joint grid around an optimum;
+  gp_hyper_posterior  the grid as quadrature for p(hyperparameters | data) under log-uniform hyperpriors (INLA-style);
   gp_laplace / gp_laplace_samples / gp_log10_std   the Laplace posterior N(theta_map, (I + J^T G J)^-1);
   gp_spectral_diagnostic   posterior power per DCT wavenumber vs the prior (1 per whitened mode);
+  gp_polar_diagnostic      the same per azimuthal order m and per radial latent row, for the polar field;
   simulate_response   injection: the response of simulated data, without any optics.
 """
+import itertools
 import os
 import warnings
 
@@ -54,7 +87,8 @@ from models import ModelFit, ModelParams, PointResolvedFit
 from batching import make_batch
 
 LN10 = float(onp.log(10.0))
-HYPER_NAMES = ("sigma", "length", "order", "mean", "level_prior")
+HYPER_NAMES = ("sigma", "length", "order", "length_r", "length_theta", "cos_inc", "pa", "dx", "dy", "mean",
+               "level_prior")   # any GP fit's
 
 
 # ----------------------------------------------------------------------------- prior
@@ -94,32 +128,169 @@ def reference_level(d_ref, mean=None):
     return float(np.mean(logd - (0. if mean is None else mean)))
 
 
-class GPResolvedFit(PointResolvedFit):
-    """PointResolvedFit with the Matern GP prior on log10 of the disc, always on an InterpolatedResolvedSource.
+# ----------------------------------------------------------------------------- polar (multipole) field
+_NUS = (0.5, 1.5, 2.5, float("inf"))
 
-    Parameters: "resolved" (wid x wid whitened coefficients z, start at zeros) and "resolved_level" (scalar, dex; the
-    spatial mean of log10 I - mean), both keyed by target. Hyperparameters are fit leaves (not parameters, never
-    optimised): sigma (dex), length (grid px, (row, col)), order, mean (log10 template, wid x wid) and level_prior
-    (mean, std) of the Normal prior on resolved_level; change them with set_hyper (no recompilation).
-    The loss gains the negative log prior 0.5 |z|^2 + 0.5 ((level - mu) / sd)^2, divided by n_share, the number of
-    exposures in the loss that share one target-keyed disc, so that it is counted once in total: set it with
-    with_n_share(exposures) on the full list of exposures entering the loss.
-    d_override (internal): a disc used instead of the parameters (LinearResponse, verify_linear_response)."""
+
+def _check_nu(nu):
+    nu = float(nu)
+    assert nu in _NUS, f"nu must be one of {_NUS} (closed-form Matern), got {nu}"
+    return nu
+
+
+def matern_correlation(d, nu):
+    """Matern correlation at separation d (in units of the length), nu in {1/2, 3/2, 5/2, inf} (virgil models._matern)."""
+    if nu == 0.5:
+        return np.exp(-d)
+    if nu == 1.5:
+        s = np.sqrt(3.)*d
+        return (1 + s)*np.exp(-s)
+    if nu == 2.5:
+        s = np.sqrt(5.)*d
+        return (1 + s + s**2/3)*np.exp(-s)
+    return np.exp(-0.5*d**2)
+
+
+def radial_factor(nodes, length, nu):
+    """Cholesky factor of the radial Matern correlation on `nodes` (virgil fields._radial_factor); the jitter scales
+    with the dtype's eps so that long lengths stay positive definite."""
+    corr = matern_correlation(np.abs(nodes[:, None] - nodes[None, :])/length, nu)
+    jitter = max(1e-6, 10*nodes.size*float(np.finfo(corr.dtype).eps))
+    return np.linalg.cholesky(corr + jitter*np.eye(nodes.size))
+
+
+def log_azimuthal_spectrum(m, length, nu):
+    """log S(m) of the periodic Matern over azimuthal order m (virgil models._log_azimuthal_spectrum); in log space so
+    that high orders underflow without NaN gradients."""
+    x = (m*length)**2
+    return -0.5*x if nu == float("inf") else (-nu - 0.5)*np.log1p(x/(2*nu))
+
+
+def _orders(n):
+    return np.minimum(np.arange(n), n - np.arange(n))
+
+
+def azimuthal_filter(latent, length, nu):
+    """Unit-variance periodic GP along the last axis from white `latent`: a circulant square root by FFT, normalised so
+    mean_m S(m) = 1 (virgil fields._azimuthal_filter)."""
+    n = latent.shape[-1]
+    lp = log_azimuthal_spectrum(_orders(n), length, nu)
+    amp = np.exp(0.5*(lp - jax.scipy.special.logsumexp(lp) + np.log(n)))
+    return np.real(np.fft.ifft(amp*np.fft.fft(latent, axis=-1), axis=-1))
+
+
+def polar_values(latent, nodes, spacing, sigma, length_r, length_theta, nu_r, nu_theta):
+    """The field on the polar grid, (n_r, n_theta): sigma * taper(L_r latent F_theta), taper = tanh(r / spacing)^|m| on
+    harmonic m (nodes[0] = 0, so only m = 0 survives at the centre; virgil fields.MultipoleField.polar_values)."""
+    field = sigma*(radial_factor(nodes, length_r, nu_r) @ azimuthal_filter(latent, length_theta, nu_theta))
+    taper = np.tanh(nodes/spacing)[:, None]**_orders(latent.shape[-1])[None, :]
+    return np.real(np.fft.ifft(taper*np.fft.fft(field, axis=1), axis=1))
+
+
+class PolarGrid(eqx.Module):
+    """A polar grid in the disc plane, r = 0 .. r_max at n_r uniform nodes and n_theta azimuths, for a wid x wid disc,
+    and the bilinear map from it onto the disc pixels for a given geometry (virgil fields.polar_interpolate /
+    undo_elliptical_transf_coord). The radial grid is static and the same for every geometry: r_max defaults to the
+    box's half-diagonal deprojected at cover_inc (deg), so every pixel is inside the grid up to that inclination and
+    the outermost ring's value extends beyond it. The geometry (cos_inc, pa, dx, dy) is an argument (traced: changing it
+    never recompiles). Frame: pixel (row i, column j) is at x = j - (wid - 1) / 2 - dx, y = i - (wid - 1) / 2 - dy (the
+    star at the centre for dx = dy = 0)."""
+    nodes: jax.Array
+    shape: tuple = eqx.field(static=True)
+    wid: int = eqx.field(static=True)
+    spacing: float = eqx.field(static=True)
+    nu_r: float = eqx.field(static=True)
+    nu_theta: float = eqx.field(static=True)
+
+    @classmethod
+    def build(cls, wid, n_r=44, n_theta=128, r_max=None, cover_inc=55., nu_r=1.5, nu_theta=None):
+        assert n_r >= 2 and n_theta >= 2 and n_theta % 2 == 0, "n_theta must be even (pa + 180 symmetry)"
+        if r_max is None:
+            r_max = (wid - 1)/2*onp.sqrt(2)/onp.cos(onp.deg2rad(cover_inc))
+        spacing = float(r_max)/(n_r - 1)
+        nu_r = _check_nu(nu_r)
+        nu_theta = nu_r if nu_theta is None else _check_nu(nu_theta)
+        return cls(np.asarray(spacing*onp.arange(n_r)), (int(n_r), int(n_theta)), int(wid), spacing, nu_r, nu_theta)
+
+    @property
+    def n_latent(self):
+        return self.shape[0]*self.shape[1]
+
+    @property
+    def r_max(self):
+        return self.spacing*(self.shape[0] - 1)
+
+    def coordinates(self, geometry):
+        """Disc-plane (r in grid px, theta in rad from the major axis) of every disc pixel, (wid, wid) each.
+        geometry = (cos_inc, pa_deg, dx, dy)."""
+        cos_inc, pa, dx, dy = geometry
+        c = (self.wid - 1)/2
+        y, x = np.mgrid[:self.wid, :self.wid] - c
+        x, y = x - dx, y - dy
+        p = np.deg2rad(pa)
+        xe = (x*np.cos(p) - y*np.sin(p))/np.maximum(cos_inc, 1e-3)
+        ye = x*np.sin(p) + y*np.cos(p)
+        return np.sqrt(xe**2 + ye**2), np.arctan2(xe, ye)
+
+    def interpolation(self, geometry):
+        """(idx, weights), each (wid^2, 4): the flat polar indices of each pixel's bilinear neighbours and their weights;
+        pixels beyond r_max get the outermost ring."""
+        n_r, n_t = self.shape
+        r, theta = self.coordinates(geometry)
+        f = np.minimum(r.ravel()/self.spacing, n_r - 1)
+        i0 = np.minimum(np.floor(f), n_r - 2)
+        wr = np.clip(f - i0, 0., 1.)
+        t = np.mod(theta.ravel(), 2*np.pi)*n_t/(2*np.pi)
+        j0 = np.floor(t)
+        wt = t - j0
+        i0, j0 = i0.astype(int), j0.astype(int) % n_t
+        j1 = (j0 + 1) % n_t
+        idx = np.stack([i0*n_t + j0, i0*n_t + j1, (i0 + 1)*n_t + j0, (i0 + 1)*n_t + j1], -1)
+        return idx, np.stack([(1 - wr)*(1 - wt), (1 - wr)*wt, wr*(1 - wt), wr*wt], -1)
+
+    def fraction_outside(self, geometry):
+        """The fraction of disc pixels beyond r_max (given the outermost ring's value) at this geometry."""
+        return np.mean(self.coordinates(geometry)[0] > self.r_max)
+
+    def values(self, z, sigma, length_r, length_theta):
+        return polar_values(z.reshape(self.shape), self.nodes, self.spacing, sigma, length_r, length_theta,
+                            self.nu_r, self.nu_theta)
+
+    def field(self, z, sigma, length_r, length_theta, geometry, interp=None):
+        """log10 field on the disc pixels (wid, wid) from latents z (n_r, n_theta); interp: precomputed
+        self.interpolation(geometry)."""
+        idx, w = self.interpolation(geometry) if interp is None else interp
+        v = self.values(z, sigma, length_r, length_theta).ravel()
+        return np.sum(w*v[idx], axis=1).reshape(self.wid, self.wid)
+
+    def digest(self):
+        import hashlib
+        h = hashlib.sha256(repr((self.shape, self.wid, self.spacing, self.nu_r, self.nu_theta)).encode())
+        h.update(onp.ascontiguousarray(onp.asarray(self.nodes)).tobytes())
+        return h.hexdigest()[:16]
+
+
+def _geometry(cos_inc=1., pa=0., dx=0., dy=0.):
+    return np.stack([np.asarray(x, dtype=float) for x in (cos_inc, pa, dx, dy)])
+
+
+class _GPFitBase(PointResolvedFit):
+    """Shared by the GP disc fits (always on an InterpolatedResolvedSource): log10 I = level + mean + log10_field(z).
+
+    Parameters: "resolved" (the whitened latents z, start at zeros) and "resolved_level" (scalar, dex), both keyed by
+    target. Hyperparameters (type(fit).HYPER) are fit leaves, not parameters: change them with set_hyper (no
+    recompilation). The loss gains the negative log prior 0.5 |z|^2 + 0.5 ((level - mu) / sd)^2, divided by n_share,
+    the number of exposures in the loss sharing one target-keyed disc (with_n_share), so it is counted once in total.
+    d_override (internal): a disc used instead of the parameters (LinearResponse, verify_linear_response).
+    Subclasses define log10_field(z) and surrogate_prior(), and must not override get_distribution."""
     PARAM_KEYS = PointResolvedFit.PARAM_KEYS | {"resolved_level": "target"}
-    sigma: jax.Array
-    length: jax.Array
-    order: jax.Array
+    HYPER = ("mean", "level_prior")
     mean: jax.Array
     level_prior: jax.Array
     n_share: int
     d_override: jax.Array | None
 
-    def __init__(self, spectrum_basis, filter, wid, sigma=1., length=1.6, order=2., mean=None, level_prior=(0., 1.),
-                 n_share=1, resolved_kwargs=None):
-        super().__init__(spectrum_basis, filter, wid, resolved_source="interp", resolved_kwargs=resolved_kwargs)
-        self.sigma = np.asarray(sigma, dtype=float)
-        self.length = np.broadcast_to(np.asarray(length, dtype=float), (2,))
-        self.order = np.asarray(order, dtype=float)
+    def _init_gp(self, wid, mean, level_prior, n_share):
         self.mean = np.zeros((wid, wid)) if mean is None else np.asarray(mean, dtype=float)
         assert self.mean.shape == (wid, wid), f"mean template shape {self.mean.shape} != ({wid}, {wid})"
         self.level_prior = np.asarray(level_prior, dtype=float)
@@ -127,15 +298,18 @@ class GPResolvedFit(PointResolvedFit):
         self.regulariser = None  # the GP prior replaces the L1/TSV weights; precond.py handles it through n_share
         self.d_override = None
 
-    def amplitude(self):
-        return matern_amplitude(self.mean.shape, self.length, self.sigma, self.order)
+    def log10_field(self, z):
+        raise NotImplementedError
+
+    def surrogate_prior(self):
+        raise NotImplementedError
 
     def get_distribution(self, model, exposure):
         if self.d_override is not None:
             return self.d_override
         z = model.get(self.map_param(exposure, "resolved"))
         level = model.get(self.map_param(exposure, "resolved_level"))
-        return 10**(level + self.mean + gp_field(z, self.amplitude()))
+        return 10**(level + self.mean + self.log10_field(z))
 
     def neg_log_prior(self, model, exposure):
         z = model.get(self.map_param(exposure, "resolved"))
@@ -148,6 +322,68 @@ class GPResolvedFit(PointResolvedFit):
         if return_im or per_pix:
             return ll
         return ll + self.neg_log_prior(model, exposure)/self.n_share
+
+
+class GPResolvedFit(_GPFitBase):
+    """The DCT Matern prior: "resolved" holds the wid x wid whitened DCT coefficients. Hyperparameters: sigma (dex),
+    length (grid px, (row, col)), order, mean (log10 template, wid x wid), level_prior ((mean, std) of resolved_level,
+    the spatial mean of log10 I - mean)."""
+    HYPER = ("sigma", "length", "order", "mean", "level_prior")
+    sigma: jax.Array
+    length: jax.Array
+    order: jax.Array
+
+    def __init__(self, spectrum_basis, filter, wid, sigma=1., length=1.6, order=2., mean=None, level_prior=(0., 1.),
+                 n_share=1, resolved_kwargs=None):
+        super().__init__(spectrum_basis, filter, wid, resolved_source="interp", resolved_kwargs=resolved_kwargs)
+        self.sigma = np.asarray(sigma, dtype=float)
+        self.length = np.broadcast_to(np.asarray(length, dtype=float), (2,))
+        self.order = np.asarray(order, dtype=float)
+        self._init_gp(wid, mean, level_prior, n_share)
+
+    def amplitude(self):
+        return matern_amplitude(self.mean.shape, self.length, self.sigma, self.order)
+
+    def log10_field(self, z):
+        return gp_field(z, self.amplitude())
+
+    def surrogate_prior(self):
+        return gp_prior(self.mean.shape[0], self.sigma, self.length, self.order, self.mean, self.level_prior)
+
+
+class PolarGPResolvedFit(_GPFitBase):
+    """The polar (multipole) prior on a PolarGrid: "resolved" holds the (n_r, n_theta) whitened latents.
+    Hyperparameters: sigma (dex), length_r (disc-plane grid px), length_theta (rad), the geometry cos_inc, pa (deg),
+    dx, dy (grid px), mean and level_prior (as GPResolvedFit's, but the level is no longer exactly the spatial mean: the
+    polar field keeps its constant part). Change any of them with set_hyper (no recompilation)."""
+    HYPER = ("sigma", "length_r", "length_theta", "cos_inc", "pa", "dx", "dy", "mean", "level_prior")
+    grid: PolarGrid
+    sigma: jax.Array
+    length_r: jax.Array
+    length_theta: jax.Array
+    cos_inc: jax.Array
+    pa: jax.Array
+    dx: jax.Array
+    dy: jax.Array
+
+    def __init__(self, spectrum_basis, filter, wid, grid, sigma=0.5, length_r=4., length_theta=0.5, cos_inc=1.,
+                 pa=0., dx=0., dy=0., mean=None, level_prior=(0., 1.), n_share=1, resolved_kwargs=None):
+        assert grid.wid == wid, f"PolarGrid is for a {grid.wid} px disc, not {wid}"
+        super().__init__(spectrum_basis, filter, wid, resolved_source="interp", resolved_kwargs=resolved_kwargs)
+        self.grid = grid
+        self.sigma, self.length_r, self.length_theta, self.cos_inc, self.pa, self.dx, self.dy = (
+            np.asarray(x, dtype=float) for x in (sigma, length_r, length_theta, cos_inc, pa, dx, dy))
+        self._init_gp(wid, mean, level_prior, n_share)
+
+    def geometry(self):
+        return _geometry(self.cos_inc, self.pa, self.dx, self.dy)
+
+    def log10_field(self, z):
+        return self.grid.field(z, self.sigma, self.length_r, self.length_theta, self.geometry())
+
+    def surrogate_prior(self):
+        return polar_prior(self.grid, self.sigma, self.length_r, self.length_theta, self.cos_inc, self.pa, self.dx,
+                           self.dy, self.mean, self.level_prior)
 
 
 def gp_n_share(exposures):
@@ -174,12 +410,14 @@ def check_n_share(exposures):
 
 
 def set_hyper(exposures, **hyper):
-    """`exposures` with GP hyperparameters replaced (sigma, length, order, mean, level_prior; None leaves one alone)."""
-    unknown = set(hyper) - set(HYPER_NAMES)
-    assert not unknown, f"unknown GP hyperparameters {unknown}; expected some of {HYPER_NAMES}"
+    """`exposures` with GP hyperparameters replaced (type(fit).HYPER: GPResolvedFit sigma, length, order, mean,
+    level_prior; PolarGPResolvedFit sigma, length_r, length_theta, cos_inc, pa, dx, dy, mean, level_prior; None leaves
+    one alone)."""
     out = []
     for e in exposures:
         fit = e.fit
+        unknown = set(hyper) - set(type(fit).HYPER)
+        assert not unknown, f"{type(fit).__name__} has no hyperparameters {unknown}; it has {type(fit).HYPER}"
         for name, v in hyper.items():
             if v is None:
                 continue
@@ -218,13 +456,36 @@ def gp_image(params, exposure):
     p = params.params if isinstance(params, ModelParams) else params
     fit = exposure.fit
     key = fit.get_key(exposure, "resolved")
-    return 10**(p["resolved_level"][key] + fit.mean + gp_field(p["resolved"][key], fit.amplitude()))
+    return 10**(p["resolved_level"][key] + fit.mean + fit.log10_field(p["resolved"][key]))
 
 
-# ----------------------------------------------------------------------------- surrogate prior (theta = (z, u))
-class GPPrior(eqx.Module):
-    """The GP prior in the surrogate's coordinates theta = (z.ravel(), u) ~ N(0, I), level = level_mu + level_sd u.
-    All leaves are arrays, so jitted functions taking it never recompile when the hyperparameters change."""
+# ----------------------------------------------------------------------------- surrogate priors (theta = (z, u))
+class _SurrogatePrior(eqx.Module):
+    """A GP prior in the surrogate's coordinates theta = (z.ravel(), u) ~ N(0, I), level = level_mu + level_sd u,
+    log10 I = level + mean + field(z), with field linear in z (field(z) = B z). Subclasses give field / field_T (B^T) /
+    congruence (B^T H B) / field_matrix (B W) and meta_arrays (what a grid point's digest covers). All leaves are
+    arrays, so jitted functions taking a prior never recompile when its hyperparameters change."""
+
+    @property
+    def wid(self):
+        return self.mean.shape[0]
+
+    def log10_image(self, theta):
+        return self.level_mu + self.level_sd*theta[-1] + self.mean + self.field(theta[:-1])
+
+    def distribution(self, theta):
+        return 10**self.log10_image(theta)
+
+    def theta(self, z, level):
+        return np.concatenate([np.ravel(z), np.atleast_1d((level - self.level_mu)/self.level_sd)])
+
+    def params(self, theta):
+        """(z, level) for the fit's "resolved" and "resolved_level"."""
+        return theta[:-1].reshape(self.latent_shape), self.level_mu + self.level_sd*theta[-1]
+
+
+class GPPrior(_SurrogatePrior):
+    """The DCT Matern prior: B = Psi diag(amp), applied by fast DCTs."""
     amp: jax.Array
     mean: jax.Array
     level_mu: jax.Array
@@ -234,23 +495,36 @@ class GPPrior(eqx.Module):
     order: jax.Array
 
     @property
-    def wid(self):
-        return self.amp.shape[0]
+    def latent_shape(self):
+        return self.amp.shape
 
-    def log10_image(self, theta):
+    @property
+    def n_latent(self):
+        return self.amp.size
+
+    def field(self, z):
+        return gp_field(np.reshape(z, self.amp.shape), self.amp)
+
+    def field_T(self, v):
         w = self.amp.shape[0]
-        return self.level_mu + self.level_sd*theta[-1] + self.mean + gp_field(theta[:-1].reshape(w, w), self.amp)
+        return self.amp.ravel()*_dct2(v.reshape(w, w)).ravel()
 
-    def distribution(self, theta):
-        return 10**self.log10_image(theta)
-
-    def theta(self, z, level):
-        return np.concatenate([np.ravel(z), np.atleast_1d((level - self.level_mu)/self.level_sd)])
-
-    def params(self, theta):
-        """(z, level) for GPResolvedFit's "resolved" and "resolved_level"."""
+    def congruence(self, H):
         w = self.amp.shape[0]
-        return theta[:-1].reshape(w, w), self.level_mu + self.level_sd*theta[-1]
+        a = self.amp.ravel()
+        return _congruence_dct(H.reshape(w, w, w, w)).reshape(w*w, w*w)*a[:, None]*a[None, :]
+
+    def field_matrix(self, Wz):
+        w = self.amp.shape[0]
+        return jsp.fft.idctn(self.amp[:, :, None]*Wz.reshape(w, w, -1), type=2, norm="ortho", axes=(0, 1)).reshape(w*w, -1)
+
+    def fit_field(self, f):
+        """The z whose field is closest to the log10 field f (exact on the modes with amp > 0)."""
+        a = self.amp.ravel()
+        return np.where(a > 0, _dct2(f.reshape(self.amp.shape)).ravel()/np.where(a > 0, a, 1.), 0.)
+
+    def meta_arrays(self):
+        return (self.sigma, self.length, self.order, self.mean, self.level_mu, self.level_sd)
 
 
 def gp_prior(wid, sigma, length, order=2., mean=None, level_prior=(0., 1.)):
@@ -261,9 +535,73 @@ def gp_prior(wid, sigma, length, order=2., mean=None, level_prior=(0., 1.)):
     return GPPrior(matern_amplitude((wid, wid), length, sigma, order), mean, mu, sd, sigma, length, order)
 
 
+class PolarPrior(_SurrogatePrior):
+    """The polar prior: B (wid^2, n_r n_theta) = d log10 I / d z at one geometry, a dense matrix built by polar_prior."""
+    B: jax.Array
+    mean: jax.Array
+    level_mu: jax.Array
+    level_sd: jax.Array
+    sigma: jax.Array
+    length_r: jax.Array
+    length_theta: jax.Array
+    geometry: jax.Array
+    nodes: jax.Array
+    latent_shape: tuple = eqx.field(static=True)
+    grid_digest: str = eqx.field(static=True)
+
+    @property
+    def n_latent(self):
+        return self.B.shape[1]
+
+    def field(self, z):
+        w = self.mean.shape[0]
+        return (self.B @ np.ravel(z)).reshape(w, w)
+
+    def field_T(self, v):
+        return self.B.T @ v
+
+    def congruence(self, H):
+        return self.B.T @ (H @ self.B)
+
+    def field_matrix(self, Wz):
+        return self.B @ Wz
+
+    def fit_field(self, f):
+        """The minimum-norm z whose field is closest to the log10 field f (ridge-regularised B^T (B B^T)^-1 f). Call it
+        eagerly or with the prior as a jit argument: closed over in a jit, B B^T is constant-folded (minutes)."""
+        BBt = self.B @ self.B.T
+        ridge = 1e-8*np.trace(BBt)/BBt.shape[0]
+        return self.B.T @ np.linalg.solve(BBt + ridge*np.eye(BBt.shape[0]), f.ravel())
+
+    def meta_arrays(self):
+        return (self.sigma, self.length_r, self.length_theta, self.geometry, self.mean, self.level_mu, self.level_sd,
+                onp.frombuffer(self.grid_digest.encode(), dtype=onp.uint8))
+
+
+@eqx.filter_jit
+def _polar_basis(grid, sigma, length_r, length_theta, geometry):
+    """B = d(log10 field)/dz, column by column: the field is linear in z, so column i is the field of the i-th unit
+    latent (built from the traced index, cf. precond._map_tangents; batched to bound memory). Everything is traced,
+    geometry included, so this compiles once per grid."""
+    n = grid.n_latent
+    interp = grid.interpolation(geometry)
+    cols = jax.lax.map(lambda i: grid.field(jax.nn.one_hot(i, n, dtype=float), sigma, length_r, length_theta, geometry,
+                                            interp).ravel(), np.arange(n), batch_size=256)
+    return cols.T
+
+
+def polar_prior(grid, sigma, length_r, length_theta, cos_inc=1., pa=0., dx=0., dy=0., mean=None, level_prior=(0., 1.)):
+    mean = np.zeros((grid.wid, grid.wid)) if mean is None else np.asarray(mean, dtype=float)
+    mu, sd = (np.asarray(x, dtype=float) for x in level_prior)
+    sigma, length_r, length_theta = (np.asarray(x, dtype=float) for x in (sigma, length_r, length_theta))
+    geometry = _geometry(cos_inc, pa, dx, dy)
+    return PolarPrior(_polar_basis(grid, sigma, length_r, length_theta, geometry), mean, mu, sd, sigma, length_r,
+                      length_theta, geometry, grid.nodes, grid.shape, grid.digest())
+
+
 def gp_prior_from_fit(fit):
-    """The GPPrior of a GPResolvedFit's current hyperparameters."""
-    return gp_prior(fit.mean.shape[0], fit.sigma, fit.length, fit.order, fit.mean, fit.level_prior)
+    """The surrogate prior of a GP fit's current hyperparameters."""
+    return fit.surrogate_prior()
 
 
 # ----------------------------------------------------------------------------- linear response
@@ -347,9 +685,9 @@ def _response_group(model, group, batch_size):
 
 def _check_response_inputs(model, exposures):
     for e in exposures:
-        assert isinstance(e.fit, GPResolvedFit), f"{e.key}: LinearResponse needs a GPResolvedFit, got {type(e.fit)}"
+        assert isinstance(e.fit, _GPFitBase), f"{e.key}: LinearResponse needs a GP fit, got {type(e.fit)}"
         # the response and its check both inject the disc through d_override, so a subclass must not bypass it
-        assert type(e.fit).get_distribution is GPResolvedFit.get_distribution, \
+        assert type(e.fit).get_distribution is _GPFitBase.get_distribution, \
             f"{type(e.fit).__name__} overrides get_distribution; LinearResponse would not see the disc"
     keys = {e.fit.get_key(e, "resolved") for e in exposures}
     assert len(keys) == 1, f"LinearResponse handles one disc; exposures read {keys}"
@@ -429,33 +767,26 @@ def _weighted(resp, beta):
 
 
 def _whitened_metric(G, d, prior):
-    """J^T G J for theta = (z, u), J = dd/dtheta = ln10 diag(d) [Psi diag(amp) | level_sd 1], Psi the idctn matrix.
-    Psi^T H Psi is two 2D DCTs of H reshaped (w, w, w, w), not a dense matmul."""
-    w = prior.amp.shape[0]
-    n = w*w
+    """J^T G J for theta = (z, u), J = dd/dtheta = ln10 diag(d) [B | level_sd 1], B = d(field)/dz (prior.congruence:
+    two 2D DCTs for the DCT prior, B^T H B for the polar one)."""
     D = LN10*d
     H = G*D[:, None]*D[None, :]
-    B = _congruence_dct(H.reshape(w, w, w, w)).reshape(n, n)
-    a = prior.amp.ravel()
     r = H.sum(1)
-    zu = a*_dct2(r.reshape(w, w)).ravel()*prior.level_sd
-    top = np.concatenate([B*a[:, None]*a[None, :], zu[:, None]], axis=1)
+    zu = prior.field_T(r)*prior.level_sd
+    top = np.concatenate([prior.congruence(H), zu[:, None]], axis=1)
     bottom = np.concatenate([zu, (r.sum()*prior.level_sd**2)[None]])[None, :]
     return np.concatenate([top, bottom], axis=0)
 
 
 def _grad(G, b, d, prior, theta):
     """Gradient of 0.5 d^T G d - b^T d + 0.5 |theta|^2 in theta."""
-    w = prior.amp.shape[0]
     Dg = LN10*d*(G @ d - b)
-    gz = prior.amp.ravel()*_dct2(Dg.reshape(w, w)).ravel()
-    return np.concatenate([gz, (prior.level_sd*Dg.sum())[None]]) + theta
+    return np.concatenate([prior.field_T(Dg), (prior.level_sd*Dg.sum())[None]]) + theta
 
 
 def _log10_step(prior, delta):
     """Change of log10 I (flat) for a step delta in theta."""
-    w = prior.amp.shape[0]
-    return gp_field(delta[:-1].reshape(w, w), prior.amp).ravel() + prior.level_sd*delta[-1]
+    return prior.field(delta[:-1]).ravel() + prior.level_sd*delta[-1]
 
 
 @eqx.filter_jit
@@ -468,9 +799,9 @@ def _map_core(resp, beta, prior, theta0, max_iter, tol, max_dex):
         f = 0.5*(d @ (G @ d)) - b @ d + 0.5*yy + 0.5*theta @ theta
         return np.where(np.isfinite(f), f, np.inf)
 
-    # a start whose image overflows (e.g. a warm start far from these hyperparameters) falls back to the prior mean
-    f0 = obj(theta0)
-    theta0 = np.where(np.isfinite(f0), theta0, np.zeros_like(theta0))
+    # a start worse than the prior mean (e.g. a warm start far from these hyperparameters, or one whose image overflows)
+    # is replaced by it
+    theta0 = np.where(obj(theta0) <= obj(np.zeros_like(theta0)), theta0, np.zeros_like(theta0))
 
     def cond(c):
         theta, lam, f, k, dec = c
@@ -508,7 +839,7 @@ def gp_map(resp, prior, theta0=None, beta=None, n_iter=200, tol=1e-6, max_dex=1.
     """MAP theta = (z, u) at fixed hyperparameters, by Levenberg-Marquardt with the Gauss-Newton metric I + J^T G J
     (exact Cholesky solves) and a trust region of max_dex per pixel per step, until the Newton decrement is below tol
     or n_iter steps. Returns (theta, info): objective (without the lognorm constants), steps, decrement, damping."""
-    theta0 = np.zeros(prior.amp.size + 1) if theta0 is None else np.asarray(theta0, dtype=float)
+    theta0 = np.zeros(prior.n_latent + 1) if theta0 is None else np.asarray(theta0, dtype=float)
     return _map_core(resp, _beta(resp, beta), prior, theta0, n_iter, tol, max_dex)
 
 
@@ -522,8 +853,11 @@ def _evidence_core(resp, beta, prior, theta):
     chi2 = resp.chi2(d)
     nll = 0.5*beta*chi2 + resp.lognorm - 0.5*resp.n_good*np.log(beta)
     g = _grad(G, b, d, prior, theta)
-    # tr(M^-1 A_e), M = I + A: each exposure's share of the well-measured directions, divided by beta_e
-    tr = jax.lax.map(lambda Ge: np.sum(V*(_whitened_metric(Ge, d, prior) @ V), 0) @ (1/(1 + mu)), resp.G)
+    # tr(M^-1 A_e), M = I + A, A_e = J^T G_e J: each exposure's share of the well-measured directions, divided by beta_e.
+    # In pixel space: tr(M^-1 J^T G_e J) = sum(G_e * (J M^-1 J^T)), J M^-1 J^T = (JV / (1 + mu)) (JV)^T
+    JV = LN10*d[:, None]*(prior.field_matrix(V[:-1]) + prior.level_sd*V[-1][None, :])
+    K = (JV/(1 + mu)) @ JV.T
+    tr = jax.lax.map(lambda Ge: np.sum(Ge*K), resp.G)
     return dict(logZ=-nll.sum() - 0.5*theta @ theta - 0.5*np.sum(np.log1p(mu)), nll=nll, chi2=chi2,
                 prior=0.5*theta @ theta, occam=0.5*np.sum(np.log1p(mu)), gamma=np.sum(mu/(1 + mu)),
                 gamma_e=beta*tr, tr_e=tr, newton_decrement=np.sum((V.T @ g)**2/(1 + mu)), grad_norm=np.sqrt(g @ g))
@@ -564,16 +898,11 @@ def gp_error_scale(resp, prior, theta0=None, beta0=None, n_outer=20, tol=1e-4, n
 
 
 # ----------------------------------------------------------------------------- hyperparameter grid
-def _point_file(outdir, tag, sigma, length):
-    return os.path.join(outdir, f"{tag}_s{sigma:.6g}_l{length:.6g}.npz")
-
-
 def _point_meta(resp, prior, beta, n_iter):
-    """Digest of everything a grid point depends on besides (sigma, length), stored with it and checked on resume."""
+    """Digest of everything a grid point depends on, stored with it and checked on resume."""
     import hashlib
-    h = hashlib.sha256()
-    for a in (resp.b, resp.yy, resp.n_good, resp.G.diagonal(axis1=1, axis2=2), beta, prior.order, prior.mean,
-              prior.level_mu, prior.level_sd, n_iter):
+    h = hashlib.sha256(type(prior).__name__.encode())
+    for a in (resp.b, resp.yy, resp.n_good, resp.G.diagonal(axis1=1, axis2=2), beta, n_iter, *prior.meta_arrays()):
         h.update(onp.ascontiguousarray(onp.asarray(a, dtype=float)).tobytes())
     return h.hexdigest()[:16]
 
@@ -587,143 +916,378 @@ def _ratio(vals, name):
     return float(r[0])
 
 
-def gp_evidence_grid(resp, sigmas, lengths, order=2., mean=None, level_prior=(0., 1.), beta=None, outdir=None,
-                     tag="grid", max_growth=3, bounds=((0.03, 8.), (0.1, 30.)), n_iter=200, theta0=None,
-                     converged_tol=1e-3, edge_dlogz=5., verbose=True):
-    """Laplace evidence over a log-spaced (sigma, length) grid (isotropic length), each point a warm-started MAP.
+def _difference(vals, name):
+    """The common step of a linearly spaced axis (None for a single value)."""
+    if len(vals) < 2:
+        return None
+    d = onp.diff(vals)
+    assert onp.allclose(d, d[0], rtol=1e-6, atol=1e-12) and d[0] > 0, \
+        f"{name} must be evenly spaced with one step > 0, got {vals}"
+    return float(d[0])
 
-    Each axis must have one common ratio. While an edge row / column holds a point within edge_dlogz of the best log Z
-    (posterior mass at the edge, not only the argmax), the grid is extended by one step past that edge, at most
-    max_growth times and within `bounds` ((sigma_lo, hi), (length_lo, hi)). Warm starts keep the neighbour's log10
-    image (z rescaled by its amplitude ratio). A non-finite log Z counts as -inf (and unconverged). With `outdir`, each
-    point is saved as {outdir}/{tag}_s{sigma}_l{length}.npz with a digest of the response, beta and prior settings, and
-    reloaded on a rerun only if that digest matches (else recomputed). Returns a dict with sigmas, lengths, logZ (n_s,
-    n_l), gamma, chi2 (summed), newton_decrement, converged, steps, the MAP thetas (n_s, n_l, n + 1), and the inputs."""
-    sigmas, lengths = sorted(float(s) for s in sigmas), sorted(float(l) for l in lengths)
-    r_s, r_l = _ratio(sigmas, "sigmas"), _ratio(lengths, "lengths")
-    # starting values outside the bounds are dropped (e.g. a local grid about an optimum near a bound)
-    for name, vals, (lo, hi) in (("sigmas", sigmas, bounds[0]), ("lengths", lengths, bounds[1])):
-        keep = [v for v in vals if lo*(1 - 1e-9) <= v <= hi*(1 + 1e-9)]
-        if len(keep) < len(vals):
-            warnings.warn(f"gp_evidence_grid {tag}: {name} outside {(lo, hi)} dropped: {sorted(set(vals) - set(keep))}")
-        assert keep, f"gp_evidence_grid {tag}: no {name} within {(lo, hi)}"
-        vals[:] = keep
+
+class _Axis:
+    """One grid axis: scale "log" (a common ratio), "linear" (a common step) or "periodic" (a common step, period
+    `period`, values covering the whole period: no edges, no growth). step is the ratio (log) or the difference."""
+
+    def __init__(self, name, vals, scale="log", period=None):
+        assert scale in ("log", "linear", "periodic"), f"{name}: scale {scale}"
+        self.name, self.scale, self.period = name, scale, period
+        self.vals = sorted(float(v) for v in vals)
+        self.step = _ratio(self.vals, name) if scale == "log" else _difference(self.vals, name)
+        if scale == "periodic":
+            assert period is not None and self.step is not None and onp.isclose(self.step*len(self.vals), period), \
+                f"{name}: a periodic axis needs evenly spaced values covering its period {period}, got {self.vals}"
+
+    def distance(self, a, b):
+        """|a - b| in steps (log: in log; periodic: wrapped)."""
+        if self.step is None:
+            return 0.
+        if self.scale == "log":
+            return abs(onp.log(a/b))/onp.log(self.step)
+        d = abs(a - b)
+        if self.scale == "periodic":
+            d = min(d % self.period, -d % self.period)
+        return d/self.step
+
+    def next_out(self, lower):
+        v = self.vals[0] if lower else self.vals[-1]
+        if self.scale == "log":
+            return v/self.step if lower else v*self.step
+        return v - self.step if lower else v + self.step
+
+    def can_grow(self, lower, bounds):
+        if self.step is None or self.scale == "periodic":
+            return False
+        lo, hi = bounds
+        v = self.next_out(lower)
+        return v >= lo - 1e-9*abs(lo) - 1e-12 if lower else v <= hi + 1e-9*abs(hi) + 1e-12
+
+    def measure(self, v):
+        """The axis's uniform measure: log v for "log", v otherwise."""
+        with onp.errstate(divide="ignore"):
+            return onp.log(onp.asarray(v, dtype=float)) if self.scale == "log" else onp.asarray(v, dtype=float)
+
+    def cell_edges(self, bounds=None):
+        """(lower, upper) edges of each cell in the axis's measure, half a step either side of its value, clipped to
+        finite bounds (so a cell at a bound does not count prior mass beyond it)."""
+        t = self.measure(self.vals)
+        h = 0. if self.step is None else 0.5*(onp.log(self.step) if self.scale == "log" else self.step)
+        e0, e1 = t - h, t + h
+        if bounds is not None and self.scale != "periodic":
+            e0, e1 = onp.maximum(e0, self.measure(bounds[0])), onp.minimum(e1, self.measure(bounds[1]))
+        return e0, e1
+
+    def log_masses(self, bounds):
+        """log prior mass of each cell under the axis's uniform hyperprior on `bounds` (cells clipped to them); None
+        when the bounds are not finite in the axis's measure."""
+        if self.step is None:
+            return onp.zeros(len(self.vals))
+        if self.scale == "periodic":
+            return onp.full(len(self.vals), onp.log(self.step/self.period))
+        if bounds is None:
+            return None
+        lo, hi = self.measure(bounds[0]), self.measure(bounds[1])
+        if not (onp.isfinite(lo) and onp.isfinite(hi)):
+            return None
+        e0, e1 = self.cell_edges(bounds)
+        with onp.errstate(divide="ignore"):
+            return onp.log(onp.maximum(e1 - e0, 0.)) - onp.log(hi - lo)
+
+    def at_bound(self, lower, bounds):
+        """Whether the face's cell reaches the hyperprior's bound (posterior mass there is not truncated by the grid); a
+        bound not finite in the axis's measure is never reached."""
+        if bounds is None:
+            return False
+        b = self.measure(bounds[0] if lower else bounds[1])
+        if not onp.isfinite(b):
+            return False
+        t = self.measure(self.vals[0] if lower else self.vals[-1])
+        h = 0. if self.step is None else 0.5*(onp.log(self.step) if self.scale == "log" else self.step)
+        return bool(t - h <= b + 1e-9*abs(b) + 1e-12) if lower else bool(t + h >= b - 1e-9*abs(b) - 1e-12)
+
+
+def _axes(grid):
+    """_Axis objects of a grid dict (a legacy 2D DCT grid: log sigma, length)."""
+    names = grid.get("names", ["sigma", "length"])
+    vals = grid.get("axes") or {"sigma": grid["sigmas"], "length": grid["lengths"]}
+    scales, periods = grid.get("scales", {}), grid.get("periods", {})
+    return [_Axis(k, vals[k], scales.get(k, "log"), periods.get(k)) for k in names]
+
+
+def gp_best(grid, converged_only=True):
+    """{name: value} at the grid's best log Z among its converged points (an unconverged MAP's log Z is not
+    trustworthy); warns and uses every point if none converged."""
+    logZ = onp.asarray(grid["logZ"], dtype=float)
+    if converged_only:
+        ok = onp.asarray(grid["converged"]).astype(bool)
+        if ok.any():
+            logZ = onp.where(ok, logZ, -onp.inf)
+        else:
+            warnings.warn(f"gp_best {grid.get('tag')}: no converged point; using the best unconverged one")
+    idx = onp.unravel_index(onp.argmax(logZ), logZ.shape)
+    return {a.name: float(a.vals[i]) for a, i in zip(_axes(grid), idx)}
+
+
+def local_axes(center, steps, scales=None, n=1):
+    """Axes {name: values} of a local grid about `center` ({name: value}): 2n + 1 values per axis, spaced by steps[name]
+    (a ratio for a "log" axis, else a difference; a "periodic" axis becomes a linear one about the centre, with its
+    period's uniform prior kept through bounds = centre -+ period / 2)."""
+    scales = scales or {}
+    out = {}
+    for k, c in center.items():
+        if scales.get(k, "log") == "log":
+            out[k] = [c*steps[k]**i for i in range(-n, n + 1)]
+        else:
+            out[k] = [c + steps[k]*i for i in range(-n, n + 1)]
+    return out
+
+
+def gp_evidence_grid_nd(resp, axes, make_prior, beta=None, outdir=None, tag="grid", abbrev=None, max_growth=3,
+                        bounds=None, scales=None, periods=None, n_iter=200, theta0=None, converged_tol=1e-3,
+                        edge_dlogz=5., recheck_top=3, verbose=True):
+    """Laplace evidence over a grid of hyperparameters, each point a warm-started MAP.
+
+    axes: {name: values}; scales: {name: "log" (default; one common ratio) | "linear" (one common step) | "periodic"
+    (one common step covering periods[name])}; make_prior(**{name: value}) -> surrogate prior. While a face of the grid
+    holds a point within edge_dlogz of the best log Z (posterior mass at the edge, not only the argmax), the grid is
+    extended by one step past that face, at most max_growth times and within bounds ({name: (lo, hi)}; periodic axes
+    never grow). Warm starts keep the nearest evaluated point's log10 field (prior.fit_field), nearness in steps along
+    each axis. A non-finite log Z counts as -inf (and unconverged). With `outdir`, each point is saved as
+    {outdir}/{tag}_{abbrev[name]}{value}....npz with a digest of the response, beta and prior settings, and reloaded on a
+    rerun only if that digest matches (else recomputed). The recheck_top best points are re-solved from the prior mean
+    (a warm start can land in a worse MAP) and the better solution kept. Returns a dict: names, axes {name: values},
+    scales, periods,
+    bounds, logZ / gamma / chi2 (summed) / newton_decrement / converged / steps (grid-shaped), thetas (grid shape +
+    (n + 1,)), best (index tuple of the best converged point, as gp_best), tag."""
+    names = list(axes)
+    abbrev = abbrev or {k: k for k in names}
+    bounds = dict(bounds or {})
+    scales = {k: (scales or {}).get(k, "log") for k in names}
+    periods = {k: (periods or {}).get(k) for k in names}
+    ax = {k: _Axis(k, axes[k], scales[k], periods[k]) for k in names}
+    for k in names:   # starting values outside the bounds are dropped (e.g. a local grid about an optimum near a bound)
+        if scales[k] == "periodic":
+            continue
+        lo, hi = bounds.setdefault(k, (0., onp.inf) if scales[k] == "log" else (-onp.inf, onp.inf))
+        keep = [v for v in ax[k].vals if lo - 1e-9*abs(lo) - 1e-12 <= v <= hi + 1e-9*abs(hi) + 1e-12]
+        if len(keep) < len(ax[k].vals):
+            warnings.warn(f"gp_evidence_grid {tag}: {k} outside {(lo, hi)} dropped: {sorted(set(ax[k].vals) - set(keep))}")
+        assert keep, f"gp_evidence_grid {tag}: no {k} within {(lo, hi)}"
+        ax[k].vals = keep
     beta = _beta(resp, beta)
-    w = resp.wid
     results = {}
     if outdir is not None:
         os.makedirs(outdir, exist_ok=True)
 
-    def prior_at(s, l):
-        return gp_prior(w, s, l, order, mean, level_prior)
+    def path(pt):
+        return os.path.join(outdir, tag + "".join(f"_{abbrev[k]}{v:.6g}" for k, v in zip(names, pt)) + ".npz")
 
     def run(points):
-        for s, l in points:
-            if (s, l) in results:
+        for pt in points:
+            if pt in results:
                 continue
-            prior = prior_at(s, l)
+            prior = make_prior(**dict(zip(names, pt)))
             meta = _point_meta(resp, prior, beta, n_iter)
-            path = None if outdir is None else _point_file(outdir, tag, s, l)
-            if path is not None and os.path.exists(path):
-                with onp.load(path) as f:
+            fpath = None if outdir is None else path(pt)
+            if fpath is not None and os.path.exists(fpath):
+                with onp.load(fpath) as f:
                     if "meta" in f.files and str(f["meta"]) == meta:
-                        results[(s, l)] = {k: f[k] for k in f.files}
+                        results[pt] = {k: f[k] for k in f.files}
                         continue
                 if verbose:
-                    print(f"[gp grid {tag}] {path} was made with other inputs; recomputing", flush=True)
-            if results:   # warm start from the nearest evaluated point, keeping its log10 image
-                near = min(results, key=lambda p: (onp.log(p[0]/s))**2 + (onp.log(p[1]/l))**2)
+                    print(f"[gp grid {tag}] {fpath} was made with other inputs; recomputing", flush=True)
+            if results:   # warm start from the nearest evaluated point (in steps along each axis), keeping its field
+                near = min(results, key=lambda q: sum(ax[k].distance(a, b)**2 for k, a, b in zip(names, q, pt)))
                 th = onp.asarray(results[near]["theta"])
-                a_old, a_new = onp.asarray(prior_at(*near).amp).ravel(), onp.asarray(prior.amp).ravel()
-                z = onp.where(a_new > 0, th[:-1]*a_old/onp.where(a_new > 0, a_new, 1.), 0.)
-                start = np.asarray(onp.concatenate([z, th[-1:]]))
+                start = (np.concatenate([prior.fit_field(np.asarray(results[near]["field"])), np.asarray(th[-1:])])
+                         if "field" in results[near] else np.asarray(th))
             else:
                 start = theta0
-            theta, info = gp_map(resp, prior, start, beta, n_iter)
-            ev = jax.tree.map(onp.asarray, gp_log_evidence(resp, prior, theta, beta))
-            r = dict(sigma=s, length=l, order=float(order), theta=onp.asarray(theta), meta=meta,
-                     steps=int(info["steps"]),
-                     **{k: ev[k] for k in ("logZ", "nll", "chi2", "prior", "occam", "gamma", "gamma_e",
-                                          "newton_decrement", "grad_norm")})
-            finite = bool(onp.isfinite(r["logZ"]))
-            r["logZ"] = r["logZ"] if finite else onp.asarray(-onp.inf)
-            r["converged"] = finite and bool(r["newton_decrement"] < converged_tol)
-            results[(s, l)] = r
-            if path is not None:
-                _save_npz(path, **r)
-            if verbose:
-                print(f"[gp grid {tag}] sigma {s:.4g} dex, length {l:.4g} px: logZ {float(r['logZ']):.3f}, "
-                      f"gamma {float(r['gamma']):.1f}, decrement {float(r['newton_decrement']):.1e}, "
-                      f"{r['steps']} steps", flush=True)
+            solve(pt, prior, meta, fpath, start, cold_checked=start is None)   # a cold first point needs no recheck
 
-    def table():
-        return onp.array([[float(results[(s, l)]["logZ"]) for l in lengths] for s in sigmas])
+    def solve(pt, prior, meta, fpath, start, cold_checked=False):
+        theta, info = gp_map(resp, prior, start, beta, n_iter)
+        ev = jax.tree.map(onp.asarray, gp_log_evidence(resp, prior, theta, beta))
+        r = dict(zip(names, pt), theta=onp.asarray(theta), field=onp.asarray(prior.field(theta[:-1])), meta=meta,
+                 steps=int(info["steps"]), cold_checked=cold_checked,
+                 **{k: ev[k] for k in ("logZ", "nll", "chi2", "prior", "occam", "gamma", "gamma_e",
+                                      "newton_decrement", "grad_norm")})
+        finite = bool(onp.isfinite(r["logZ"]))
+        r["logZ"] = r["logZ"] if finite else onp.asarray(-onp.inf)
+        r["converged"] = finite and bool(r["newton_decrement"] < converged_tol)
+        if pt in results and ((bool(results[pt]["converged"]), float(results[pt]["logZ"]))
+                              >= (r["converged"], float(r["logZ"]))):   # converged first, then the higher log Z
+            results[pt]["cold_checked"] = onp.asarray(True)   # the warm solution stands
+            if fpath is not None:
+                _save_npz(fpath, **results[pt])
+            return
+        results[pt] = r
+        if fpath is not None:
+            _save_npz(fpath, **r)
+        if verbose:
+            print(f"[gp grid {tag}] " + ", ".join(f"{k} {v:.4g}" for k, v in zip(names, pt))
+                  + f": logZ {float(r['logZ']):.3f}, gamma {float(r['gamma']):.1f}, decrement "
+                  f"{float(r['newton_decrement']):.1e}, {r['steps']} steps", flush=True)
+
+    def points():
+        return list(itertools.product(*(ax[k].vals for k in names)))
+
+    def table(key, reduce=None):
+        a = onp.array([onp.asarray(results[pt][key]) for pt in points()])
+        a = a if reduce is None else reduce(a)
+        return a.reshape(tuple(len(ax[k].vals) for k in names) + a.shape[1:])
 
     for growth in range(max_growth + 1):
-        # snake order, so each point starts from a neighbour
-        run([(s, l) for i, s in enumerate(sigmas) for l in (lengths if i % 2 == 0 else lengths[::-1])])
-        logZ = table()
+        run(points())
+        logZ = table("logZ").astype(float)
         if growth == max_growth:
             break
         near_max = logZ > onp.max(logZ) - edge_dlogz
         grew = False
-        for vals, ratio, (lo, hi), lo_edge, hi_edge in (
-                (sigmas, r_s, bounds[0], near_max[0].any(), near_max[-1].any()),
-                (lengths, r_l, bounds[1], near_max[:, 0].any(), near_max[:, -1].any())):
-            if ratio is None:
-                continue
-            if lo_edge and vals[0]/ratio >= lo:
-                vals.insert(0, vals[0]/ratio)
-                grew = True
-            if hi_edge and vals[-1]*ratio <= hi:
-                vals.append(vals[-1]*ratio)
-                grew = True
+        for i, k in enumerate(names):
+            for lower, face in ((True, 0), (False, -1)):
+                if onp.take(near_max, face, axis=i).any() and ax[k].can_grow(lower, bounds.get(k)):
+                    v = ax[k].next_out(lower)
+                    ax[k].vals = [v] + ax[k].vals if lower else ax[k].vals + [v]
+                    grew = True
         if not grew:
             break
-    i, j = onp.unravel_index(onp.argmax(logZ), logZ.shape)
-    get = lambda k: onp.array([[onp.asarray(results[(s, l)][k]) for l in lengths] for s in sigmas])
-    grid = dict(sigmas=onp.array(sigmas), lengths=onp.array(lengths), logZ=logZ, gamma=get("gamma"),
-                chi2=get("chi2").sum(-1), newton_decrement=get("newton_decrement"), converged=get("converged"),
-                steps=get("steps"), thetas=get("theta"), order=float(order), best=(int(i), int(j)), tag=tag)
+    for flat in onp.argsort(logZ.ravel())[::-1][:recheck_top]:   # cold restarts of the best points
+        pt = points()[flat]
+        if bool(results[pt].get("cold_checked", False)):
+            continue
+        prior = make_prior(**dict(zip(names, pt)))
+        old = float(results[pt]["logZ"])
+        solve(pt, prior, str(results[pt]["meta"]), None if outdir is None else path(pt), None, cold_checked=True)
+        if verbose and float(results[pt]["logZ"]) > old:
+            print(f"[gp grid {tag}] cold start better by {float(results[pt]['logZ']) - old:.3g} at {pt}", flush=True)
+    logZ, ok = table("logZ").astype(float), table("converged").astype(bool)
+    if not ok.any():
+        warnings.warn(f"gp_evidence_grid {tag}: no point converged; best is the best unconverged one")
+    best = tuple(int(i) for i in onp.unravel_index(onp.argmax(onp.where(ok, logZ, -onp.inf) if ok.any() else logZ),
+                                                   logZ.shape))   # the best converged point, as gp_best
+    grid = dict(names=names, axes={k: onp.array(ax[k].vals) for k in names}, scales=scales, periods=periods,
+                bounds=bounds, logZ=logZ, gamma=table("gamma"), chi2=table("chi2", lambda a: a.sum(-1)),
+                newton_decrement=table("newton_decrement"), converged=table("converged"), steps=table("steps"),
+                thetas=table("theta"), best=best, tag=tag)
+    if not onp.isfinite(logZ).any():
+        warnings.warn(f"gp_evidence_grid {tag}: no point has a finite log Z")
+        return grid
     ew = gp_hyper_posterior(grid)["edge_weight"]
     if ew > 1e-2:
-        warnings.warn(f"gp_evidence_grid {tag}: {ew:.2f} of the posterior weight is on the edge of the final grid "
-                      "(growth limit or bounds reached): its intervals are truncated")
+        warnings.warn(f"gp_evidence_grid {tag}: {ew:.2f} of the posterior weight is on faces short of the hyperprior's "
+                      "bounds (growth limit, or a step past the bound): its intervals are truncated")
     return grid
 
 
-def _quantiles(x, w, qs=(0.16, 0.5, 0.84)):
-    """Quantiles of a distribution on log-spaced cells x (weights w), interpolating the CDF in log x at the cell
-    centres; a cell is assumed to span half a step either side."""
-    lx = onp.log(x)
-    edges = onp.concatenate([[lx[0] - 0.5*(lx[1] - lx[0])] if len(x) > 1 else [lx[0] - 0.5],
-                             0.5*(lx[1:] + lx[:-1]),
-                             [lx[-1] + 0.5*(lx[-1] - lx[-2])] if len(x) > 1 else [lx[0] + 0.5]])
+def gp_evidence_grid(resp, sigmas, lengths, order=2., mean=None, level_prior=(0., 1.), beta=None, outdir=None,
+                     tag="grid", max_growth=3, bounds=((0.03, 8.), (0.1, 30.)), n_iter=200, theta0=None,
+                     converged_tol=1e-3, edge_dlogz=5., verbose=True):
+    """gp_evidence_grid_nd for the DCT prior over (sigma, length) (isotropic length), with the 2D return keys sigmas,
+    lengths, best (i, j), order, and point files {tag}_s{sigma}_l{length}.npz as before."""
+    w = resp.wid
+    grid = gp_evidence_grid_nd(
+        resp, {"sigma": sigmas, "length": lengths},
+        lambda sigma, length: gp_prior(w, sigma, length, order, mean, level_prior), beta=beta, outdir=outdir, tag=tag,
+        abbrev={"sigma": "s", "length": "l"}, max_growth=max_growth,
+        bounds={"sigma": bounds[0], "length": bounds[1]}, n_iter=n_iter, theta0=theta0, converged_tol=converged_tol,
+        edge_dlogz=edge_dlogz, recheck_top=0, verbose=verbose)
+    out = {k: v for k, v in grid.items() if k not in ("names", "axes", "scales", "periods", "bounds")}   # plain arrays
+    return out | dict(sigmas=grid["axes"]["sigma"], lengths=grid["axes"]["length"], order=float(order))
+
+
+def _quantiles(x, w, qs=(0.16, 0.5, 0.84), scale="log", period=None, bounds=None):
+    """Quantiles of a distribution on evenly spaced cells x (weights w), interpolating the CDF at the cell edges (a
+    cell spans half a step either side, clipped to finite bounds), in log x for "log", in x for "linear"; for
+    "periodic", about the circular mean (x unwrapped to within half a period of it) and returned modulo the period."""
+    x, w = onp.asarray(x, dtype=float), onp.asarray(w, dtype=float)
+    if len(x) < 2:
+        return onp.full(len(qs), x[0])
+    if scale == "periodic":
+        a = 2*onp.pi*x/period
+        mean = onp.arctan2(onp.sum(w*onp.sin(a)), onp.sum(w*onp.cos(a)))*period/(2*onp.pi)
+        u = mean + (x - mean + period/2) % period - period/2
+        order = onp.argsort(u)
+        q = _quantiles(u[order], w[order], qs, "linear") % period
+        return onp.where(onp.isclose(q, period), 0., q)
+    ax = _Axis("q", x, scale)
+    e0, e1 = ax.cell_edges(bounds)   # an infinite bound clips nothing (maximum / minimum)
+    edges = onp.concatenate([e0[:1], e1])
     cdf = onp.concatenate([[0.], onp.cumsum(w)/onp.sum(w)])
-    return onp.exp(onp.interp(qs, cdf, edges))
+    q = onp.interp(qs, cdf, edges)
+    return onp.exp(q) if scale == "log" else q
 
 
-def gp_hyper_posterior(grid, box=None):
-    """p(sigma, length | data) on the grid under log-uniform hyperpriors over its extent (each axis log-spaced, so a
-    uniform weight per cell): weights = softmax(logZ). Returns the weights, the marginal quantiles (16, 50, 84 %) of
-    sigma and length, edge_weight (the posterior weight on the grid's border: large means truncated intervals), and
-    log_evidence = log of the mean of Z over the cells. log_evidence depends on the grid's extent, so to compare model
-    variants (order, template) whose grids grew differently, pass box = (sigmas, lengths), a common set of cells, and
-    compare log_evidence_box: the evidence under the same log-uniform hyperprior on that box for every variant."""
-    logZ = grid["logZ"]
-    lse = onp.logaddexp.reduce(logZ.ravel())
-    w = onp.exp(logZ - lse)
-    edge = onp.ones_like(w, dtype=bool)
-    if min(w.shape) > 2:
-        edge[1:-1, 1:-1] = False
-    out = dict(weights=w, sigma_q=_quantiles(grid["sigmas"], w.sum(1)), length_q=_quantiles(grid["lengths"], w.sum(0)),
-               log_evidence=float(lse - onp.log(logZ.size)), edge_weight=float(w[edge].sum()))
+def gp_hyper_posterior(grid, box=None, bounds=None):
+    """p(hyperparameters | data) on the grid under uniform hyperpriors on each axis (in log for "log" axes, else
+    linear; each axis evenly spaced in that measure, so a uniform weight per cell): weights = softmax(logZ). Returns the
+    weights, quantiles {name: (16, 50, 84 %)} of each marginal (circular for periodic axes), edge_weight (the posterior
+    weight on faces whose cells stop short of the hyperprior's bounds: large means truncated intervals; a face whose
+    cell reaches a bound, or on a periodic axis, is not an edge), and log_evidence = log of the mean of Z over the cells. log_evidence depends on the
+    grid's extent; to compare grids of different extent pass box = {name: values} (a common set of cells; for a 2D DCT
+    grid also a (sigmas, lengths) tuple) and compare log_evidence_box, or pass bounds = {name: (lo, hi)} (default: the
+    grid's own) for log_evidence_bounds, the evidence under the uniform hyperprior on those fixed bounds (each cell's
+    prior mass its width over the range; the posterior assumed ~0 outside the grid: check edge_weight), which compares
+    models with different hyperparameters fairly given bounds chosen before seeing the data. Axes with a single value
+    are fixed (no edge, quantiles = the value). A single-cell posterior gives intervals of one cell's width.
+    Unconverged points (grid["converged"]) get zero weight throughout (an unconverged MAP's log Z is not trustworthy;
+    every point is used, with a warning, if none converged), in log_evidence(_box, _bounds) too; unconverged_fraction
+    is their share of the cells and unconverged_weight the largest posterior weight one of them would have had."""
+    axs = _axes(grid)
+    names = [a.name for a in axs]
+    bounds = {**grid.get("bounds", {}), **(bounds or {})}
+    logZ = onp.asarray(grid["logZ"], dtype=float)
+    conv = onp.asarray(grid.get("converged", onp.ones(logZ.shape)), dtype=bool)
+    ok = conv if conv.any() else onp.ones(logZ.shape, dtype=bool)   # the points that carry weight
+    if not conv.any():
+        warnings.warn(f"gp_hyper_posterior {grid.get('tag')}: no converged point; using every point")
+    logZ_all, logZ = logZ, onp.where(ok, logZ, -onp.inf)
+    # each cell's prior mass: uniform on each axis's bounds (cells at a bound clipped to it); axes without finite
+    # bounds count every cell equally and leave log_evidence_bounds undefined
+    masses = [a.log_masses(bounds.get(a.name)) for a in axs]
+    bounded = all(m is not None for m in masses)
+    logmass = onp.zeros(logZ.shape)
+    for i, m in enumerate(masses):
+        if m is not None:
+            shape = [1]*logZ.ndim
+            shape[i] = -1
+            logmass = logmass + m.reshape(shape)
+    logpost = logZ + logmass
+    lse = onp.logaddexp.reduce(logpost.ravel())
+    # the weight the unconverged points would have had, counting them
+    lse_all = onp.logaddexp.reduce((logZ_all + logmass).ravel())
+    w_un = onp.exp(logZ_all + logmass - lse_all)[~ok] if onp.isfinite(lse_all) else onp.zeros(0)
+    w = onp.exp(logpost - lse) if onp.isfinite(lse) else onp.full(logZ.shape, onp.nan)
+    edge = onp.zeros(w.shape, dtype=bool)
+    for i, a in enumerate(axs):
+        if len(a.vals) < 2 or a.scale == "periodic":
+            continue
+        for lower, face in ((True, 0), (False, len(a.vals) - 1)):
+            if a.at_bound(lower, bounds.get(a.name)):   # the cell reaches the hyperprior's bound: not truncated
+                continue
+            sl = [slice(None)]*w.ndim
+            sl[i] = face
+            edge[tuple(sl)] = True
+    q = {a.name: _quantiles(a.vals, w.sum(axis=tuple(j for j in range(w.ndim) if j != i)), scale=a.scale,
+                            period=a.period, bounds=bounds.get(a.name)) for i, a in enumerate(axs)}
+    out = dict(weights=w, quantiles=q, log_evidence=float(onp.logaddexp.reduce(logZ.ravel()) - onp.log(logZ.size)),
+               edge_weight=float(w[edge].sum()), unconverged_fraction=float(onp.mean(~conv)),
+               unconverged_weight=float(w_un.max()) if w_un.size else 0.)
+    if bounded:
+        out["log_evidence_bounds"] = float(lse)
+    if "sigmas" in grid:   # the DCT grid's 2D keys
+        out |= dict(sigma_q=q["sigma"], length_q=q["length"])
     if box is not None:
-        si = [int(onp.argmin(onp.abs(onp.log(grid["sigmas"]/s)))) for s in box[0]]
-        li = [int(onp.argmin(onp.abs(onp.log(grid["lengths"]/l)))) for l in box[1]]
-        assert onp.allclose(grid["sigmas"][si], box[0]) and onp.allclose(grid["lengths"][li], box[1]), \
-            "box cells must be grid cells"
-        sub = logZ[onp.ix_(si, li)]
+        if not isinstance(box, dict):
+            box = dict(zip(names, box))
+        idx = []
+        for a in axs:
+            vals = onp.asarray(a.vals)
+            ii = [int(onp.argmin(onp.abs(vals - v))) for v in box[a.name]]
+            assert onp.allclose(vals[ii], box[a.name]), "box cells must be grid cells"
+            idx.append(ii)
+        sub = logZ[onp.ix_(*idx)]
         out["log_evidence_box"] = float(onp.logaddexp.reduce(sub.ravel()) - onp.log(sub.size))
     return out
 
@@ -751,10 +1315,9 @@ def gp_laplace_samples(theta, laplace, key, n=200):
 def gp_log10_std(prior, laplace):
     """Exact per-pixel posterior std of log10 I under the Laplace approximation (log10 I is linear in theta)."""
     mu, V = laplace
-    w = prior.amp.shape[0]
+    w = prior.wid
     W = V/np.sqrt(1 + mu)
-    LW = jsp.fft.idctn(prior.amp[:, :, None]*W[:-1].reshape(w, w, -1), type=2, norm="ortho", axes=(0, 1))
-    LW = LW.reshape(w*w, -1) + prior.level_sd*W[-1][None, :]
+    LW = prior.field_matrix(W[:-1]) + prior.level_sd*W[-1][None, :]
     return np.sqrt(np.sum(LW**2, axis=1)).reshape(w, w)
 
 
@@ -763,6 +1326,7 @@ def gp_spectral_diagnostic(prior, theta, laplace):
     <z_k^2> = z_map_k^2 + var_k, which averages to 1 when the prior's spectral shape is right. A systematic excess
     (deficit) over a range of wavenumbers means the Matern shape has too little (too much) power there. Also returns
     the mean posterior variance per bin (1: unconstrained by the data, 0: fully measured). freq is in cycles / px."""
+    assert isinstance(prior, GPPrior), "gp_spectral_diagnostic is for the DCT prior; use gp_polar_diagnostic"
     mu, V = laplace
     w = prior.amp.shape[0]
     var = np.sum(V[:-1]**2/(1 + mu), axis=1)
@@ -781,3 +1345,29 @@ def gp_spectral_diagnostic(prior, theta, laplace):
         out["var"].append(var[sel].mean())
         out["count"].append(sel.sum())
     return {k: onp.array(v) for k, v in out.items()}
+
+
+def gp_polar_diagnostic(prior, theta, laplace):
+    """For the polar prior: posterior power of the whitened latents against the prior's (1 per latent), per azimuthal
+    order |m| (orthonormal FFT of z along theta, which commutes with L_r, F_theta and the taper, so whitened mode m
+    feeds only harmonic m) and per radial latent row k. An excess (deficit) at some |m| means the azimuthal spectrum
+    has too little (too much) power there. The per-row numbers are only a rough radial guide: L_r is lower-triangular,
+    so row k (the Cholesky innovation at node r_k) feeds every node at r >= r_k, and for length_r >> spacing the first
+    rows set most of the field.
+    Returns m, power_m, var_m (mean posterior variance: 1 unconstrained, 0 measured), count_m, power_m_err, and r
+    (node radii, disc-plane px), power_r, var_r."""
+    assert isinstance(prior, PolarPrior), "gp_polar_diagnostic is for the polar prior"
+    mu, V = laplace
+    n_r, n_t = prior.latent_shape
+    W = (V/np.sqrt(1 + mu))[:-1].reshape(n_r, n_t, -1)
+    Zf = np.fft.fft(theta[:-1].reshape(n_r, n_t), axis=1, norm="ortho")
+    var = onp.asarray(np.sum(np.abs(np.fft.fft(W, axis=1, norm="ortho"))**2, axis=2))
+    power = onp.abs(onp.asarray(Zf))**2 + var
+    m = onp.asarray(_orders(n_t))
+    ms = onp.unique(m)
+    count = onp.array([n_r*onp.sum(m == k) for k in ms])
+    zvar = onp.asarray(np.sum(W**2, axis=2))
+    return dict(m=ms, power_m=onp.array([power[:, m == k].mean() for k in ms]),
+                var_m=onp.array([var[:, m == k].mean() for k in ms]), count_m=count, power_m_err=onp.sqrt(2/count),
+                r=onp.asarray(prior.nodes), power_r=onp.asarray(theta[:-1].reshape(n_r, n_t)**2 + zvar).mean(1),
+                var_r=zvar.mean(1))
