@@ -13,6 +13,10 @@ import os
 
 jax.config.update("jax_enable_x64", True)
 
+# Persistent compilation cache (directory from JAX_COMPILATION_CACHE_DIR, set in the .sh); cache every compile
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 0)
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
+
 
 # Optimisation imports
 import zodiax as zdx
@@ -121,11 +125,10 @@ os.makedirs(out, exist_ok=True)
 
 # The cold mask lateral position (shift) and its tilt (a pupil-plane Tilt initialised from the era's
 # approximate hole offset, models.hole_tilt), cold-mask OPD and defocus can differ between exposures; rotation, shear, scale and
-# distortion stay global. The high-order wavefront (primary_opd) is per visit (shared by the exposures of one visit, whose
-# residuals differ by only ~1.3 sigma); low-order Zernikes stay per exposure
+# distortion stay global. The high-order wavefront (primary_opd) and low-order Zernikes are per exposure
 class PerExposureColdMaskFit(SinglePointFit):
     PARAM_KEYS = SinglePointFit.PARAM_KEYS | {"cold_mask_shift": "exposure", "cold_mask_tilt": "exposure",
-                                              "primary_opd": "visit", "cold_mask_opd": "exposure", "defocus3": "exposure"}
+                                              "primary_opd": "exposure", "cold_mask_opd": "exposure", "defocus3": "exposure"}
 
 # The spectrum is keyed by target, so all exposures of the visit share it
 exposures_single = [
@@ -286,6 +289,9 @@ things_start = {
 }
 
 groups = list(things.keys())
+# per_block=False: one preconditioner compile for all blocks; mapped=True (below): lax.map over exposures, so compile time
+# does not grow with the number of exposures
+precond_kwargs = dict(n_probes=32, chunk=4, per_block=False, exact_max_size=32)
 
 # %%
 orig_params = params.params
@@ -293,7 +299,7 @@ opt_params = set_array({k:orig_params[k] for k in orig_params if k in things_sta
 
 losses, params_history = optimise_new(
     opt_params, model_single, exposures_single, things_start, 500,
-    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
+    mapped=True, precond_method="gn_probe", precond_kwargs=precond_kwargs)
 
 # %%
 plt.figure(figsize=(10,10))
@@ -313,7 +319,7 @@ opt_params = set_array({k:orig_params[k] for k in orig_params if k in things})
 
 losses, params_history = optimise_new(
     opt_params, model_single, exposures_single, things, 2000,
-    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
+    mapped=True, precond_method="gn_probe", precond_kwargs=precond_kwargs)
 
 # %%
 plt.figure(figsize=(10,10))
@@ -408,7 +414,7 @@ np.save(f"{out}/losses_stage1.npy", np.asarray(losses_start))
 # diagnostics.npy above stay the stage-2 results.
 n_optx = 2048
 x3, optx_info = optimise_optimistix(params_history[-1], model, exposures_single, max_steps=n_optx, return_info=True,
-                                    precond_method="gn_probe", precond_kwargs=dict(n_probes=32, chunk=4, per_block=True))
+                                    mapped=True, precond_method="gn_probe", precond_kwargs=precond_kwargs)
 final_optx = ModelParams(x3)
 model_optx = final_optx.inject(model_single)
 np.save(f"{out}/params_amp_optx.npy", x3)

@@ -59,7 +59,7 @@ npoly = 2
 n_nodes = 6  # Hermite knots across the 100-wavelength spectrum, for the star and the disc
 
 # Fourier mode k of primary_opd puts a speckle at k lambda / 3 m; k_max = 25 reaches ~3.6" at 2.07 um, beyond the crop
-n_modes = 50
+n_modes = 40
 n_zernikes = 50
 
 resolved_wid = 56                    # 56 x 0.0864" = 4.84", the 64 px crop
@@ -333,8 +333,8 @@ things = {
     "primary_opd": adam(2e-2, 50),
 
     "spectrum": sgd(g*1, 0),
-    "primary_tilt": sgd(g*1., 0),
-    "cold_mask_tilt": sgd(g*1, 0),
+    "primary_tilt": adam(1e-2, 0),
+    "cold_mask_tilt": adam(1e-2, 0),
     "cold_mask_opd": sgd(g*1., 0),
 
     "defocus1": sgd(g*1, 0),
@@ -365,7 +365,7 @@ things = {
     "distortion": sgd(g*1, 0),
 
     "resolved": adam(3e-2, 1200),
-    "contrast": adam(5e-3, 1200),
+    "contrast": adam(3e-2, 1200),
 }
 
 groups = list(things.keys())
