@@ -37,7 +37,7 @@ CACHE_VERSION = 4
 DEFAULT_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "tmp_precond_cache")
 
 # Source files that define the loss: editing any of them invalidates the cache.
-_CODE_FILES = ["models.py", "stats.py", "apertures.py", "detectors.py", "spectra.py"]
+_CODE_FILES = ["models.py", "stats.py", "apertures.py", "detectors.py", "spectra.py", "gp.py", "batching.py"]
 # Method kwargs that only change memory use, not the result.
 _MEMORY_KWARGS = {"batch_size", "chunk", "probe_batch", "mapped"}
 

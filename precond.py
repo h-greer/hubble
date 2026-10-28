@@ -21,7 +21,7 @@ import jax.tree_util as jtu
 import equinox as eqx
 from jax.flatten_util import ravel_pytree
 
-from models import ModelParams, TSV_loss
+from models import ModelParams, PointResolvedFit, TSV_loss
 from fitting import loss_fn
 from batching import make_batch, gn_core_mapped
 
@@ -59,11 +59,13 @@ def _weighted_images(x, unravel, exposures, model):
 def _regulariser_curvature(params, exposures):
     """Exact d2(reg)/d(resolved)^2, a pytree like params (zero unless PointResolvedFit-style).
 
-    reg = reg[0]*L2(d) + reg[1]*TSV(d) with d = 10**resolved and TSV(d) = d^T A d, where
-    A_kk = 4 for every pixel (tikhonov pads by 2), so grad_d TSV = 2 A d and
+    reg = reg[0]*L1(d) + reg[1]*TSV(d) (PointResolvedFit.loglike) with d = 10**resolved > 0 and
+    TSV(d) = d^T A d, where A_kk = 4 for every pixel (tikhonov pads by 2), so grad_d TSV = 2 A d and
       d2 TSV/dr2 = LN10^2 (2 A_kk d^2 + d g) = LN10^2 (8 d^2 + d g),  g = grad TSV,
-      d2 L2 /dr2 = LN10^2 * 4 d^2.
+      d2 L1 /dr2 = LN10^2 * d          (L1 = sum d; its Gauss-Newton part is zero, this is the exact term).
     Clipped at >= 0 since d*g can be negative. No n x n matrix is needed.
+    Fits whose regulariser is not of this form (a loglike or get_distribution overriding PointResolvedFit's, or
+    weights that are not (L1, TSV)) are skipped with a warning rather than given a wrong curvature.
     """
     P = ModelParams(params)
     out = ModelParams(jtu.tree_map(np.zeros_like, params))
@@ -77,10 +79,16 @@ def _regulariser_curvature(params, exposures):
         reg = getattr(e.fit, "regulariser", None)
         if reg is None:
             continue
+        cls = type(e.fit)
+        if (onp.shape(reg) != (2,) or cls.loglike is not PointResolvedFit.loglike
+                or cls.get_distribution is not PointResolvedFit.get_distribution):
+            warnings.warn(f"precond: no closed-form regulariser curvature for {cls.__name__} (regulariser shape "
+                          f"{onp.shape(reg)}, or loglike / get_distribution overridden); its curvature is omitted")
+            continue
         path = e.fit.map_param(e, "resolved")
         d = 10 ** P.get(path)
         g = jax.grad(TSV_loss)(d)
-        c = LN10 ** 2 * (reg[0] * 4 * d ** 2 + reg[1] * (8 * d ** 2 + d * g))
+        c = LN10 ** 2 * (reg[0] * d + reg[1] * (8 * d ** 2 + d * g))
         out = out.set(path, out.get(path) + np.clip(c, 0., None))
     return out.params
 
