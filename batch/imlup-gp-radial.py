@@ -160,7 +160,30 @@ fo_epochs = 200         # first-order epochs (~1.15 s each at production size)
 fo_lr_opd = 5e-3        # Adam rate on primary_opd from step 0 (the old one: 2e-2 from epoch 50)
 fo_lr_disc = 3e-3       # Adam rate on the disc latents z, C = 1 (the old one: 1e-2, which raised the loss by ~470)
 optx_max_steps = 800    # L-BFGS iterations, accepted AND rejected line-search trials (each costs one loss+grad)
-n_outer = 2
+# Cost of an outer iteration (timings.txt of the first run): refit 400-840 s (the first one pays the compiles) + response 250 s +
+# grid 12-15 s ~ 11-17 min, so n_outer = 4 adds at most ~25 min to the 33 min run (12 h allocation); the loop exits early once
+# the hyperparameters stop moving (exact test) or have moved by <= 1 grid step at < converge_dlogz nats (a flat length plateau
+# makes an exact argmax test wobble: the optics refitted at the old point are then as good as at the new one).
+n_outer = 4
+outer_half_width = 2        # initial local grid: 2n + 1 = 5 values per axis (was 3: the first run's 3 x 3 box + 2 growths was too narrow)
+outer_max_growth = 8        # growth steps (one cell per face near the maximum, within hyper_bounds); caps each axis at 5 + 2*8 = 21
+                            # values, so at most 441 points (typically a few dozen at ~0.5-1 s each)
+grid_edge_dlogz = 6.        # grow a face while it holds a cell within this many nats of the best (gp default 5)
+edge_target = 0.05          # a final grid is "contained" if its edge weight is below this
+converge_dlogz = 0.5        # None: only the exact "best cell did not move" test
+# Final grids (trend and plain): the hyperparameter posterior is very peaked (sd(ln sigma) ~ 0.028, sd(log10 length) ~ 0.09, correlation
+# ~0.7), so coarse cells put ~all weight in one cell (sigma interval overstated ~3x, evidence biased ~2+ nats). Per-axis fine grids
+# about the best point: sigma at ratio 2^(1/16) x 9 values (+-4 steps = +-0.17 in log2 sigma), length at ratio
+# 2^(1/4) x 7 values (+-3 steps = +-0.23 dex); 63 points, grown within hyper_bounds if the edge weight is not small (at most
+# 6 growth steps: <= 21 x 19 = 399 points; ~1.3-1.5 s/point, so ~1.5 min typical, 9 min worst, per grid; 3 fine grids).
+fine_steps = dict(sigma=2**(1/16), length=2**0.25)
+fine_half_width = dict(sigma=4, length=3)
+fine_max_growth = 6
+def fine_axes(center):
+    """Per-axis fine local axes {name: values} about center (local_axes takes one half-width for all axes)."""
+    return {k_: [c_*fine_steps[k_]**i_ for i_ in range(-fine_half_width[k_], fine_half_width[k_] + 1)] for k_, c_ in center.items()}
+backfill_grad_split = False # True: compute a |sqrt(C) g| split for resumed refits lacking one (a fresh gn_probe compile + run per resumed outer,
+                            # fresh C so not comparable with grad_norm_u_end; a GPU OOM there is not caught): off by default
 
 if os.path.isdir('../data/data/'):
     ddir = '../data/data/'                 # the cluster copy, as imlup-adi
@@ -508,14 +531,75 @@ things_gp = {
 check_gp_setup(ref_params, things_gp)
 
 
-def precond_grad_norm(x, C, model_b, exps_b):
-    """|sqrt(C) grad loss| at x: the gradient in L-BFGS's own coordinates u = (x - x0) / sqrt(C) (nan if it fails)."""
+def _path_str(p):
+    return str(getattr(p, "key", getattr(p, "name", getattr(p, "idx", p))))
+
+
+def grad_split(gr):
+    """Split of the whitened gradient gr = sqrt(C) grad (a tree shaped like the parameters) by parameter group: norm (the
+    total |sqrt(C) g|), groups {name: norm} (sorted, descending; "resolved" is split into resolved_dct (the DCT latents z)
+    and resolved_trend (the n_b trend latents b); "resolved_level" is the level), frac_sq (share of |.|^2), top_leaves
+    (the 8 largest single leaves, e.g. one exposure's primary_opd), dct_max_mode ((row, col, value) of the largest DCT
+    entry) and trend_components (the n_b whitened trend gradients)."""
+    nd = resolved_wid**2
+    sq, leaves, extra = {}, [], {}
+    for path, leaf in jax.tree_util.tree_flatten_with_path(gr)[0]:
+        a = numpy.asarray(leaf, dtype=float).ravel()
+        name = _path_str(path[0])
+        label = "/".join(_path_str(p) for p in path)
+        parts = {name: a}
+        if name == "resolved":
+            parts = {"resolved_dct": a[:nd], "resolved_trend": a[nd:]}
+            j = int(numpy.argmax(numpy.abs(a[:nd])))
+            extra = dict(dct_max_mode=[j//resolved_wid, j % resolved_wid, float(a[j])],
+                         trend_components=[float(v_) for v_ in a[nd:]])
+        for nm, part in parts.items():
+            sq[nm] = sq.get(nm, 0.) + float(numpy.sum(part**2))
+            leaves.append((f"{label}" if nm == name else f"{label}[{nm}]", float(numpy.sqrt(numpy.sum(part**2)))))
+    tot = sum(sq.values())
+    order_ = sorted(sq, key=sq.get, reverse=True)
+    return dict(norm=float(numpy.sqrt(tot)), groups={k_: float(numpy.sqrt(sq[k_])) for k_ in order_},
+                frac_sq={k_: float(sq[k_]/tot) if tot > 0 else 0. for k_ in order_},
+                top_leaves=sorted(leaves, key=lambda t_: -t_[1])[:8], **extra)
+
+
+def precond_grad_split(x, C, model_b, exps_b):
+    """grad_split of |sqrt(C) grad loss| at x: the gradient in L-BFGS's own coordinates u = (x - x0) / sqrt(C). The same
+    _loss_grad call (already compiled by the refit) as before; norm is nan (and the split empty) if it fails."""
     try:
         _, gr = _loss_grad(x, jax.tree.map(np.sqrt, C), make_batch(exps_b, model_b), model_b)
-        return float(np.sqrt(sum(np.sum(l**2) for l in jax.tree.leaves(gr))))
+        return grad_split(gr)
     except Exception as e:   # never lose a 15-minute refit to a diagnostic
         print(f"[refit] gradient norm failed: {e!r}")
-        return float("nan")
+        return dict(norm=float("nan"), groups={}, frac_sq={}, top_leaves=[])
+
+
+def precond_grad_norm(x, C, model_b, exps_b):
+    """|sqrt(C) grad loss| at x (nan if it fails)."""
+    return precond_grad_split(x, C, model_b, exps_b)["norm"]
+
+
+def print_split(label, sp, top=6):
+    """The largest contributors to |sqrt(C) g|^2 of a grad_split."""
+    try:
+        _print_split(label, sp, top)
+    except Exception as e:   # a diagnostic print must never discard a refit
+        print(f"[grad] print failed: {e!r}")
+
+
+def _print_split(label, sp, top):
+    if not sp.get("groups"):
+        return
+    print(f"[grad] {label}: |sqrt(C) g| {sp['norm']:.3g}; top groups " + ", ".join(
+        f"{k_} {sp['groups'][k_]:.3g} ({100*sp['frac_sq'][k_]:.0f}%)" for k_ in list(sp["groups"])[:top]), flush=True)
+    print(f"[grad]   largest leaves: " + ", ".join(f"{l_} {v_:.3g}" for l_, v_ in sp["top_leaves"][:4])
+          + (f"; trend {sp['trend_components']}; DCT max mode {sp['dct_max_mode']}" if "dct_max_mode" in sp else ""), flush=True)
+
+
+def get_C(opt_params, model_b, exps_b, things):
+    """The gn_probe preconditioner C for all parameters (one discarded 1-epoch step), as refit() computes it."""
+    return optimise_new(opt_params, model_b, exps_b, things, 1, precond_method="gn_probe",
+                        precond_kwargs=precond_kwargs, mapped=True, return_c=True, progress=False)[2]
 
 
 def refit(opt_params, model_b, exps_b, things, log=print):
@@ -524,8 +608,7 @@ def refit(opt_params, model_b, exps_b, things, log=print):
     each step) followed by the L-BFGS end loss; info = optimise_optimistix's info dict (result, num_steps, loss_start,
     loss_end) plus grad_norm_u_start / grad_norm_u_end (|sqrt(C) grad| before / after L-BFGS) and max_steps."""
     # the preconditioner for all parameters (disc included) at the start: one gn_probe call, via a discarded 1-epoch step
-    _, _, C = optimise_new(opt_params, model_b, exps_b, things, 1, precond_method="gn_probe",
-                           precond_kwargs=precond_kwargs, mapped=True, return_c=True, progress=False)
+    C = get_C(opt_params, model_b, exps_b, things)
     C_fo = dict(C) | {"resolved": jax.tree.map(np.ones_like, C["resolved"])}      # first order: C = 1 for z, as before
     things_fo = dict(things) | {"primary_opd": adam(fo_lr_opd, 0), "resolved": adam(fo_lr_disc, 0)}
     t0 = time.time()
@@ -537,11 +620,18 @@ def refit(opt_params, model_b, exps_b, things, log=print):
     t0 = time.time()
     x2, info = optimise_optimistix(x1, model_b, exps_b, use_c=C, max_steps=optx_max_steps, return_info=True,
                                    mapped=True, verbose=True)
-    info = dict(info, max_steps=optx_max_steps, grad_norm_u_start=precond_grad_norm(x1, C, model_b, exps_b),
-                grad_norm_u_end=precond_grad_norm(x2, C, model_b, exps_b))
+    try:   # diagnostics must never discard the refit
+        gs_start, gs_end = precond_grad_split(x1, C, model_b, exps_b), precond_grad_split(x2, C, model_b, exps_b)
+    except Exception as e:
+        print(f"[refit] gradient diagnostics failed: {e!r}")
+        gs_start = gs_end = dict(norm=float("nan"), groups={}, frac_sq={}, top_leaves=[])
+    info = dict(info, max_steps=optx_max_steps, grad_norm_u_start=gs_start["norm"], grad_norm_u_end=gs_end["norm"],
+                grad_split_start=gs_start, grad_split_end=gs_end)
     log(f"[refit] L-BFGS: {info['result']} after {info['num_steps']}/{optx_max_steps} iterations, loss "
         f"{info['loss_start']:.1f} -> {info['loss_end']:.1f}, |sqrt(C) grad| {info['grad_norm_u_start']:.3g} -> "
         f"{info['grad_norm_u_end']:.3g} ({time.time() - t0:.0f} s)")
+    print_split("L-BFGS start", gs_start)
+    print_split("L-BFGS end", gs_end)
     if not all(bool(numpy.all(numpy.isfinite(numpy.asarray(l)))) for l in jax.tree.leaves(x2)):
         raise RuntimeError("L-BFGS returned non-finite parameters")
     return to_host(x2), numpy.append(losses, info["loss_end"]), info
@@ -567,7 +657,8 @@ try:
           f"{float(ev_c['nll'].sum() + ev_c['prior']):.4f}; |grad| {float(np.linalg.norm(g_c['resolved'][key])):.2e}")
 except Exception as e:   # a diagnostic: never lose the stage to it
     print(f"[check] trend surrogate vs full model failed: {e!r}")
-outer_converged = False
+outer_converged, outer_reason = False, "not converged"
+outer_history = []
 lbfgs_info = {}
 for it in range(1, n_outer + 1):
     prior_b = make_b()(**hyp_b)
@@ -583,6 +674,19 @@ for it in range(1, n_outer + 1):
             p_new = numpy.load(path, allow_pickle=True).item()
             if os.path.exists(ipath):
                 lbfgs_info[it] = json.load(open(ipath))
+                if backfill_grad_split and "grad_split_end" not in lbfgs_info[it]:
+                    # an older refit without the split: |sqrt(C) g| at its saved result with a FRESH gn_probe C (random probes,
+                    # computed at the end point, not the start's) -- indicative, stored as grad_split_end_backfill
+                    try:
+                        model_r = set_array(ModelParams(p_new).inject(model_single))
+                        opt_r = set_array({k_: p_new[k_] for k_ in things_gp})
+                        gs_r = precond_grad_split(opt_r, get_C(opt_r, model_r, exps_b, things_gp), model_r, exps_b)
+                        lbfgs_info[it]["grad_split_end_backfill"] = gs_r
+                        print_split(f"outer {it} (resumed; fresh C)", gs_r)
+                        with open(ipath, "w") as f:
+                            json.dump(lbfgs_info[it], f, indent=2, default=str)
+                    except Exception as e:
+                        print(f"[grad] backfill for outer {it} failed: {e!r}")
         else:
             z_b, l_b = prior_b.params(current["theta"])
             start = dict(current["params"]) | {"resolved": {key: z_b}, "resolved_level": {key: l_b}}
@@ -630,28 +734,116 @@ for it in range(1, n_outer + 1):
             _save_npz(npath, s=s_new, theta=theta_new)
         beta_new = 1/np.asarray(s_new)**2
         tag = f"outer{it}_trend_" + fingerprint(resp_new_fp, beta_new, lp_b, n_iter, code_fp)
-        # local 3 x 3 grid; values outside the bounds are dropped
-        grid_new = gp_evidence_grid_nd(resp_new, local_axes(hyp_b, outer_steps, n=1), make_b(),
+        # local (2n + 1)^2 grid about the refit hyperparameters, grown (within hyper_bounds, at most outer_max_growth steps) while
+        # a face holds posterior mass; values outside the bounds are dropped. Existing points are reused (same tag).
+        grid_new = gp_evidence_grid_nd(resp_new, local_axes(hyp_b, outer_steps, n=outer_half_width), make_b(),
                                        beta=beta_new, outdir=f"{out}/grid", tag=tag, abbrev=ABBREV,
                                        bounds=hyper_bounds, n_iter=n_iter, theta0=theta_new,
-                                       max_growth=2, recheck_top=3)
+                                       max_growth=outer_max_growth, edge_dlogz=grid_edge_dlogz, recheck_top=3)
         idx_new = grid_new["best"]
         new = {k: float(grid_new["axes"][k][i]) for k, i in zip(grid_new["names"], idx_new)}
-        print(f"outer {it}: s {numpy.round(numpy.asarray(s_new), 4)}; best {new} (was {hyp_b})")
+        post_new = gp_hyper_posterior(grid_new)
+        print(f"outer {it}: s {numpy.round(numpy.asarray(s_new), 4)}; best {new} (was {hyp_b}); grid "
+              f"{ {k: len(grid_new['axes'][k]) for k in grid_new['names']} } edge weight {post_new['edge_weight']:.3f}; "
+              f"16/50/84 % { {k: [round(float(x_), 3) for x_ in v_] for k, v_ in post_new['quantiles'].items()} }")
     moved = not all(numpy.isclose(new[k], hyp_b[k], rtol=1e-6, atol=1e-9) for k in hyp_b)
+    # how far (grid steps, per axis) and how much log Z (nats) the best cell moved relative to the refit hyperparameters
+    steps_moved = {k: float(abs(numpy.log(new[k]/hyp_b[k]))/numpy.log(outer_steps[k])) for k in hyp_b}
+    old_cell = tuple(int(numpy.argmin(numpy.abs(numpy.log(grid_new["axes"][k]/hyp_b[k])))) for k in grid_new["names"])
+    old_in_grid = all(numpy.isclose(grid_new["axes"][k][i], hyp_b[k], rtol=1e-6) for k, i in zip(grid_new["names"], old_cell))
+    dlogZ_old = float(grid_new["logZ"][old_cell] - grid_new["logZ"][idx_new]) if old_in_grid else float("nan")
+    loose = (moved and converge_dlogz is not None and old_in_grid and all(v_ <= 1 + 1e-6 for v_ in steps_moved.values())
+             and dlogZ_old > -converge_dlogz and bool(grid_new["converged"][old_cell]))
+    outer_history.append(dict(it=it, refit_at=dict(hyp_b), best=new, moved=bool(moved), steps_moved=steps_moved,
+                              dlogZ_refit_cell_minus_best=dlogZ_old, loose_converged=bool(loose),
+                              edge_weight=post_new["edge_weight"], contained=bool(post_new["edge_weight"] < edge_target),
+                              quantiles={k: list(map(float, v_)) for k, v_ in post_new["quantiles"].items()},
+                              axes_size={k: len(grid_new["axes"][k]) for k in grid_new["names"]},
+                              n_points=int(grid_new["logZ"].size), unconverged=int((~grid_new["converged"].astype(bool)).sum())))
     hyp_b = new
     current = dict(params=p_new, resp=resp_new, resp_fp=resp_new_fp, beta=beta_new, s=numpy.asarray(s_new),
                    grid=grid_new, theta=np.asarray(grid_new["thetas"][idx_new]), idx=idx_new, stage=f"E{it}")
-    if not moved:
-        outer_converged = True
+    if not moved or loose:
+        outer_converged, outer_reason = True, ("best cell did not move" if not moved else
+                                               f"moved <= 1 step and {-dlogZ_old:.2f} < {converge_dlogz} nats (refit cell nearly as good)")
+        print(f"outer {it}: converged ({outer_reason})")
         break
 if not outer_converged:
     print(f"WARNING: the hyperparameters still moved at outer iteration {n_outer}: the optics were refitted at the "
           "previous hyperparameters; raise n_outer")
+if outer_history and outer_history[-1]["edge_weight"] >= edge_target:
+    print(f"WARNING: the final local grid still has edge weight {outer_history[-1]['edge_weight']:.3f} >= {edge_target} "
+          f"(axes {outer_history[-1]['axes_size']}): its quantiles are truncated (growth capped at {outer_max_growth})")
 for it, info in lbfgs_info.items():
     if not info.get("successful", False) or info.get("reached_max_steps", False):
         print(f"WARNING: outer {it} L-BFGS did not report success ({info.get('result')}, {info.get('num_steps')} its, "
               f"|sqrt(C) grad| end {info.get('grad_norm_u_end')}): the optics may be under-converged")
+
+# %%
+# ---------------------------------------------------------------- G: like-for-like re-evaluation of the plain Matern
+# The first run established the +29 nats only at the stage-D optics. Re-evaluate the plain Matern (orders 1 and 2, the same
+# (sigma, length) bounds, level prior and beta, trend_sigma = 0 nesting) on the FINAL response, against the trend's final grid.
+with timed("G: plain Matern on the final response"):
+    fin_resp, fin_beta = current["resp"], current["beta"]
+    fin_fp = fingerprint(current["resp_fp"], fin_beta, lp_b, n_iter, code_fp)
+    # trend: fine 7 x 7 grid at ratio 2^(1/4) about the loop's best (the coarse loop grid is its warm start and fallback)
+    fin_grid = gp_evidence_grid_nd(fin_resp, fine_axes(hyp_b), make_b(), beta=fin_beta,
+                                   outdir=f"{out}/grid", tag="final_fine_trend_" + fin_fp, abbrev=ABBREV, bounds=hyper_bounds,
+                                   n_iter=n_iter, theta0=current["theta"], max_growth=fine_max_growth,
+                                   edge_dlogz=grid_edge_dlogz, recheck_top=recheck_top)
+    fin_post = gp_hyper_posterior(fin_grid)
+    hyp_b = {k: float(fin_grid["axes"][k][i]) for k, i in zip(fin_grid["names"], fin_grid["best"])}   # the fine best
+    current = dict(current, grid=fin_grid, theta=np.asarray(fin_grid["thetas"][fin_grid["best"]]), idx=fin_grid["best"],
+                   stage=current["stage"] + "+fine")          # stage F's products / mixture use the fine grid
+    fin_trend = dict(order=best_trend, log_evidence=fin_post["log_evidence_bounds"], best=gp_best(fin_grid),
+                     edge_weight=fin_post["edge_weight"], n_points=int(fin_grid["logZ"].size),
+                     axes_size={k: len(fin_grid["axes"][k]) for k in fin_grid["names"]},
+                     unconverged=int((~fin_grid["converged"].astype(bool)).sum()),
+                     quantiles={k: list(map(float, v_)) for k, v_ in fin_post["quantiles"].items()})
+    print(f"[final trend o{best_trend:g}] log_evidence_bounds {fin_post['log_evidence_bounds']:.2f} at {hyp_b}; edge "
+          f"{fin_post['edge_weight']:.3f}; {fin_trend['n_points']} points")
+    fin_plain = {}
+    for o_p in orders:
+        gs_o = singles[o_p]
+        # coarse pass from the stage-D best (the plain optimum may have moved), then the same fine grid as the trend's
+        gc_p = gp_evidence_grid_nd(fin_resp, local_axes(gp_best(gs_o), outer_steps, n=outer_half_width), sg(o_p), beta=fin_beta,
+                                   outdir=f"{out}/grid", tag=f"final_plain_o{o_p:g}_" + fin_fp, abbrev=ABBREV,
+                                   bounds=hyper_bounds, n_iter=n_iter, theta0=np.asarray(gs_o["thetas"][gs_o["best"]]),
+                                   max_growth=outer_max_growth, edge_dlogz=grid_edge_dlogz, recheck_top=recheck_top)
+        gp_p = gp_evidence_grid_nd(fin_resp, fine_axes(gp_best(gc_p)), sg(o_p), beta=fin_beta,
+                                   outdir=f"{out}/grid", tag=f"final_fine_plain_o{o_p:g}_" + fin_fp, abbrev=ABBREV,
+                                   bounds=hyper_bounds, n_iter=n_iter, theta0=np.asarray(gc_p["thetas"][gc_p["best"]]),
+                                   max_growth=fine_max_growth, edge_dlogz=grid_edge_dlogz, recheck_top=recheck_top)
+        pp = gp_hyper_posterior(gp_p)
+        best_p = gp_best(gp_p)
+        th_p = np.asarray(gp_p["thetas"][gp_p["best"]])
+        # nesting at this point: the trend prior with trend_sigma = 0 (b = 0) must reproduce the plain Matern's log Z
+        ev_p0 = gp_log_evidence(fin_resp, sg(o_p)(**best_p), th_p, fin_beta)
+        ev_p1 = gp_log_evidence(fin_resp, gp_trend_prior(resolved_wid, best_p["sigma"], best_p["length"], o_p, 0., None,
+                                                         lp_b), embed_trend_theta(th_p, n_b), fin_beta)
+        fin_plain[f"o{o_p:g}"] = dict(log_evidence=pp["log_evidence_bounds"], best=best_p, edge_weight=pp["edge_weight"],
+                                      n_points=int(gp_p["logZ"].size), unconverged=int((~gp_p["converged"].astype(bool)).sum()),
+                                      axes_size={k: len(gp_p["axes"][k]) for k in gp_p["names"]},
+                                      max_converged_logZ=float(converged_max(gp_p)),
+                                      coarse_log_evidence=gp_hyper_posterior(gc_p)["log_evidence_bounds"],
+                                      quantiles={k: list(map(float, v_)) for k, v_ in pp["quantiles"].items()},
+                                      nesting_logZ_abs_diff=float(np.abs(ev_p0["logZ"] - ev_p1["logZ"])))
+        print(f"[final plain o{o_p:g}] log_evidence_bounds {pp['log_evidence_bounds']:.2f} (coarse "
+              f"{fin_plain[f'o{o_p:g}']['coarse_log_evidence']:.2f}) at {best_p}; edge {pp['edge_weight']:.3f}; "
+              f"{fin_plain[f'o{o_p:g}']['n_points']} points; nesting |dlogZ| {fin_plain[f'o{o_p:g}']['nesting_logZ_abs_diff']:.1e}")
+    best_plain_key = max(fin_plain, key=lambda k_: fin_plain[k_]["log_evidence"])
+    dlogE_final = float(fin_trend["log_evidence"] - fin_plain[best_plain_key]["log_evidence"])
+    dlogE_final_same_order = float(fin_trend["log_evidence"] - fin_plain[f"o{best_trend:g}"]["log_evidence"])
+    fin_valid = bool(fin_trend["edge_weight"] < edge_target and all(d_["edge_weight"] < edge_target for d_ in fin_plain.values()))
+    comparison_final = dict(
+        dlogE_trend_minus_best_plain=dlogE_final, best_plain=best_plain_key, dlogE_same_order=dlogE_final_same_order,
+        grid_quality_valid=fin_valid, edge_target=edge_target, trend=fin_trend, plain=fin_plain,
+        dlogE_stage_D=dlogE, note="fine grids (sigma 9 values at 2^(1/16), length 7 at 2^(1/4)) for both; same final response, same beta, same hyper_bounds and level prior; the trend is the "
+        "outer loop's order only; the optics were refitted WITH the trend, so a plain Matern refit would shift too")
+    with open(f"{out}/comparison-final.json", "w") as f:
+        json.dump(comparison_final, f, indent=2, default=float)
+    print(f"final-stage dlogE (trend - plain {best_plain_key}) {dlogE_final:+.2f} nats (same order {dlogE_final_same_order:+.2f}; "
+          f"stage D {dlogE:+.2f}); grid quality valid (edge < {edge_target}): {fin_valid}")
 
 # %%
 # ---------------------------------------------------------------- F: products
@@ -738,12 +930,15 @@ with timed("F: products"):
         hyper=hyp_b, order=best_trend, trend_sigma=trend_sigma, trend_kinds=list(trend_kinds),
         trend_coef_dex=tc_f["coef"].tolist(), trend_coef_sd_dex=tc_f["coef_sd"].tolist(),
         dct_modes_02_20_z=[float(tc_f["z_dct"][0, 2]), float(tc_f["z_dct"][2, 0])],
-        final_stage=current["stage"], outer_converged=outer_converged, data_dir=ddir,
+        final_stage=current["stage"], outer_converged=outer_converged, outer_converged_reason=outer_reason,
+        outer_history=outer_history, comparison_final_stage=comparison_final, data_dir=ddir,
         lbfgs={str(it): info for it, info in lbfgs_info.items()},   # result status, iterations, |sqrt(C) grad| start / end
         noise_scale=dict(zip(resp_f.keys, map(float, current["s"]))),
         chi2_per_pixel_raw=dict(zip(resp_f.keys, map(float, ev_f["chi2"]/n_good))),
         logZ=float(ev_f["logZ"]), gamma=float(ev_f["gamma"]), newton_decrement=float(ev_f["newton_decrement"]),
         final_grid=dict(quantiles=q_f, selected_outside_16_84=outside, edge_weight=post_f["edge_weight"],
+                        contained=bool(post_f["edge_weight"] < edge_target), n_points=int(grid_f["logZ"].size),
+                        axes_size={k: len(grid_f["axes"][k]) for k in grid_f["names"]},
                         unconverged=int((~grid_f["converged"].astype(bool)).sum())),
         comparison_at_stage_D=comparison, mixture_top20_weight=float(flat_w[top].sum()),
         gradient_ratio=float(noise["g_ratio"]), verify_max_abs=verify_max_abs,
