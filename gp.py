@@ -73,6 +73,8 @@ verify_linear_response). Everything below then costs dense n x n linear algebra 
   simulate_response   injection: the response of simulated data, without any optics.
   multi_gp_prior / MultiGPResolvedFit / two_kernel_prior_factory / capped_posterior   multi-kernel DCT prior (a sum of K
                       Matern kernels on the one DCT basis) and its fit, kernel factory and length-capped hyper-posterior;
+  bpl_gp_prior / BPLGPResolvedFit / bpl_prior_factory   broken-power-law spectrum prior (one spectrum, four hyperparameters;
+                      gamma1 = 0 is exactly the Matern prior of order gamma2 / 2);
   SumPrior / PolarDCTResolvedFit   polar + DCT prior (polar field plus a DCT residual field) and its fit.
 """
 import itertools
@@ -91,8 +93,10 @@ from batching import make_batch
 
 LN10 = float(onp.log(10.0))
 HYPER_NAMES = ("sigma", "length", "order", "length_r", "length_theta", "cos_inc", "pa", "dx", "dy", "mean",
-               "level_prior", "sigmas", "lengths", "orders", "sigma_p", "sigma_d", "length_d", "order_d")   # any GP fit's
-# (sigmas, lengths, orders: MultiGPResolvedFit; sigma_p, sigma_d, length_d, order_d: SumPrior / PolarDCTResolvedFit)
+               "level_prior", "sigmas", "lengths", "orders", "sigma_p", "sigma_d", "length_d", "order_d",
+               "length_b", "gamma1", "gamma2")   # any GP fit's
+# (sigmas, lengths, orders: MultiGPResolvedFit; sigma_p, sigma_d, length_d, order_d: SumPrior / PolarDCTResolvedFit;
+# length_b, gamma1, gamma2: BPLGPResolvedFit)
 
 
 # ----------------------------------------------------------------------------- prior
@@ -732,6 +736,104 @@ def capped_best(grid, allowed):
     logZ = onp.where(onp.asarray(grid["converged"]).astype(bool) & allowed, onp.asarray(grid["logZ"], dtype=float), -onp.inf)
     idx = tuple(int(i) for i in onp.unravel_index(onp.argmax(logZ), logZ.shape))
     return idx, {k: float(grid["axes"][k][i]) for k, i in zip(grid["names"], idx)}
+
+
+# ----------------------------------------------------------------------------- broken power-law spectrum
+# One spectrum on the same DCT latents (GPPrior just receives another `amp`), with a low-k slope gamma1, a high-k slope
+# gamma2 and a smooth break (fixed sharpness s = 2) at the wavenumber k_b = 1 / length_b:
+#
+#     S(k) ~ k^-gamma1 [1 + (k / k_b)^2]^(-(gamma2 - gamma1) / 2),   k^2 = lap_0 + lap_1 (the DCT / Neumann eigenvalues
+#                                                                     of matern_spectrum, rad / px; f = k / 2 pi cycles / px)
+#
+# normalised to a mean pixel variance sigma^2 with the constant mode removed, exactly as matern_spectrum. For gamma1 = 0
+# this is matern_spectrum(shape, length_b, sigma, order = gamma2 / 2) EXACTLY (1 + l^2 k^2 is its base), so the Matern
+# prior is the gamma1 = 0 face of this one and a like-for-like evidence comparison is a nested one. The high-k slope is
+# gamma2 (the Matern's is 2 order). For length_b >> 1 / k_min (the lowest mode, ~ wid / pi px) the spectrum is the pure
+# power law k^-gamma2 and (length_b, gamma1) are not separately identified. Because the normalisation sums over modes, for
+# gamma1 > 2 a handful of the lowest modes carry most of sigma^2.
+
+def bpl_spectrum(shape, sigma, length_b, gamma1, gamma2):
+    """Broken power-law power spectrum (variance per DCT-II mode) on `shape`, normalised to a mean pixel variance sigma^2,
+    constant mode removed. length_b (px, isotropic) is 1 / k_b; all arguments may be traced (no recompiles)."""
+    lap = [(2*np.sin(np.pi*np.arange(n)/(2*n)))**2 for n in shape]
+    q2 = lap[0][:, None] + lap[1][None, :]
+    pos = q2 > 0
+    q2 = np.where(pos, q2, 1.)                      # safe at the removed mode (finite gradients)
+    g1, g2 = (np.asarray(g, dtype=float) for g in (gamma1, gamma2))
+    S = np.where(pos, q2**(-0.5*g1)*(1 + length_b**2*q2)**(-0.5*(g2 - g1)), 0.)
+    return sigma**2 * S * S.size / S.sum()
+
+
+def bpl_amplitude(shape, sigma, length_b, gamma1, gamma2):
+    """sqrt(bpl_spectrum), with a finite gradient at the removed constant mode."""
+    S = bpl_spectrum(shape, sigma, length_b, gamma1, gamma2)
+    pos = S > 0
+    return np.where(pos, np.sqrt(np.where(pos, S, 1.)), 0.)
+
+
+def bpl_from_matern(length, order):
+    """(length_b, gamma1, gamma2) whose bpl_spectrum is matern_spectrum(length, order) (isotropic length)."""
+    return length, 0., 2.*order
+
+
+def bpl_gp_prior(wid, sigma, length_b, gamma1, gamma2, mean=None, level_prior=(0., 1.)):
+    """GPPrior of the broken power-law spectrum; prior.length = length_b and prior.order = (gamma1, gamma2) (they only
+    enter meta_arrays, the grid-point digests)."""
+    mean = np.zeros((wid, wid)) if mean is None else np.asarray(mean, dtype=float)
+    mu, sd = (np.asarray(x, dtype=float) for x in level_prior)
+    sigma, length_b, gamma1, gamma2 = (np.asarray(x, dtype=float) for x in (sigma, length_b, gamma1, gamma2))
+    return GPPrior(bpl_amplitude((wid, wid), sigma, length_b, gamma1, gamma2), mean, mu, sd, sigma, length_b,
+                   np.stack([gamma1, gamma2]))
+
+
+class BPLGPResolvedFit(_GPFitBase):
+    """GPResolvedFit with the broken power-law spectrum. Hyperparameters (set_hyper names): sigma (dex), length_b (px),
+    gamma1, gamma2, mean, level_prior."""
+    HYPER = ("sigma", "length_b", "gamma1", "gamma2", "mean", "level_prior")
+    sigma: jax.Array
+    length_b: jax.Array
+    gamma1: jax.Array
+    gamma2: jax.Array
+
+    def __init__(self, spectrum_basis, filter, wid, sigma=1., length_b=6., gamma1=1., gamma2=3., mean=None,
+                 level_prior=(0., 1.), n_share=1, resolved_kwargs=None):
+        super().__init__(spectrum_basis, filter, wid, resolved_source="interp", resolved_kwargs=resolved_kwargs)
+        self.sigma, self.length_b, self.gamma1, self.gamma2 = (np.asarray(x, dtype=float)
+                                                               for x in (sigma, length_b, gamma1, gamma2))
+        self._init_gp(wid, mean, level_prior, n_share)
+
+    def amplitude(self):
+        return bpl_amplitude(self.mean.shape, self.sigma, self.length_b, self.gamma1, self.gamma2)
+
+    def log10_field(self, z):
+        return gp_field(z, self.amplitude())
+
+    def surrogate_prior(self):
+        return bpl_gp_prior(self.mean.shape[0], self.sigma, self.length_b, self.gamma1, self.gamma2, self.mean,
+                            self.level_prior)
+
+
+# Grid parametrisation: the high-k slope is gamma2 = gamma1 + dgamma with dgamma > 0 (a steepening break), so the
+# hyperprior is a plain box in (log sigma, log length_b, gamma1, dgamma) (unit Jacobian from (gamma1, gamma2)) and every
+# constraint is an axis bound: gp_hyper_posterior's quantiles, edge weights and log_evidence_bounds all see it (no mask
+# as capped_posterior needs). The Matern face is gamma1 = 0, dgamma = 2 order.
+BPL_AXES = ("sigma", "length_b", "gamma1", "dgamma")
+BPL_ABBREV = {"sigma": "s", "length_b": "lb", "gamma1": "g1", "dgamma": "dg"}
+BPL_SCALES = {"gamma1": "linear", "dgamma": "linear"}      # sigma and length_b are log axes (the default)
+
+
+def bpl_prior_factory(wid, mean=None, level_prior=(0., 1.)):
+    """make_prior for gp_evidence_grid_nd with axes BPL_AXES (gamma2 = gamma1 + dgamma)."""
+    def make_prior(sigma, length_b, gamma1, dgamma):
+        return bpl_gp_prior(wid, sigma, length_b, gamma1, gamma1 + dgamma, mean, level_prior)
+    return make_prior
+
+
+def bpl_hypers(point):
+    """{sigma, length_b, gamma1, dgamma} -> {sigma, length_b, gamma1, gamma2} for BPLGPResolvedFit / set_hyper."""
+    return dict(sigma=point["sigma"], length_b=point["length_b"], gamma1=point["gamma1"],
+                gamma2=point["gamma1"] + point["dgamma"])
+
 
 
 # ----------------------------------------------------------------------------- linear response
