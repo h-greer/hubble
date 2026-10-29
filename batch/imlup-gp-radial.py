@@ -5,7 +5,7 @@ best single-Matern MAP puts z ~ -5.4, -5.0 in the DCT modes (0, 2), (2, 0) (the 
 box centre, made from the lowest cosine modes at ~27 nats of prior cost). trend_sigma = 0 is exactly the Matern prior, so the
 comparison is nested; trend_sigma is a fixed broad hyperparameter (1 dex), not a grid axis, so the trend adds no hyperprior
 volume. Stages A-C are those of imlup-gp-bpl.py (same optics, response, noise scales); then
-  D  single-Matern grids (orders 1, 2) vs Matern + trend grids (same (sigma, length) axes and bounds), the nesting check,
+  D  single-Matern grids (orders 1, 1.5, 2, 2.5, 3.5) vs Matern + trend grids (same (sigma, length) axes and bounds), the nesting check,
      the trend amplitudes and the (0, 2), (2, 0) latents before / after, the trend_sigma sensitivity, the spectral
      diagnostic (trend latents excluded), a small local 5 x 5 refinement of a close call; comparison-D.json
   E  outer loop (hybrid refit of optics + disc latents (z, b) at the chosen hyperparameters, response rebuilt, local grid)
@@ -133,7 +133,7 @@ sigmas0 = [0.25, 0.5, 1., 2.]
 lengths0 = [200/2**0.5/2**i for i in range(5, -1, -1)]          # 4.42 .. 141.4 (6 values; growth reaches 0.1 below)
 hyper_bounds = dict(sigma=(0.03, 8.), length=(0.1, 200.))        # log-uniform hyperpriors, the SAME for both models
 ABBREV = {"sigma": "s", "length": "l"}
-orders = [1., 2.]           # imlup-gp.py's best was order 1; both with and without the trend
+orders = [1., 1.5, 2., 2.5, 3.5]   # 2-D Matern nu = order - 1: nu 0 (TSV-like), 1/2, 1, 3/2, 5/2; with and without the trend
 trend_kinds = ("log_r", "r2")   # radial basis (gp.py radial_trend_basis): log10 sqrt(r^2 + 1 px^2), then r^2, orthonormalised
 trend_sigma = 1.            # dex, rms contribution of each unit-rms basis column: FIXED broad (the evidence is insensitive to
                             # it: NOTES.md), not a grid axis, so the trend adds no hyperprior volume
@@ -781,7 +781,7 @@ for it, info in lbfgs_info.items():
 
 # %%
 # ---------------------------------------------------------------- G: like-for-like re-evaluation of the plain Matern
-# The first run established the +29 nats only at the stage-D optics. Re-evaluate the plain Matern (orders 1 and 2, the same
+# The first run established the +29 nats only at the stage-D optics. Re-evaluate the plain Matern (every order in `orders`, the same
 # (sigma, length) bounds, level prior and beta, trend_sigma = 0 nesting) on the FINAL response, against the trend's final grid.
 with timed("G: plain Matern on the final response"):
     fin_resp, fin_beta = current["resp"], current["beta"]
