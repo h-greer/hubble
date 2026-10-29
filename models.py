@@ -288,12 +288,50 @@ OPTICS_PARAMS = [
     # EllipticalOcculter only: complex edge ring (glint), (2 n_max + 1, 2) Fourier coefficients and width (um)
     ("occulter_glint", ["occulter.layers.occulter.glint"], lambda x: x),
     ("occulter_glint_width", ["occulter.layers.occulter.glint_width"], lambda x: x*1e-6),
+    # occulters.CLIMBGlintOcculter (occulter="climb"): edge Fourier coefficients m = 3..M (relative radius), (K, H) rim
+    # log-amplitude and rim OPD (nm -> m); occulters.ImageOcculter (occulter="image"): rotation (deg), same rim leaves
+    ("occulter_edge", ["occulter.layers.occulter.edge_coeffs"], lambda x: x),
+    ("occulter_rim_amp", ["occulter.layers.occulter.rim_amp"], lambda x: x),
+    ("occulter_rim_opd", ["occulter.layers.occulter.rim_opd"], _nm),
+    ("occulter_rotation", ["occulter.layers.occulter.rotation"], lambda x: x),
     ("fnumber", ["prop1.focal_length"], lambda x: x*2.4),
     # NICMOSFresnelCoronagraph only: defocus before / after the occulter (FresnelFastObstruction) and at the detector
     ("defocus1", ["occulter.defocus1"], lambda x: x),
     ("defocus2", ["occulter.defocus2"], lambda x: x),
     ("defocus3", ["prop1.FreeSpace.distance"], lambda x: x),
 ]
+
+
+_LEGACY_OCCULTER_KEYS = ("occulter_radius", "occulter_ellipticity", "occulter_glint", "occulter_glint_width", "occulter_coeffs")
+
+
+def _has_path(optics, path):
+    try:
+        optics.get(path)
+        return True
+    except (KeyError, AttributeError):
+        return False
+
+
+def _check_occulter_params(model, optics):
+    """No silent no-ops for occulter parameters. Every model.params key starting with "occulter" must be known
+    (OPTICS_PARAMS or occulter_coeffs): a typo raises ValueError instead of being skipped by update_optics. The legacy
+    keys (occulter_radius / ellipticity / glint / glint_width / coeffs) behave exactly as before: if their path is
+    missing on the occulter, optics.set raises the same KeyError as without this check. The new keys (occulter_edge,
+    occulter_rim_amp, occulter_rim_opd, occulter_rotation) raise ValueError if their path is missing on the chosen
+    occulter (e.g. occulter_rotation needs occulter="image", occulter_edge needs "climb")."""
+    known = {name: paths for name, paths, _ in OPTICS_PARAMS} | {"occulter_coeffs": ["occulter.layers.occulter.cc", "occulter.layers.occulter.ss"]}
+    for key in model.params.keys():
+        if not key.startswith("occulter"):
+            continue
+        if key not in known:
+            raise ValueError(f"unknown occulter parameter {key!r}; known: {sorted(k for k in known if k.startswith('occulter'))}")
+        if key in _LEGACY_OCCULTER_KEYS:
+            continue
+        missing = [q for q in known[key] if not _has_path(optics, q)]
+        if missing:
+            kind = type(optics.get("occulter.layers.occulter")).__name__
+            raise ValueError(f"parameter {key!r} needs {missing} on the occulter ({kind}): wrong occulter= for this parameter?")
 
 
 class ModelFit(zdx.Base):
@@ -332,6 +370,7 @@ class ModelFit(zdx.Base):
 
     def update_optics(self, model, exposure):
         optics = model.optics
+        _check_occulter_params(model, optics)
         if "occulter_coeffs" in model.params.keys():
             coeffs = model.get(self.map_param(exposure, "occulter_coeffs"))*dlu.arcsec2rad(0.3)*24*2.4
             optics = optics.set("occulter.layers.occulter.cc", coeffs[::2])

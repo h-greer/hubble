@@ -1,4 +1,4 @@
-"""DRAFT batch/imlup-gp-radial.py: IM Lup with a RADIAL-TREND term added to the Matern DCT disc prior,
+"""DRAFT (support-mask variant) batch/imlup-gp-radial.py: IM Lup with a RADIAL-TREND term added to the Matern DCT disc prior,
 log10 I = level + H s_h b + idctn(sqrt(S) z), b ~ N(0, I_nb) (gp.py TrendGPPrior / TrendGPResolvedFit; a degenerate
 basis-function kernel, Rasmussen & Williams sec. 2.7), against the plain single-Matern prior of imlup-gp.py. Motivation: the
 best single-Matern MAP puts z ~ -5.4, -5.0 in the DCT modes (0, 2), (2, 0) (the disc's ~3 dex radial fall-off from the star at the
@@ -12,7 +12,15 @@ volume. Stages A-C are those of imlup-gp-bpl.py (same optics, response, noise sc
   F  products: MAP disc, Laplace std, posterior mixture, the trend as its own log10 image (gp-trend-log10.npy and its std),
      the DCT field, spectral diagnostic, summary.json (incl. L-BFGS status)
 "resolved" holds the flat latents (z_dct, b), length resolved_wid^2 + n_b (as PolarDCTResolvedFit's). Needs the radial-trend
-patch of gp.py (gp.patch). The refit is imlup-gp-bpl.py's hybrid (short first-order stage, then one L-BFGS call); the
+patch of gp.py (gp.patch) AND the support-mask patch (support-mask/gp.patch).
+SUPPORT MASK: the 60 x 60 disc box (corners 3.6" from the star) extends beyond the 80 px crop after the roll, so box pixels
+outside the crop are free "sinks" for unmodelled smooth light at the crop edge. A fixed support M (gp.py support_mask, built below
+from the exposures' own roll angles and star positions) multiplies the disc's linear brightness, I = M 10**(level + field),
+for EVERY model here (plain, trend, all orders; response.npz is mask-independent, so imlup-gp's is reused). Default: the
+pixels whose whole (rotated) footprint is inside the crop of at least one exposure (support_cover = "any",
+footprint, margin 0), with the star at the MODEL's fitted position (primary_tilt + cold_mask_tilt of the reference params), built once at the start
+and fixed for the run; "circle" is the largest star-centred circle of those (costs far more evidence on IM Lup, see
+support-mask/NOTES.md). Results go to a new output dir. The refit is imlup-gp-bpl.py's hybrid (short first-order stage, then one L-BFGS call); the
 prior-independent response.npz / verify-*.npz are read from imlup-gp/ when present. Resumable and fingerprinted as
 imlup-gp-bpl.py."""
 import sys
@@ -31,6 +39,7 @@ import time
 import hashlib
 import glob
 from contextlib import contextmanager
+from astropy.nddata import Cutout2D
 
 jax.config.update("jax_enable_x64", True)
 
@@ -69,7 +78,7 @@ from batching import make_batch
 from gp import *
 from gp import _save_npz, _axes   # the trend prior comes with `import *`; underscore names are not covered
 
-out = "imlup-gp-radial-m12"   # Matern 1/2 outer loop; the order-1 loop's results stay in imlup-gp-radial/
+out = "imlup-gp-radial-m12-support"   # Matern 1/2 outer loop with the support mask; earlier results (imlup-gp-radial*/) are kept
 ref_dir = "imlup-adi"
 shared_dir = "imlup-gp"     # the prior-independent response.npz / verify-*.npz are read from here (no recompute)
 os.makedirs(out, exist_ok=True)
@@ -262,9 +271,67 @@ for f in ("intermediate-params.npy", "params_amp.npy"):
         raise FileNotFoundError(f"{path} missing: run imlup-adi.py first (its fit is the reference optics and disc)")
     params |= numpy.load(path, allow_pickle=True).item()
 
+# ---- disc support mask (gp.py support_mask): which box pixels can the data see? Geometry as models.py: the disc pixel centre
+# ((col - 29.5) pitch, (row - 29.5) pitch) is rolled by -ORIENTAT about the star, and a point (x', y') arcsec from the star lands at
+# crop pixel (star_col + x'/scale, star_row + y'/scale). The star position and the pixel scale are the MODEL's, from the reference
+# params used by this run: the star is at the optical axis + primary_tilt + cold_mask_tilt (arcsec, (x, y)): a source offset,
+# primary_tilt and cold_mask_tilt all shift the PSF identically (x -> col, y -> row; tests/probe_shifts.py: no other optics or
+# detector parameter moves it), so crop pixel (wid - 1)/2 + (primary_tilt + cold_mask_tilt)/scale, with
+# scale = MFT output pixel x oversample = d / (fnumber 2.4) rad. The
+# FITS header's TARSIAFX/Y (printed for comparison) is ~1-2 px away. The mask is FIXED for the run: built once here from the
+# reference params, not updated by the outer-loop refits.
+support_shape = "coverage"   # "coverage": keep covered pixels; "circle": the largest star-centred circle of them
+support_cover = "any"        # "any": keep a pixel if at least one exposure covers it; "all": only if every exposure does
+support_footprint = True     # cover = the whole rotated pixel footprint (4 corners) inside the crop, not just its centre
+support_margin_px = 0.       # data px a pixel must be inside the crop edge (evidence cost grows quickly with it: NOTES.md)
+support_radius = None        # arcsec: override the circle's radius (shape "circle" only)
+support_taper = 0.           # disc px cos^2 edge roll-off (shape "circle" only); 0 = hard edge
+support_star = "fitted"      # "fitted": primary_tilt + cold_mask_tilt of the reference params; "header": TARSIAFX/Y minus the crop origin
+disc_pitch = 0.0432*2
+support_scale = float(dlu.rad2arcsec(optics.layers["prop1"].spec.d/(float(params["fnumber"])*2.4))*oversample)   # arcsec / data px
+crop_origin = Cutout2D(numpy.zeros((256, 256)), CROP_CENTRE, wid).origin_original      # (x0, y0) of the crop on the detector
+stars_header = numpy.array([[float(e.hdr["TARSIAFX"]) - crop_origin[0], float(e.hdr["TARSIAFY"]) - crop_origin[1]]
+                            for e in exposures])
+def tilt_of(e, name):
+    """The exposure's fitted tilt (arcsec, (x, y)): keyed by get_key (primary_tilt), or per exposure (cold_mask_tilt is "global" in
+    PARAM_KEYS but stored per exposure in the imlup-adi params)."""
+    d = params[name]
+    for k_ in (e.fit.get_key(e, name), e.key):
+        if k_ in d:
+            return numpy.asarray(d[k_], dtype=float)
+    raise KeyError(f"params[{name!r}] has neither {e.fit.get_key(e, name)!r} nor {e.key!r}: {list(d)}")
+stars_fitted = numpy.array([(wid - 1)/2 + (tilt_of(e, "primary_tilt") + tilt_of(e, "cold_mask_tilt"))/support_scale
+                            for e in exposures])
+support_stars = stars_fitted if support_star == "fitted" else stars_header
+support_orients = numpy.array([float(e.orient) for e in exposures])
+sm_kw = dict(margin=support_margin_px, shape=support_shape, cover=support_cover, footprint=support_footprint,
+             radius=support_radius, taper=support_taper)
+support, support_info = support_mask(resolved_wid, disc_pitch, support_orients, support_stars, wid, support_scale, **sm_kw)
+n_header = support_mask(resolved_wid, disc_pitch, support_orients, stars_header, wid, support_scale, **sm_kw)[1]["n_support"]
+circle_txt = (f"circle radius {support_info['radius_arcsec']:.3f}\" = {support_info['radius_px']:.1f} px; "
+              if support_shape == "circle" else "")
+print(f"support mask ({support_shape}, cover {support_cover}, footprint {support_footprint}, margin {support_margin_px:g} px): "
+      f"{support_info['n_support']} / {resolved_wid**2} disc pixels kept ({n_header} with the header star); pixel scale {support_scale:.5f}\"; "
+      f"per-exposure coverage {numpy.round(support_info['coverage_fraction'], 3)}; nearest uncovered pixel "
+      f"{support_info['r_coverage_arcsec']:.3f}\"; {circle_txt}fitted stars {numpy.round(stars_fitted, 2).tolist()} vs header "
+      f"{numpy.round(stars_header, 2).tolist()}; orients {support_orients.tolist()}", flush=True)
+numpy.save(f"{out}/support.npy", support)
+fig, axs = plt.subplots(1, 3, figsize=(30, 10))
+axs[0].imshow(support); axs[0].set_title(f"support M ({support_shape}, {support_cover}), n = {support_info['n_support']}")
+for k_ in range(len(exposures)):
+    axs[1].contour(support_info["coverage"][k_], [0.5], colors=f"C{k_}")
+axs[1].set_title("coverage of each exposure (contours)")
+axs[2].imshow(support_info["coverage"].sum(0)); axs[2].set_title("number of exposures covering each disc pixel")
+fig.savefig(f"{out}/support.png")
+plt.close(fig)
+exposures = with_support(exposures, support)      # every prior the fits build (surrogate_prior) and the full model carry M
+check_n_share(exposures)
+# the prior-independent results below depend on the mask through the priors, so every fingerprint (code_fp) includes it
+code_fp = hashlib.sha256(open("../gp.py", "rb").read() + numpy.asarray(support, dtype=float).tobytes()).hexdigest()[:12]
+
 d_ref = 10**np.asarray(params.pop("resolved")[key])           # the L1/TSV disc
 mean_t = log10_template(d_ref, template_floor)
-level_mu = {t: reference_level(d_ref, mean_t if t else None) for t in templates}
+level_mu = {t: reference_level(d_ref, mean_t if t else None, support) for t in templates}   # mean over the support only
 print(f"reference level (dex): flat mean {level_mu[False]:.3f}")
 
 params["resolved"] = {key: np.zeros(resolved_wid**2 + n_b)}      # the flat latents (z_dct, b)
@@ -317,7 +384,7 @@ with timed("B: verify"):
 
 # %%
 # ---------------------------------------------------------------- C: first MAP, gradient check, noise scales
-prior0 = gp_prior(resolved_wid, 1., 1.6, 2., None, lp_of(False))   # single kernel: the noise scales are the DCT run's
+prior0 = gp_prior(resolved_wid, 1., 1.6, 2., None, lp_of(False), support=support)   # single kernel: the noise scales are the DCT run's
 
 with timed("C: noise"):
     npath = f"{out}/noise-{fingerprint(resp_fp, level_mu[False], level_sd, n_iter, code_fp)}.npz"
@@ -365,8 +432,8 @@ beta = 1/np.asarray(s_noise)**2
 # sensitivity to the fixed trend_sigma is reported at the best point (trend_sigma_sensitivity).
 base_fp = fingerprint(resp_fp, beta, level_mu[False], level_sd, n_iter, code_fp)
 singles, singles_post, trends, trends_post = {}, {}, {}, {}
-sg = lambda order: (lambda sigma, length: gp_prior(resolved_wid, sigma, length, order, None, lp_of(False)))
-tf = lambda order, s_h=trend_sigma: trend_prior_factory(resolved_wid, order, s_h, None, lp_of(False), basis=trend_basis)
+sg = lambda order: (lambda sigma, length: gp_prior(resolved_wid, sigma, length, order, None, lp_of(False), support=support))
+tf = lambda order, s_h=trend_sigma: trend_prior_factory(resolved_wid, order, s_h, None, lp_of(False), basis=trend_basis, support=support)
 theta_s_trend = embed_trend_theta(noise["theta_s"], n_b)
 with timed("D: single-kernel grids"):
     for order in orders:
@@ -398,7 +465,7 @@ prior_1 = sg(best_single)(**b1)
 prior_t = tf(best_trend)(**bt)
 
 # nesting check on the data's prior: trend_sigma = 0 IS the Matern prior (amplitudes and the surrogate's evidence)
-p_nest = gp_trend_prior(resolved_wid, b1["sigma"], b1["length"], best_single, 0., None, lp_of(False))
+p_nest = gp_trend_prior(resolved_wid, b1["sigma"], b1["length"], best_single, 0., None, lp_of(False), support=support)
 nest = float(np.abs(p_nest.amp - prior_1.amp).max())
 ev_n1 = gp_log_evidence(resp, prior_1, th_1, beta)
 ev_n0 = gp_log_evidence(resp, p_nest, embed_trend_theta(th_1, n_b), beta)
@@ -652,7 +719,7 @@ def refit(opt_params, model_b, exps_b, things, log=print):
 
 
 mean_b, lp_b = None, lp_of(False)
-make_b = lambda: trend_prior_factory(resolved_wid, best_trend, trend_sigma, mean_b, lp_b, basis=trend_basis)
+make_b = lambda: trend_prior_factory(resolved_wid, best_trend, trend_sigma, mean_b, lp_b, basis=trend_basis, support=support)
 hyp_b = dict(bt)                                    # {sigma, length}; the order and trend_sigma are fixed
 outer_steps = dict(sigma=2**0.5, length=2**0.5)     # local grid: 3 values per axis (n=1)
 hypers_of = lambda h: dict(sigma=h["sigma"], length=h["length"], order=best_trend, trend_sigma=trend_sigma)
@@ -1006,7 +1073,7 @@ with timed("G: plain Matern + trend at every order on the final response"):
         # nesting at this point: the trend prior with trend_sigma = 0 (b = 0) must reproduce the plain Matern's log Z
         ev_p0 = gp_log_evidence(fin_resp, sg(o_p)(**best_p), th_p, fin_beta)
         ev_p1 = gp_log_evidence(fin_resp, gp_trend_prior(resolved_wid, best_p["sigma"], best_p["length"], o_p, 0., None,
-                                                         lp_b), embed_trend_theta(th_p, n_b), fin_beta)
+                                                         lp_b, support=support), embed_trend_theta(th_p, n_b), fin_beta)
         fin_plain[f"o{o_p:g}"] = grid_record(gp_p, pp, if_p, order=o_p, coarse_log_evidence=float(gp_hyper_posterior(gc_p)["log_evidence_bounds"]),
                                              nesting_logZ_abs_diff=float(np.abs(ev_p0["logZ"] - ev_p1["logZ"])))
         fin_plain_grids[o_p] = gp_p
@@ -1081,9 +1148,9 @@ if g_continuous_order:
                 print(f"G2 skipped: the {g_stage_budget_s:.0f} s stage budget is used up")
             else:
                 cont_make = dict(
-                    plain=lambda sigma, length, order: gp_prior(resolved_wid, sigma, length, order, None, lp_b),
+                    plain=lambda sigma, length, order: gp_prior(resolved_wid, sigma, length, order, None, lp_b, support=support),
                     trend=lambda sigma, length, order: trend_prior_factory(resolved_wid, order, trend_sigma, None, lp_b,
-                                                                           basis=trend_basis)(sigma, length))
+                                                                           basis=trend_basis, support=support)(sigma, length))
                 for kind, recs, grids_k in (("plain", fin_plain, fin_plain_grids), ("trend", fin_trends, fin_trend_grids)):
                     key_o = max(recs, key=lambda k_: recs[k_]["log_evidence"])
                     o_best = recs[key_o]["order"]
@@ -1133,10 +1200,13 @@ with timed("F: products"):
     theta_f = current["theta"]
     ev_f = to_host(gp_log_evidence(resp_f, prior_f, theta_f, beta_f))
     lap = gp_laplace(resp_f, prior_f, theta_f, beta_f)
-    log_map = numpy.asarray(prior_f.log10_image(theta_f))
+    nan_off = lambda a_: numpy.where(support > 0, numpy.asarray(a_), numpy.nan)    # the data say nothing outside the support
+    log_map = nan_off(prior_f.log10_image(theta_f))
     log_std = numpy.asarray(gp_log10_std(prior_f, lap))
     z_f, l_f = prior_f.params(theta_f)
     tc_f = to_host(trend_components(prior_f, theta_f, lap))     # coef (dex), coef_sd, trend / trend_std maps, DCT field
+    for k_ in ("trend", "trend_std", "field_dct"):
+        tc_f[k_] = nan_off(tc_f[k_])
 
     # posterior mixture over the final (sigma, length) grid (every bound is an axis bound: gp_hyper_posterior's weights ARE the posterior)
     post_f = gp_hyper_posterior(grid_f)
@@ -1156,7 +1226,7 @@ with timed("F: products"):
         draws.append(jax.vmap(prior_c.distribution)(
             gp_laplace_samples(th, gp_laplace(resp_f, prior_c, th, beta_f), jr.PRNGKey(10 + hash(idx) % 1000), n=m)))
     mix = np.concatenate(draws)
-    mix_mean, mix_std = numpy.asarray(mix.mean(0)), numpy.asarray(mix.std(0))
+    mix_mean, mix_std = nan_off(mix.mean(0).reshape(support.shape)), nan_off(mix.std(0).reshape(support.shape))
     spec = gp_spectral_diagnostic(prior_f, theta_f, lap)
     q_f = {k: list(map(float, v)) for k, v in post_f["quantiles"].items()}
     outside = {k: v for k, v in hyp_b.items() if not (q_f[k][0] <= v <= q_f[k][2])}
@@ -1175,7 +1245,7 @@ with timed("F: products"):
     p_final = dict(current["params"]) | {"resolved": {key: z_f}, "resolved_level": {key: l_f}}
     save_npy(f"{out}/gp-params.npy", to_host(p_final))
 
-    lo, hi = numpy.percentile(log_map, 1), log_map.max()
+    lo, hi = numpy.nanpercentile(log_map, 1), numpy.nanmax(log_map)
     panels = [(numpy.log10(numpy.asarray(d_ref)), "L1/TSV reference (log10)", (lo, hi)),
               (log_map, "Matern + trend GP MAP (log10)", (lo, hi)),
               (numpy.log10(mix_mean), "posterior-mixture mean (log10)", (lo, hi)),
@@ -1207,6 +1277,8 @@ with timed("F: products"):
 
     n_good = numpy.asarray(resp_f.n_good)
     summary = dict(
+        support={k_: v_ for k_, v_ in support_info.items() if k_ != "coverage"} | dict(
+            stars=support_stars.tolist(), orients=support_orients.tolist(), scale=support_scale),
         hyper=hyp_b, order=best_trend, trend_sigma=trend_sigma, trend_kinds=list(trend_kinds),
         trend_coef_dex=tc_f["coef"].tolist(), trend_coef_sd_dex=tc_f["coef_sd"].tolist(),
         dct_modes_02_20_z=[float(tc_f["z_dct"][0, 2]), float(tc_f["z_dct"][2, 0])],

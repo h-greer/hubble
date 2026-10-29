@@ -37,7 +37,9 @@ CACHE_VERSION = 4
 DEFAULT_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "tmp_precond_cache")
 
 # Source files that define the loss: editing any of them invalidates the cache.
-_CODE_FILES = ["models.py", "stats.py", "apertures.py", "detectors.py", "spectra.py", "gp.py", "batching.py"]
+_CODE_FILES = ["models.py", "stats.py", "apertures.py", "detectors.py", "spectra.py", "gp.py", "batching.py", "occulters.py"]
+# Data files read by the loss (the occulter hole SDF): hashed with the code.
+_DATA_FILES = [os.path.join("data", "occulter", "hole_sdf.npz")]
 # Method kwargs that only change memory use, not the result.
 _MEMORY_KWARGS = {"batch_size", "chunk", "probe_batch", "mapped"}
 
@@ -48,6 +50,7 @@ DEFAULT_ATOL = {
     "primary_spider": 0.01, "fnumber": 0.5, "anisotropy": 1e-3, "bias": 1.0,
     "occulter_radius": 0.01, "occulter_coeffs": 0.01, "outer_radius": 0.01,
     "secondary_radius": 0.01, "spider_width": 0.01, "spectrum": 1.0,
+    "occulter_edge": 0.01, "occulter_rim_amp": 0.03, "occulter_rim_opd": 10., "occulter_rotation": 1.,
 }
 GENERIC_ATOL = 1e-3
 
@@ -72,7 +75,7 @@ def _digest(*trees):
 
 def _code_fingerprint():
     here = os.path.dirname(os.path.abspath(__file__))
-    files = [precond.__file__] + [os.path.join(here, f) for f in _CODE_FILES]
+    files = [precond.__file__] + [os.path.join(here, f) for f in _CODE_FILES + _DATA_FILES]
     h = hashlib.sha256()
     for f in files:
         if os.path.exists(f):

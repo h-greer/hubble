@@ -14,6 +14,8 @@ from abcdLux.lct import *
 from abcdLux.abcd import *
 
 from spectra import hermite_propagate
+from occulters import CLIMBGlintOcculter, ImageOcculter   # (helpers imported with _ aliases: `from apertures import *` must not export them)
+from occulters import combine_terms as _combine_terms, pool as _pool, soft_coverage as _soft_coverage
 
 # ---- dLux soft-aperture fixes (monkeypatches of dLux.utils.geometry) ----------------------------
 # 1. soften: stock dLux rescales the clipped distances by the array's own min/max. When a feature is
@@ -298,7 +300,10 @@ class EllipticalOcculter(dl.OpticalLayer):
             occulter-plane angle theta (from its x axis, after the model's flip) of a complex ring on the edge,
             subtracted from the obstruction: mask = disc - g(theta) exp(-(rho - rho_edge)^2 / 2 w^2), i.e. light the
             hole's edge reflects or scatters back into the beam (positive real g0 adds in-phase light). Zero = no glint.
-    glint_width : w (m) in the occulter plane."""
+    glint_width : w (m) in the occulter plane.
+    edge : static. "soft_binarise" (default, unchanged): dlu.soft_binarise of the CLIMB latent. "coverage": the
+           continuous area-fraction edge occulters.soft_coverage (no sub-pixel noise in the gradients; shifts the PSF
+           by ~8e-4 of its peak at fixed r, so r refits at the 1e-4 level)."""
     r: Array
     e: Array
     glint: Array
@@ -306,8 +311,12 @@ class EllipticalOcculter(dl.OpticalLayer):
 
     normalise: bool
     invert: bool
+    edge: str = eqx.field(static=True)
 
-    def __init__(self, r, e=np.zeros(2), glint=np.zeros((1, 2)), glint_width=3e-6, normalise: bool = False, invert: bool = False):
+    def __init__(self, r, e=np.zeros(2), glint=np.zeros((1, 2)), glint_width=3e-6, normalise: bool = False, invert: bool = False, edge: str = "soft_binarise"):
+        if edge not in ("soft_binarise", "coverage"):
+            raise ValueError(f"edge must be 'soft_binarise' or 'coverage', got {edge!r}")
+        self.edge = edge
         self.r = np.asarray(r, float)
         self.e = np.asarray(e, float)
         self.glint = np.asarray(glint, float)
@@ -324,7 +333,14 @@ class EllipticalOcculter(dl.OpticalLayer):
         """Wavelength-independent transmission (so it can be hoisted out of the wavelength loop); complex (glint)."""
         xx, yy = dlu.pixel_coords(npixels*3, pixel_scale=pixel_scale/3)
         rho2 = self._rho2(xx, yy)
-        circ = dlu.soft_binarise(-rho2/(2*self.r)**2 + 0.5, oversample=3)   # as fourier_circle: edge at rho = sqrt(2) r
+        if self.edge == "coverage":
+            e1, e2 = self.e
+            k, s = np.sqrt(1 - e1**2 - e2**2), 2*np.sqrt(2)*self.r
+            d = (rho2 - 2*self.r**2) / s                                      # < 0 inside; |grad d| = 1 at the edge
+            gx, gy = 2*((1 - e1)*xx - e2*yy)/(k*s), 2*((1 + e1)*yy - e2*xx)/(k*s)   # analytic gradient of d
+            circ = _pool(_soft_coverage(d, gx, gy, pixel_scale/3), 3)
+        else:
+            circ = dlu.soft_binarise(-rho2/(2*self.r)**2 + 0.5, oversample=3)   # as fourier_circle: edge at rho = sqrt(2) r
 
         # glint ring on the same 3x oversampled grid, mean-pooled to the mask's pixels (w is only ~2 pixels)
         theta = np.arctan2(yy, xx)
@@ -467,6 +483,48 @@ class _AmpOpd:
         return _AmpOpd(self.ref, self.amp * np.sqrt(1. / np.sum(self.amp ** 2)), self.opd)
 
 
+_OCCULTER_RADIUS = dlu.arcsec2rad(0.3)*24*2.4      # default occulter radius (m): 0.3 arcsec at the 24 * 2.4 focal ratio
+
+
+def _build_occulter(occulter, occulter_kwargs, chromatic, default):
+    """Occulter layer for the NICMOS coronagraphs. occulter: None (-> default), "fourier" (CLIMBOcculter with cc / ss,
+    NICMOSCoronagraph's default), "elliptical" (EllipticalOcculter, NICMOSFresnelCoronagraph's default), "climb"
+    (occulters.CLIMBGlintOcculter) or "image" (occulters.ImageOcculter). occulter_kwargs go to the constructor (r defaults
+    to _OCCULTER_RADIUS). chromatic None | "exact" | "linear" needs a wavelength-dependent occulter ("climb" / "image")."""
+    name = default if occulter is None else occulter
+    kw = dict(occulter_kwargs or {})
+    if name not in ("fourier", "elliptical", "climb", "image"):
+        raise ValueError(f"occulter must be None, 'fourier', 'elliptical', 'climb' or 'image', got {occulter!r}")
+    if chromatic not in (None, "exact", "linear"):
+        raise ValueError(f"chromatic must be None, 'exact' or 'linear', got {chromatic!r}")
+    if chromatic is not None and name not in ("climb", "image"):
+        raise ValueError(f"chromatic={chromatic!r} needs a wavelength-dependent occulter ('climb' or 'image'), not {name!r}")
+    if name == "fourier":
+        return CLIMBOcculter(**({"r": _OCCULTER_RADIUS, "cc": np.zeros(1), "ss": np.zeros(1)} | kw))
+    cls = {"elliptical": EllipticalOcculter, "climb": CLIMBGlintOcculter, "image": ImageOcculter}[name]
+    return cls(**({"r": _OCCULTER_RADIUS} | kw))
+
+
+class _ModeOcculter(dl.OpticalLayer):
+    """Occulter layer for the stock (return_wf) path of NICMOSCoronagraph with a glint occulter, so that path applies
+    the same mask as the fast path: mode None -> the mask at the occulter's wavelength0 (achromatic), "linear" -> the
+    linear terms combined at the wavefront's wavelength. Parameter paths: ".occulter.*" (the wrapped layer)."""
+    occulter: dl.OpticalLayer
+    mode: str | None = eqx.field(static=True)
+
+    def __init__(self, occulter, mode):
+        self.occulter = occulter
+        self.mode = mode
+
+    def __call__(self, wavefront):
+        n, ps = wavefront.npixels, wavefront.pixel_scale
+        if self.mode == "linear":
+            mask = _combine_terms(self.occulter.mask_terms(n, ps), wavefront.wavelength)
+        else:
+            mask = self.occulter.mask(n, ps)
+        return wavefront * mask
+
+
 class NICMOSCoronagraph(dl.LayeredOpticalSystem):
     """wl_batch : None -> vmap all wavelengths at once (dLux default).  int k -> lax.map over wavelengths in chunks of k
                   (sequential; with remat=True the reverse pass only holds k wavelengths of residuals).
@@ -479,13 +537,21 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
                 (spectra.hermite_propagate; ~9 knots on-axis for ~2e-4 accuracy, independent of the fine grid).
     pad       : model the PSF `pad` detector pixels wider on each side than psf_npixels, for a
                 NICMOSDetector(oversample, psf_npixels, pad=pad), which crops it back after resampling.
+    occulter  : None / "fourier" (default: CLIMBOcculter with cc / ss), "elliptical", "climb" or "image" (see _build_occulter).
+    occulter_kwargs : dict passed to the occulter's constructor.
+    chromatic : None -> one achromatic mask for all wavelengths (the occulter's mask at its wavelength0 for the glint
+                occulters). "exact" -> the mask is built per wavelength. "linear" -> (M0, M1) are built ONCE per
+                propagation and combined per wavelength (M0 + (lam0/lam - 1) M1). The return_wf path (stock dLux loop)
+                applies the same mask for the glint occulters (via _ModeOcculter), so every path agrees.
     """
     wl_batch: int | None = eqx.field(static=True)
     remat: bool = eqx.field(static=True)
     n_nodes: int | None = eqx.field(static=True)
+    chromatic: str | None = eqx.field(static=True)
 
-    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., wavefront_pca=None, amplitude_pca=None, wl_batch=None, remat=False, amplitude=False, n_nodes=None, pad=0):
+    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1, wavefront_pca=None, amplitude_pca=None, wl_batch=None, remat=False, amplitude=False, n_nodes=None, pad=0, occulter=None, occulter_kwargs=None, chromatic=None):
         diameter = 3.
+        occ = _build_occulter(occulter, occulter_kwargs, chromatic, "fourier")
         layers = [
             ("primary",HSTMainAperture(transformation=DistortedCoordTransform(rotation=np.pi/4), softening=5)),
 
@@ -527,7 +593,7 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
             ("occulter", SoummerFastObstruction([
                 ("prop1", dl.MFT(256, focal_length=24*2.4, pixel_scale=1.5e-6)),
                 # ("occulter", dl.CircularAperture(dlu.arcsec2rad(0.3)*24*2.4)),
-                ("occulter", CLIMBOcculter(dlu.arcsec2rad(0.3)*24*2.4, np.zeros(1), np.zeros(1))),
+                ("occulter", occ),
                 ("prop1", dl.MFT(wf_npixels, focal_length=24*2.4, pixel_scale=diameter/wf_npixels)),
             ])),
 
@@ -538,7 +604,7 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
                     # rotation as the mask's, so cold_mask_distortion acts in the same frame even if cold_mask_rot is unset
                     dl.layers.CircularAperture(1.2, transformation=DistortedCoordTransform(translation=np.asarray((-0.05, -0.05)), rotation=np.pi/4)),
                     noll_inds=np.arange(4,20),
-                    coefficients = np.zeros(1),
+                    coefficients = np.zeros(16),
                 )),
 
             ("cold_mask_tilt", dl.Tilt(angles=(0.,0.))),
@@ -550,6 +616,7 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
         self.wl_batch = wl_batch
         self.remat = bool(remat)
         self.n_nodes = n_nodes
+        self.chromatic = chromatic
 
     # Layout is fixed: [wavelength-independent layers] occulter [wavelength-independent layers] final MFT.
     # The wavelength-independent layers (Zernikes, soft apertures, CLIMB mask) are evaluated once per call
@@ -573,7 +640,13 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
             rec2 = layer(rec2)
         mft1, climb, _ = occulter.layers.values()
         w1 = mft1(ref)                                               # only pixel_scale/npixels are used
-        return (rec.amp, rec.opd), climb.mask(w1.npixels, w1.pixel_scale), (rec2.amp, rec2.opd)
+        if self.chromatic == "linear":                               # (M0, M1, lam0): built once, combined per wavelength
+            mask = climb.mask_terms(w1.npixels, w1.pixel_scale)
+        elif self.chromatic == "exact":                              # built per wavelength in _one_wavelength
+            mask = None
+        else:
+            mask = climb.mask(w1.npixels, w1.pixel_scale)
+        return (rec.amp, rec.opd), mask, (rec2.amp, rec2.opd)
 
     def _one_wavelength(self, static, wavelength, weight):
         (amp1, opd1), mask, (amp2, opd2) = static
@@ -581,8 +654,13 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
         wf = dl.Wavefront(wavelength, self.wf_npixels, self.diameter)
         wf = wf.set(phasor=np.ones((self.wf_npixels,) * 2, complex))   # the 1/npix^2 amplitude is in amp1
         wf = (wf * amp1).add_opd(opd1)
-        mft1, _, mft2 = occulter.layers.values()
-        wf = wf.flip(axis=(0, 1)) - mft2(mft1(wf) * mask)              # Babinet, as SoummerFastObstruction
+        mft1, climb, mft2 = occulter.layers.values()
+        w1 = mft1(wf)
+        if self.chromatic == "exact":
+            mask = climb.mask(w1.npixels, w1.pixel_scale, wavelength)
+        elif self.chromatic == "linear":
+            mask = _combine_terms(mask, wavelength)
+        wf = wf.flip(axis=(0, 1)) - mft2(w1 * mask)                    # Babinet, as SoummerFastObstruction
         wf = (wf * amp2).add_opd(opd2)
         wf = final_mft(wf).multiply("phasor", weight ** 0.5)
         return wf.psf, wf.pixel_scale
@@ -590,8 +668,12 @@ class NICMOSCoronagraph(dl.LayeredOpticalSystem):
     def propagate(self, wavelengths, offset=None, weights=None, return_wf=False, return_psf=False, n_nodes=None):
         """n_nodes : overrides self.n_nodes for this call (e.g. fewer knots for faint off-axis sources)."""
         n_nodes = self.n_nodes if n_nodes is None else n_nodes
-        if return_wf:                                   # rarely needed: keep the stock dLux path
-            return super().propagate(wavelengths, offset, weights, return_wf, return_psf)
+        if return_wf:                                   # rarely needed: stock dLux path, with the occulter in the chromatic mode
+            system = self
+            climb = self.layers["occulter"].layers["occulter"]
+            if self.chromatic != "exact" and hasattr(climb, "mask_terms"):      # glint occulters: same mask as the fast path
+                system = eqx.tree_at(lambda s: s.layers["occulter"].layers["occulter"], self, _ModeOcculter(climb, self.chromatic))
+            return dl.LayeredOpticalSystem.propagate(system, wavelengths, offset, weights, return_wf, return_psf)
         wavelengths = np.atleast_1d(wavelengths)
         weights = np.ones_like(wavelengths) / len(wavelengths) if weights is None else np.atleast_1d(weights)
         offset = np.zeros(2) if offset is None else np.asarray(offset)
@@ -660,6 +742,43 @@ class FresnelFastObstruction(dl.OpticalLayer):
         return self.apply_mask(wavefront, self.mask())
 
 
+class ChromaticFresnelObstruction(FresnelFastObstruction):
+    """FresnelFastObstruction whose occulter mask depends on wavelength (the rim OPD of the glint occulters).
+    mode (static): "exact"  -> mask = occulter.mask(npixels, pixel_scale, wavelength) per wavelength;
+                   "linear" -> (M0, M1, lam0) = occulter.mask_terms(npixels, pixel_scale); mask = M0 + (lam0/lam - 1) M1.
+    `hoist()` returns a copy with the linear terms evaluated once and stored in `terms`; NICMOSFresnelCoronagraph.propagate
+    uses it so the terms are built once per propagation, not per wavelength.
+    WARNING: a hoisted copy's `terms` are a snapshot. After `.set` of any occulter parameter on a hoisted layer,
+    `.mask(wavelength)` (and calling the layer) is STALE; call `hoist()` again, or `.set` on the un-hoisted layer. Parameter paths: "occulter.layers.occulter.*", "occulter.defocus1/2"."""
+    mode: str = eqx.field(static=True)
+    terms: tuple | None
+
+    def __init__(self, occulter, focal_length, npixels, pixel_scale, defocus1=0., defocus2=0., normalise=False, mode="exact"):
+        if mode not in ("exact", "linear"):
+            raise ValueError(f"mode must be 'exact' or 'linear', got {mode!r}")
+        super().__init__(occulter, focal_length, npixels, pixel_scale, defocus1, defocus2, normalise)
+        self.mode = mode
+        self.terms = None
+
+    def mask_terms(self):
+        """(M0, M1, lam0) of the occulter on this layer's grid."""
+        return self.layers["occulter"].mask_terms(self.npixels, self.pixel_scale)
+
+    def hoist(self):
+        """Copy with the linear-mode terms evaluated (once) and stored; identity for mode "exact"."""
+        if self.mode != "linear":
+            return self
+        return eqx.tree_at(lambda o: o.terms, self, self.mask_terms(), is_leaf=lambda x: x is None)
+
+    def mask(self, wavelength=None):
+        if self.mode == "exact":
+            return self.layers["occulter"].mask(self.npixels, self.pixel_scale, wavelength)
+        return _combine_terms(self.mask_terms() if self.terms is None else self.terms, wavelength)
+
+    def __call__(self, wavefront):
+        return self.apply_mask(wavefront, self.mask(wavefront.wavelength))
+
+
 class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
     """NICMOSCoronagraph with Fresnel (ABCD) propagation through the occulter, so the occulter (defocus1/2)
     and detector (defocus3) can be out of focus. Same layer names and parameter paths as NICMOSCoronagraph
@@ -667,11 +786,20 @@ class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
     FresnelFastObstruction (defocus1/2 are its "occulter.defocus1/2") around an EllipticalOcculter
     (occulter_ellipticity = (e1, e2), not occulter_coeffs).
     n_modes, amplitude, wavefront_pca, amplitude_pca, n_nodes, pad : as NICMOSCoronagraph.
+    occulter  : None / "elliptical" (default), "climb" or "image" ("fourier" is the CLIMBOcculter of NICMOSCoronagraph);
+                occulter_kwargs : dict for its constructor.
+    chromatic : None (achromatic mask, FresnelFastObstruction), "exact" or "linear" (ChromaticFresnelObstruction; linear
+                builds (M0, M1) once per propagate), as NICMOSCoronagraph.
     """
     n_nodes: int | None = eqx.field(static=True)
 
-    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1., wavefront_pca=None, amplitude_pca=None, amplitude=False, n_nodes=None, pad=0):
+    def __init__(self, wf_npixels, psf_npixels, oversample, n_modes=12, n_zernikes=1, wavefront_pca=None, amplitude_pca=None, amplitude=False, n_nodes=None, pad=0, occulter=None, occulter_kwargs=None, chromatic=None):
         diameter = 3.
+        occ = _build_occulter(occulter, occulter_kwargs, chromatic, "elliptical")
+        if chromatic is None:
+            occ_layer = FresnelFastObstruction(occ, 24*2.4, 256, 1.5e-6)
+        else:
+            occ_layer = ChromaticFresnelObstruction(occ, 24*2.4, 256, 1.5e-6, mode=chromatic)
         layers = [
             ("primary",HSTMainAperture(transformation=DistortedCoordTransform(rotation=np.pi/4), softening=2)),
 
@@ -700,7 +828,7 @@ class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
 
             ("flip", dl.Flip(axes=(0,1))),
 
-            ("occulter", FresnelFastObstruction(EllipticalOcculter(dlu.arcsec2rad(0.3)*24*2.4), 24*2.4, 256, 1.5e-6)),
+            ("occulter", occ_layer),
 
             ("cold_mask",   NIC2ColdMask(transformation=DistortedCoordTransform(translation=np.asarray((-0.05,-0.05)),rotation=np.pi/4, compression=np.asarray([1.,1.])), softening=2, normalise=False)),
 
@@ -708,7 +836,7 @@ class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
                     # rotation as the mask's, so cold_mask_distortion acts in the same frame even if cold_mask_rot is unset
                     dl.layers.CircularAperture(1.2, transformation=DistortedCoordTransform(translation=np.asarray((-0.05, -0.05)), rotation=np.pi/4)),
                     noll_inds=np.arange(4,20),
-                    coefficients = np.zeros(1),
+                    coefficients = np.zeros(16),
                 )),
 
             ("cold_mask_tilt", dl.Tilt(angles=(0.,0.))),
@@ -728,14 +856,17 @@ class NICMOSFresnelCoronagraph(dl.LayeredOpticalSystem):
     def propagate(self, wavelengths, offset=None, weights=None, return_wf=False, return_psf=False, n_nodes=None):
         """n_nodes : overrides self.n_nodes for this call (e.g. fewer knots for faint off-axis sources)."""
         n_nodes = self.n_nodes if n_nodes is None else n_nodes
+        # chromatic="linear": evaluate the occulter's (M0, M1) once here, not per wavelength / per Hermite knot
+        occ = self.layers["occulter"]
+        system = eqx.tree_at(lambda s: s.layers["occulter"], self, occ.hoist()) if hasattr(occ, "hoist") else self
         # with <= n_nodes wavelengths (e.g. a single-wavelength resolved source) the direct sum is exact and cheaper,
         # and Hermite needs >= 2 distinct knots
         if return_wf or not n_nodes or np.size(wavelengths) <= n_nodes:
-            return super().propagate(wavelengths, offset, weights, return_wf, return_psf)
+            return dl.LayeredOpticalSystem.propagate(system, wavelengths, offset, weights, return_wf, return_psf)
         wavelengths = np.atleast_1d(wavelengths)
         weights = np.ones_like(wavelengths) / len(wavelengths) if weights is None else np.atleast_1d(weights)
         offset = np.zeros(2) if offset is None else np.asarray(offset)
-        mono = lambda wl: (lambda wf: (wf.psf, wf.pixel_scale))(self.propagate_mono(wl, offset, return_wf=True))
+        mono = lambda wl: (lambda wf: (wf.psf, wf.pixel_scale))(system.propagate_mono(wl, offset, return_wf=True))
         psf, ps = hermite_propagate(mono, wavelengths, weights, n_nodes)
         return dl.PSF(psf, ps) if return_psf else psf
 

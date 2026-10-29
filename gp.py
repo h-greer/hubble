@@ -78,6 +78,10 @@ verify_linear_response). Everything below then costs dense n x n linear algebra 
   TrendGPPrior / TrendGPResolvedFit / gp_trend_prior / trend_prior_factory / trend_components   Matern DCT prior plus a
                       radial trend (degenerate basis kernel; trend_sigma = 0 is exactly the Matern prior);
   SumPrior / PolarDCTResolvedFit   polar + DCT prior (polar field plus a DCT residual field) and its fit.
+  support_mask / disc_coverage / with_support   a fixed disc SUPPORT mask M (wid x wid, 0/1 or tapered) multiplying the
+                      LINEAR brightness, I = M * 10**(level + mean + field): a disc pixel whose emission the data cannot
+                      cover (it falls outside the crop after the roll) is switched off instead of becoming a "sink" for
+                      unmodelled light at the crop edge. support=None (the default everywhere) is exactly the unmasked model.
 """
 import itertools
 import os
@@ -131,11 +135,115 @@ def log10_template(T, floor=1e-3):
     return np.log10(np.maximum(T/np.max(T), floor))
 
 
-def reference_level(d_ref, mean=None):
+def reference_level(d_ref, mean=None, support=None):
     """Prior centre for resolved_level from a reference disc d_ref (e.g. an L1/TSV fit): the spatial mean of
-    log10 d_ref - mean, which is what `level` is for a zero-mean field."""
-    logd = np.log10(np.asarray(d_ref, dtype=float))
-    return float(np.mean(logd - (0. if mean is None else mean)))
+    log10 d_ref - mean, which is what `level` is for a zero-mean field. support (wid x wid, optional): average over the
+    pixels with support > 0 only (weighted by support); `level` is still the mean of the field over the WHOLE box, but the
+    data only see the support, and a reference disc's values outside it (its edge "sink") are not data-driven."""
+    logd = np.log10(np.asarray(d_ref, dtype=float)) - (0. if mean is None else mean)
+    if support is None:
+        return float(np.mean(logd))
+    w = np.asarray(support, dtype=float)
+    return float(np.sum(w*logd)/np.sum(w))
+
+
+# ----------------------------------------------------------------------------- disc support mask
+def disc_coverage(wid, pitch, orients, stars, crop, scale=0.0755, margin=0., footprint=True):
+    """(n_exposures, wid, wid) bool: does exposure e's crop cover disc pixel (row, col)?
+
+    Same geometry as models.InterpolatedResolvedSource.model: the disc pixel centre is (x, y) = ((col - (wid - 1)/2) pitch,
+    (row - (wid - 1)/2) pitch) (dlu.pixel_coords, "xy" indexing), rotated about the star by roll = -deg2rad(ORIENTAT)
+    (PointResolvedFit.update_source), and a point (x', y') arcsec from the star lands at crop pixel col = star_col + x' / scale,
+    row = star_row + y' / scale (_anchor_image: an offset (x, y) is a (row, col) = (y, x) pixel shift).
+    footprint=True (default): the pixel counts as covered only if its whole footprint, the pitch x pitch square rotated by the
+    roll (all four corners), lies inside the crop; False: only its centre. margin (data px): inside the crop edge by at least this.
+    pitch, scale: arcsec per disc / data pixel (scale: scalar or (x, y)); orients: ORIENTAT (deg) per exposure; stars: (n, 2)
+    star position (col, row) in crop pixels (0-indexed centres; the crop spans -0.5 .. crop - 0.5)."""
+    xs = (onp.arange(wid) - (wid - 1)/2)*pitch
+    X, Y = onp.meshgrid(xs, xs)
+    h = 0.5*pitch
+    offs = [(sx_, sy_) for sx_ in (-h, h) for sy_ in (-h, h)] if footprint else [(0., 0.)]
+    sx, sy = onp.broadcast_to(onp.asarray(scale, dtype=float), (2,))
+    lo, hi = -0.5 + margin, crop - 0.5 - margin
+    out = []
+    for orient, (c0, r0) in zip(onp.atleast_1d(orients), onp.atleast_2d(stars)):
+        a = -onp.deg2rad(orient)
+        ca, sa = onp.cos(a), onp.sin(a)
+        ok = onp.ones((wid, wid), bool)
+        for ox, oy in offs:
+            x, y = X + ox, Y + oy
+            col, row = c0 + (x*ca - y*sa)/sx, r0 + (x*sa + y*ca)/sy
+            ok &= (col >= lo) & (col <= hi) & (row >= lo) & (row <= hi)
+        out.append(ok)
+    return onp.stack(out)
+
+
+def support_mask(wid, pitch, orients, stars, crop, scale=0.0755, margin=0., shape="coverage", cover="any", footprint=True,
+                 radius=None, taper=0.):
+    """(mask (wid, wid) float in [0, 1], info dict): the disc support M of I = M * 10**(...).
+
+    shape="coverage" (default): M = 1 where the disc pixel is covered (disc_coverage: whole rotated footprint in the crop,
+    `margin` data px to spare) by at least one exposure (cover="any", default: only pixels NO exposure can see are masked) or by
+    every exposure (cover="all": conservative, also masks pixels that are outside the crop in some exposure, which can then act
+    as a free sink for unmodelled light at that exposure's edge). The star position (stars) should be the model's fitted one.
+    shape="circle": the largest circle about the star (the box centre) whose pixels are all covered (under `cover`), radius =
+    distance of the nearest uncovered pixel (or `radius`, arcsec, the user override; the box itself clips it, pixel centres reach
+    29.5 pitch along the axes). A circle throws away covered pixels beyond the nearest crop edge, which costs far more evidence on
+    IM Lup (NOTES.md). taper (circle only, disc px): 0 = hard edge (default; masked pixels leave the problem exactly);
+    > 0: cos^2 roll-off from 1 at radius - taper pitch to 0 at radius.
+    info: shape, cover, footprint, radius_arcsec / radius_px (the circle's), r_coverage_arcsec (nearest uncovered pixel from
+    the star; inf if none), r_support_max_arcsec, n_support (M > 0), margin_px, taper, per-exposure and combined coverage
+    fractions, coverage (n, wid, wid)."""
+    assert shape in ("coverage", "circle") and cover in ("any", "all"), (shape, cover)
+    cov = disc_coverage(wid, pitch, orients, stars, crop, scale, margin, footprint)
+    kept = cov.any(axis=0) if cover == "any" else cov.all(axis=0)
+    xs = (onp.arange(wid) - (wid - 1)/2)*pitch
+    R = onp.hypot(*onp.meshgrid(xs, xs))
+    r_cov = float(R[~kept].min()) if (~kept).any() else float("inf")
+    if shape == "coverage":
+        assert radius is None and taper == 0., "radius / taper are for shape='circle'"
+        M, r = kept.astype(float), r_cov
+    else:
+        r = (r_cov*(1 - 1e-9)) if radius is None else float(radius)
+        if taper > 0:
+            M = onp.sin(0.5*onp.pi*onp.clip((r - R)/(taper*pitch), 0., 1.))**2
+        else:
+            M = (R <= r).astype(float)
+    info = dict(shape=shape, cover=cover, footprint=bool(footprint), radius_arcsec=r, radius_px=r/pitch,
+                r_coverage_arcsec=r_cov, r_support_max_arcsec=float(R[M > 0].max()), n_support=int((M > 0).sum()),
+                taper=float(taper), margin_px=float(margin), coverage_fraction=[float(c.mean()) for c in cov],
+                all_coverage_fraction=float(kept.mean()), coverage=cov)
+    return M, info
+
+
+def _support_array(support, wid):
+    if support is None:
+        return None
+    M = np.asarray(support, dtype=float)
+    assert M.shape == (wid, wid), f"support shape {M.shape} != ({wid}, {wid})"
+    if not isinstance(M, jax.core.Tracer):   # (a fit's support is a traced leaf inside a jit: no value check there)
+        assert bool(np.all((M >= 0) & (M <= 1))), "support must lie in [0, 1]"
+    return M
+
+
+def with_support(obj, support):
+    """`obj` with the support mask `support` ((wid, wid) in [0, 1], or None to remove it): a surrogate prior (any
+    _SurrogatePrior), or an exposure / list of exposures (their GP fit; use it once on the exposures that enter the loss, like
+    with_n_share: every prior the fit builds, surrogate_prior(), then carries it)."""
+    if isinstance(obj, (list, tuple)):
+        return [with_support(o, support) for o in obj]
+    none = lambda x: x is None
+    if isinstance(obj, _SurrogatePrior):
+        return eqx.tree_at(lambda o: o.support, obj, _support_array(support, obj.wid), is_leaf=none)
+    return eqx.tree_at(lambda o: o.fit.support, obj, _support_array(support, obj.fit.mean.shape[0]), is_leaf=none)
+
+
+def support_digest(support):
+    """Short hash of a support mask (None -> "none")."""
+    import hashlib
+    if support is None:
+        return "none"
+    return hashlib.sha256(onp.ascontiguousarray(onp.asarray(support, dtype=float)).tobytes()).hexdigest()[:12]
 
 
 # ----------------------------------------------------------------------------- polar (multipole) field
@@ -292,13 +400,14 @@ class _GPFitBase(PointResolvedFit):
     recompilation). The loss gains the negative log prior 0.5 |z|^2 + 0.5 ((level - mu) / sd)^2, divided by n_share,
     the number of exposures in the loss sharing one target-keyed disc (with_n_share), so it is counted once in total.
     d_override (internal): a disc used instead of the parameters (LinearResponse, verify_linear_response).
-    Subclasses define log10_field(z) and surrogate_prior(), and must not override get_distribution."""
+    Subclasses define log10_field(z) and _surrogate_prior(), and must not override get_distribution (or disc)."""
     PARAM_KEYS = PointResolvedFit.PARAM_KEYS | {"resolved_level": "target"}
     HYPER = ("mean", "level_prior")
     mean: jax.Array
     level_prior: jax.Array
     n_share: int
     d_override: jax.Array | None
+    support: jax.Array | None   # disc support mask M (wid, wid) multiplying the linear brightness (with_support); None: no mask
 
     def _init_gp(self, wid, mean, level_prior, n_share):
         self.mean = np.zeros((wid, wid)) if mean is None else np.asarray(mean, dtype=float)
@@ -307,19 +416,29 @@ class _GPFitBase(PointResolvedFit):
         self.n_share = int(n_share)
         self.regulariser = None  # the GP prior replaces the L1/TSV weights; precond.py handles it through n_share
         self.d_override = None
+        self.support = None
 
     def log10_field(self, z):
         raise NotImplementedError
 
-    def surrogate_prior(self):
+    def _surrogate_prior(self):
         raise NotImplementedError
+
+    def surrogate_prior(self):
+        """The surrogate prior of the current hyperparameters, carrying the support mask (subclasses define _surrogate_prior)."""
+        return with_support(self._surrogate_prior(), self.support)
+
+    def disc(self, z, level):
+        """The disc 10**log10 I = M 10**(level + mean + field(z)) (M = support, absent when None)."""
+        d = 10**(level + self.mean + self.log10_field(z))
+        return d if self.support is None else self.support*d
 
     def get_distribution(self, model, exposure):
         if self.d_override is not None:
             return self.d_override
         z = model.get(self.map_param(exposure, "resolved"))
         level = model.get(self.map_param(exposure, "resolved_level"))
-        return 10**(level + self.mean + self.log10_field(z))
+        return self.disc(z, level)
 
     def neg_log_prior(self, model, exposure):
         z = model.get(self.map_param(exposure, "resolved"))
@@ -357,7 +476,7 @@ class GPResolvedFit(_GPFitBase):
     def log10_field(self, z):
         return gp_field(z, self.amplitude())
 
-    def surrogate_prior(self):
+    def _surrogate_prior(self):
         return gp_prior(self.mean.shape[0], self.sigma, self.length, self.order, self.mean, self.level_prior)
 
 
@@ -391,7 +510,7 @@ class PolarGPResolvedFit(_GPFitBase):
     def log10_field(self, z):
         return self.grid.field(z, self.sigma, self.length_r, self.length_theta, self.geometry())
 
-    def surrogate_prior(self):
+    def _surrogate_prior(self):
         return polar_prior(self.grid, self.sigma, self.length_r, self.length_theta, self.cos_inc, self.pa, self.dx,
                            self.dy, self.mean, self.level_prior)
 
@@ -466,7 +585,7 @@ def gp_image(params, exposure):
     p = params.params if isinstance(params, ModelParams) else params
     fit = exposure.fit
     key = fit.get_key(exposure, "resolved")
-    return 10**(p["resolved_level"][key] + fit.mean + fit.log10_field(p["resolved"][key]))
+    return fit.disc(p["resolved"][key], p["resolved_level"][key])
 
 
 # ----------------------------------------------------------------------------- surrogate priors (theta = (z, u))
@@ -474,7 +593,14 @@ class _SurrogatePrior(eqx.Module):
     """A GP prior in the surrogate's coordinates theta = (z.ravel(), u) ~ N(0, I), level = level_mu + level_sd u,
     log10 I = level + mean + field(z), with field linear in z (field(z) = B z). Subclasses give field / field_T (B^T) /
     congruence (B^T H B) / field_matrix (B W) and meta_arrays (what a grid point's digest covers). All leaves are
-    arrays, so jitted functions taking a prior never recompile when its hyperparameters change."""
+    arrays, so jitted functions taking a prior never recompile when its hyperparameters change.
+
+    support (keyword-only, default None; with_support): a fixed mask M (wid, wid) in [0, 1] on the LINEAR brightness,
+    distribution = M * 10**log10_image. Nothing else changes: the surrogate's Jacobian is J = ln10 diag(M 10**log10_image)
+    [B | level_sd 1], so masked pixels drop out of the gradient, the Gauss-Newton metric, the Occam term and the Laplace
+    posterior automatically (their latents keep their prior-only directions, mu_i = 0 there: log(1 + 0) = 0). log10_image is
+    the UNMASKED field (the prior's log brightness, defined on the whole box)."""
+    support: jax.Array | None = eqx.field(default=None, kw_only=True)
 
     @property
     def wid(self):
@@ -484,7 +610,12 @@ class _SurrogatePrior(eqx.Module):
         return self.level_mu + self.level_sd*theta[-1] + self.mean + self.field(theta[:-1])
 
     def distribution(self, theta):
-        return 10**self.log10_image(theta)
+        d = 10**self.log10_image(theta)
+        return d if self.support is None else self.support*d
+
+    def _support_meta(self):
+        """() without a support (grid digests unchanged), else (support,): a masked grid point is never reused unmasked."""
+        return () if self.support is None else (self.support,)
 
     def theta(self, z, level):
         return np.concatenate([np.ravel(z), np.atleast_1d((level - self.level_mu)/self.level_sd)])
@@ -534,15 +665,16 @@ class GPPrior(_SurrogatePrior):
         return np.where(a > 0, _dct2(f.reshape(self.amp.shape)).ravel()/np.where(a > 0, a, 1.), 0.)
 
     def meta_arrays(self):
-        return (self.sigma, self.length, self.order, self.mean, self.level_mu, self.level_sd)
+        return (self.sigma, self.length, self.order, self.mean, self.level_mu, self.level_sd) + self._support_meta()
 
 
-def gp_prior(wid, sigma, length, order=2., mean=None, level_prior=(0., 1.)):
+def gp_prior(wid, sigma, length, order=2., mean=None, level_prior=(0., 1.), support=None):
     length = np.broadcast_to(np.asarray(length, dtype=float), (2,))
     mean = np.zeros((wid, wid)) if mean is None else np.asarray(mean, dtype=float)
     mu, sd = (np.asarray(x, dtype=float) for x in level_prior)
     sigma, order = np.asarray(sigma, dtype=float), np.asarray(order, dtype=float)
-    return GPPrior(matern_amplitude((wid, wid), length, sigma, order), mean, mu, sd, sigma, length, order)
+    return GPPrior(matern_amplitude((wid, wid), length, sigma, order), mean, mu, sd, sigma, length, order,
+                   support=_support_array(support, wid))
 
 
 class PolarPrior(_SurrogatePrior):
@@ -585,7 +717,7 @@ class PolarPrior(_SurrogatePrior):
 
     def meta_arrays(self):
         return (self.sigma, self.length_r, self.length_theta, self.geometry, self.mean, self.level_mu, self.level_sd,
-                onp.frombuffer(self.grid_digest.encode(), dtype=onp.uint8))
+                onp.frombuffer(self.grid_digest.encode(), dtype=onp.uint8)) + self._support_meta()
 
 
 @eqx.filter_jit
@@ -640,13 +772,14 @@ def multi_matern_amplitude(shape, sigmas, lengths, orders):
     return np.where(pos, np.sqrt(np.where(pos, S, 1.)), 0.)
 
 
-def multi_gp_prior(wid, sigmas, lengths, orders, mean=None, level_prior=(0., 1.)):
+def multi_gp_prior(wid, sigmas, lengths, orders, mean=None, level_prior=(0., 1.), support=None):
     """GPPrior of the K-kernel spectrum; prior.sigma / length / order hold the (K,) arrays (meta_arrays digests them)."""
     sigmas, lengths, orders = (np.atleast_1d(np.asarray(x, dtype=float)) for x in (sigmas, lengths, orders))
     assert sigmas.shape == lengths.shape == orders.shape and sigmas.ndim == 1, "sigmas, lengths, orders: (K,) each"
     mean = np.zeros((wid, wid)) if mean is None else np.asarray(mean, dtype=float)
     mu, sd = (np.asarray(x, dtype=float) for x in level_prior)
-    return GPPrior(multi_matern_amplitude((wid, wid), sigmas, lengths, orders), mean, mu, sd, sigmas, lengths, orders)
+    return GPPrior(multi_matern_amplitude((wid, wid), sigmas, lengths, orders), mean, mu, sd, sigmas, lengths, orders,
+                   support=_support_array(support, wid))
 
 
 # ----------------------------------------------------------------------------- fit
@@ -672,7 +805,7 @@ class MultiGPResolvedFit(_GPFitBase):
     def log10_field(self, z):
         return gp_field(z, self.amplitude())
 
-    def surrogate_prior(self):
+    def _surrogate_prior(self):
         return multi_gp_prior(self.mean.shape[0], self.sigmas, self.lengths, self.orders, self.mean, self.level_prior)
 
 
@@ -685,10 +818,10 @@ TWO_AXES = ("sigma1", "length1", "sigma2", "ratio")
 TWO_ABBREV = {"sigma1": "s1", "length1": "l1", "sigma2": "s2", "ratio": "r"}
 
 
-def two_kernel_prior_factory(wid, orders=(2., 2.), mean=None, level_prior=(0., 1.)):
+def two_kernel_prior_factory(wid, orders=(2., 2.), mean=None, level_prior=(0., 1.), support=None):
     """make_prior for gp_evidence_grid_nd with axes sigma1, length1, sigma2, ratio (length2 = length1 * ratio)."""
     def make_prior(sigma1, length1, sigma2, ratio):
-        return multi_gp_prior(wid, [sigma1, sigma2], [length1, length1*ratio], orders, mean, level_prior)
+        return multi_gp_prior(wid, [sigma1, sigma2], [length1, length1*ratio], orders, mean, level_prior, support)
     return make_prior
 
 
@@ -778,14 +911,14 @@ def bpl_from_matern(length, order):
     return length, 0., 2.*order
 
 
-def bpl_gp_prior(wid, sigma, length_b, gamma1, gamma2, mean=None, level_prior=(0., 1.)):
+def bpl_gp_prior(wid, sigma, length_b, gamma1, gamma2, mean=None, level_prior=(0., 1.), support=None):
     """GPPrior of the broken power-law spectrum; prior.length = length_b and prior.order = (gamma1, gamma2) (they only
     enter meta_arrays, the grid-point digests)."""
     mean = np.zeros((wid, wid)) if mean is None else np.asarray(mean, dtype=float)
     mu, sd = (np.asarray(x, dtype=float) for x in level_prior)
     sigma, length_b, gamma1, gamma2 = (np.asarray(x, dtype=float) for x in (sigma, length_b, gamma1, gamma2))
     return GPPrior(bpl_amplitude((wid, wid), sigma, length_b, gamma1, gamma2), mean, mu, sd, sigma, length_b,
-                   np.stack([gamma1, gamma2]))
+                   np.stack([gamma1, gamma2]), support=_support_array(support, wid))
 
 
 class BPLGPResolvedFit(_GPFitBase):
@@ -810,7 +943,7 @@ class BPLGPResolvedFit(_GPFitBase):
     def log10_field(self, z):
         return gp_field(z, self.amplitude())
 
-    def surrogate_prior(self):
+    def _surrogate_prior(self):
         return bpl_gp_prior(self.mean.shape[0], self.sigma, self.length_b, self.gamma1, self.gamma2, self.mean,
                             self.level_prior)
 
@@ -824,10 +957,10 @@ BPL_ABBREV = {"sigma": "s", "length_b": "lb", "gamma1": "g1", "dgamma": "dg"}
 BPL_SCALES = {"gamma1": "linear", "dgamma": "linear"}      # sigma and length_b are log axes (the default)
 
 
-def bpl_prior_factory(wid, mean=None, level_prior=(0., 1.)):
+def bpl_prior_factory(wid, mean=None, level_prior=(0., 1.), support=None):
     """make_prior for gp_evidence_grid_nd with axes BPL_AXES (gamma2 = gamma1 + dgamma)."""
     def make_prior(sigma, length_b, gamma1, dgamma):
-        return bpl_gp_prior(wid, sigma, length_b, gamma1, gamma1 + dgamma, mean, level_prior)
+        return bpl_gp_prior(wid, sigma, length_b, gamma1, gamma1 + dgamma, mean, level_prior, support)
     return make_prior
 
 
@@ -932,28 +1065,29 @@ class TrendGPPrior(GPPrior):
         return np.concatenate([GPPrior.fit_field(self, rest), b])
 
     def meta_arrays(self):
-        return GPPrior.meta_arrays(self) + (self.trend_sigma, self.basis)
+        return GPPrior.meta_arrays(self) + (self.trend_sigma, self.basis)   # (GPPrior's includes the support)
 
 
 def with_trend(prior, trend_sigma=1., basis=None, kinds=TREND_KINDS):
     """The TrendGPPrior of a GPPrior (any spectrum) with the radial trend of width trend_sigma (dex)."""
     basis = radial_trend_basis(prior.wid, kinds) if basis is None else np.asarray(basis, dtype=float)
     return TrendGPPrior(prior.amp, prior.mean, prior.level_mu, prior.level_sd, prior.sigma, prior.length, prior.order,
-                        basis, np.asarray(trend_sigma, dtype=float))
+                        basis, np.asarray(trend_sigma, dtype=float), support=prior.support)
 
 
 def gp_trend_prior(wid, sigma, length, order=2., trend_sigma=1., mean=None, level_prior=(0., 1.), basis=None,
-                   kinds=TREND_KINDS):
+                   kinds=TREND_KINDS, support=None):
     """Matern DCT prior plus the radial trend (trend_sigma = 0: exactly gp_prior)."""
-    return with_trend(gp_prior(wid, sigma, length, order, mean, level_prior), trend_sigma, basis, kinds)
+    return with_trend(gp_prior(wid, sigma, length, order, mean, level_prior, support), trend_sigma, basis, kinds)
 
 
-def trend_prior_factory(wid, order=2., trend_sigma=1., mean=None, level_prior=(0., 1.), basis=None, kinds=TREND_KINDS):
+def trend_prior_factory(wid, order=2., trend_sigma=1., mean=None, level_prior=(0., 1.), basis=None, kinds=TREND_KINDS,
+                        support=None):
     """make_prior for gp_evidence_grid_nd over axes (sigma, length) (the Matern's: same grid, same hyperpriors)."""
     basis = radial_trend_basis(wid, kinds) if basis is None else basis
 
     def make_prior(sigma, length):
-        return gp_trend_prior(wid, sigma, length, order, trend_sigma, mean, level_prior, basis)
+        return gp_trend_prior(wid, sigma, length, order, trend_sigma, mean, level_prior, basis, support=support)
     return make_prior
 
 
@@ -1009,7 +1143,7 @@ class TrendGPResolvedFit(_GPFitBase):
         amp = matern_amplitude(self.mean.shape, self.length, self.sigma, self.order)
         return gp_field(z[:w*w].reshape(w, w), amp) + (self.basis @ (self.trend_sigma*z[w*w:])).reshape(w, w)
 
-    def surrogate_prior(self):
+    def _surrogate_prior(self):
         return with_trend(gp_prior(self.mean.shape[0], self.sigma, self.length, self.order, self.mean, self.level_prior),
                           self.trend_sigma, self.basis)
 
@@ -1723,19 +1857,23 @@ def gp_laplace_samples(theta, laplace, key, n=200):
 
 
 def gp_log10_std(prior, laplace):
-    """Exact per-pixel posterior std of log10 I under the Laplace approximation (log10 I is linear in theta)."""
+    """Exact per-pixel posterior std of log10 I under the Laplace approximation (log10 I is linear in theta). Pixels
+    outside the prior's support (M = 0) are NaN: the data say nothing about them, the value would be the prior's."""
     mu, V = laplace
     w = prior.wid
     W = V/np.sqrt(1 + mu)
     LW = prior.field_matrix(W[:-1]) + prior.level_sd*W[-1][None, :]
-    return np.sqrt(np.sum(LW**2, axis=1)).reshape(w, w)
+    std = np.sqrt(np.sum(LW**2, axis=1)).reshape(w, w)
+    return std if prior.support is None else np.where(prior.support > 0, std, np.nan)
 
 
 def gp_spectral_diagnostic(prior, theta, laplace):
     """Posterior power of the whitened DCT modes, binned in radial wavenumber, against the prior's (1 per mode):
     <z_k^2> = z_map_k^2 + var_k, which averages to 1 when the prior's spectral shape is right. A systematic excess
     (deficit) over a range of wavenumbers means the Matern shape has too little (too much) power there. Also returns
-    the mean posterior variance per bin (1: unconstrained by the data, 0: fully measured). freq is in cycles / px."""
+    the mean posterior variance per bin (1: unconstrained by the data, 0: fully measured). freq is in cycles / px. With a support mask the data constrain the
+    field only inside it, so the global DCT modes are less constrained (var nearer 1) than without: the diagnostic is
+    computed unchanged and is not a masked-region-free statistic."""
     assert isinstance(prior, GPPrior), "gp_spectral_diagnostic is for the DCT prior; use gp_polar_diagnostic"
     mu, V = laplace
     w = prior.amp.shape[0]
@@ -1963,7 +2101,7 @@ class SumPrior(_SurrogatePrior):
     def meta_arrays(self):
         return (self.sigma_p, self.length_r, self.length_theta, self.geometry, self.sigma_d, self.length_d, self.order_d,
                 self.mean, self.level_mu, self.level_sd, onp.asarray([self.m_max]),
-                onp.frombuffer(self.grid_digest.encode(), dtype=onp.uint8))
+                onp.frombuffer(self.grid_digest.encode(), dtype=onp.uint8)) + self._support_meta()
 
 
 def sum_prior(grid, m_max, sigma_p, length_r, length_theta, cos_inc, pa, sigma_d, length_d, order_d=1., dx=0., dy=0.,
@@ -2033,7 +2171,7 @@ class PolarDCTResolvedFit(_GPFitBase):
                            self.length_r, self.length_theta, self.geometry())
                 + gp_field(z[self.n_p:].reshape(w, w), amp))
 
-    def surrogate_prior(self):
+    def _surrogate_prior(self):
         return sum_prior(self.grid, None if self.m_max < 0 else self.m_max, self.sigma_p, self.length_r,
                          self.length_theta, self.cos_inc, self.pa, self.sigma_d, self.length_d, self.order_d, self.dx,
                          self.dy, self.mean, self.level_prior)
