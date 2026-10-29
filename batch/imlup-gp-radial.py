@@ -29,6 +29,7 @@ import warnings
 import json
 import time
 import hashlib
+import glob
 from contextlib import contextmanager
 
 jax.config.update("jax_enable_x64", True)
@@ -66,7 +67,7 @@ from plotting import *
 from spectra import *
 from batching import make_batch
 from gp import *
-from gp import _save_npz   # the trend prior comes with `import *`
+from gp import _save_npz, _axes   # the trend prior comes with `import *`; underscore names are not covered
 
 out = "imlup-gp-radial"
 ref_dir = "imlup-adi"
@@ -780,29 +781,204 @@ for it, info in lbfgs_info.items():
               f"|sqrt(C) grad| end {info.get('grad_norm_u_end')}): the optics may be under-converged")
 
 # %%
-# ---------------------------------------------------------------- G: like-for-like re-evaluation of the plain Matern
-# The first run established the +29 nats only at the stage-D optics. Re-evaluate the plain Matern (every order in `orders`, the same
-# (sigma, length) bounds, level prior and beta, trend_sigma = 0 nesting) on the FINAL response, against the trend's final grid.
-with timed("G: plain Matern on the final response"):
+# ---------------------------------------------------------------- G: like-for-like re-evaluation, every order, plain and trend
+# The first run established the +29 nats only at the stage-D optics, and a later run showed the order preference depends on the
+# optics (stage D favoured trend o1, the final response puts plain o1.5 within 6 nats of it, on a grid that was not contained). So
+# on the FINAL response evaluate the plain Matern AND Matern + trend at EVERY order in `orders` (same beta, level prior lp_b,
+# hyper_bounds; coarse pass from that model's stage-D best, then fine grids grown until contained where the budgets allow), rank
+# all of them, and (G2) add a continuous-order evidence grid for each of the two families.
+# Each fine grid is grown until its edge weight is < edge_target: gp_evidence_grid_nd extends a face while it holds a cell within
+# g_edge_dlogz nats of the best (looser than edge_target alone guarantees: 8 nats ~ 3e-4 per edge cell), one growth step at a
+# time (re-calling it with max_growth + 1 replays the saved points, so only the new cells are computed). Before each step the
+# size of the next grid is predicted (the faces that will grow) and the step is refused if it would pass g_max_points, if the
+# predicted time (new points x the measured s/point of this grid, 1.4 s before any is measured) would pass g_max_seconds (this
+# grid) or the stage budget g_stage_budget_s (all of G and G2: later growth is skipped; the first, unavoidable evaluation of each
+# grid is not), or when the length axis is flat (a growth step on a length face that holds the edge mass changed the profile
+# logZ(length) by < 1 nat: "length_unidentified", more points would not contain it). Whatever stops a grid, its record has
+# "contained" (edge weight < edge_target) and "stop_reason".
+# The edge weight used here treats a face that can neither grow (the next cell lies past the hyperprior's bound) nor already
+# "reaches" the bound (its cell stops within half a step of it: gp_hyper_posterior counts that face as edge) as at-bound, so
+# a flat length posterior that runs to the 200 px bound is not falsely uncontained. gp's own number is kept as edge_weight_gp.
+g_edge_dlogz = 8.
+g_max_growth = 14
+g_max_points = 250
+g_max_seconds = 240.        # wall clock per grid for growth steps (checked against the predicted cost of the next step)
+g_stage_budget_s = 25*60.   # all of G and G2: after it the remaining growth is skipped, and G2 is skipped if it has already passed
+g_flat_dlogz = 1.           # a length profile changing by less than this over the last growth step: length unidentified
+g_decisive_dlogE = 5.       # nats: |dlogE| of the best model over the runner-up that counts as decisive (with both grids contained)
+# G2: order as a third (linear) axis. nu = order - 1 >= 0, so order < 1 is not a valid 2-D Matern: lower bound 1. Upper bound 3.5 =
+# the largest order in `orders` (the discrete evidence is already ~160 nats below the best there, and beyond it the Matern is
+# ever closer to the squared exponential). The hyperprior is uniform on [1, 3.5] (sigma, length: log-uniform on hyper_bounds, as
+# before), so the order-marginal evidence (log_evidence_bounds) is comparable between plain and trend. Initial order axis 1 .. 2 in
+# steps of 0.25 (grown up to the bound if posterior mass reaches its top face; widened to best discrete order + 0.5 when that is
+# higher); sigma / length about each family's best discrete (order, sigma, length): sigma 5 values at ratio 2^(1/12), length 5 at
+# 2^(1/2) (125 base points per family), grown at most g_cont_max_growth steps and g_cont_max_points points.
+g_continuous_order = True
+g_order_bounds = (1., 3.5)
+g_order_step, g_order_hi0 = 0.25, 2.
+g_cont_steps = dict(sigma=2**(1/12), length=2**0.5)
+g_cont_half_width = dict(sigma=2, length=2)
+g_cont_max_growth = 2
+g_cont_max_points = 350
+ORDER_ABBREV = ABBREV | {"order": "o"}    # the point file name carries the order (the tag is unique too)
+
+
+def effective_edge_weight(grid, post, only=None):
+    """Posterior weight on faces that are neither at the hyperprior's bound (gp's at_bound) nor unable to grow (the next cell
+    would lie past the bound, so the sliver to the bound is unreachable): gp_hyper_posterior's edge_weight without those
+    slivers. only: restrict to these axis names."""
+    w, bnd = post["weights"], grid.get("bounds", {})
+    edge = numpy.zeros(w.shape, dtype=bool)
+    for i, a in enumerate(_axes(grid)):
+        if len(a.vals) < 2 or a.scale == "periodic" or (only is not None and a.name not in only):
+            continue
+        for lower, face in ((True, 0), (False, len(a.vals) - 1)):
+            if a.at_bound(lower, bnd.get(a.name)) or not a.can_grow(lower, bnd.get(a.name)):
+                continue
+            sl = [slice(None)]*w.ndim
+            sl[i] = face
+            edge[tuple(sl)] = True
+    return float(w[edge].sum())
+
+
+def grid_record(grid, post, info=None, **extra):
+    """Per-model evidence record of a grid (JSON-safe): log_evidence = log_evidence_bounds, best, quantiles, edge weight
+    (effective, see effective_edge_weight; gp's in edge_weight_gp), contained (edge weight < edge_target), unconverged cells,
+    size, and info from contained_grid (stop_reason, growth_steps, seconds)."""
+    ew = effective_edge_weight(grid, post)
+    return dict(**extra, **(info or {}), log_evidence=float(post["log_evidence_bounds"]), best=gp_best(grid), edge_weight=ew,
+                edge_weight_gp=float(post["edge_weight"]), contained=bool(ew < edge_target), n_points=int(grid["logZ"].size),
+                axes_size={k: len(grid["axes"][k]) for k in grid["names"]},
+                unconverged=int((~grid["converged"].astype(bool)).sum()), max_converged_logZ=float(converged_max(grid)),
+                quantiles={k: list(map(float, v_)) for k, v_ in post["quantiles"].items()})
+
+
+def contained_grid(resp, beta, axes, make_prior, tag, theta0, scales=None, bounds=None, abbrev=ABBREV, growth_cap=g_max_growth,
+                   points_cap=g_max_points, seconds_cap=g_max_seconds):
+    """gp_evidence_grid_nd grown one step at a time (from 0, replaying the saved points) until the effective edge weight is
+    < edge_target or a limit stops it (stop_reason): "contained", "no_growth_possible" (a step added nothing), "length_unidentified",
+    "max_growth", "max_points" (the next grid would pass points_cap), "time" (predicted cost past seconds_cap),
+    "stage_budget" (past g_deadline). Returns (grid, posterior, info)."""
+    bnd = hyper_bounds if bounds is None else bounds
+    t_start = time.perf_counter()
+    n_files = lambda: len(glob.glob(f"{out}/grid/{tag}_*.npz"))
+
+    def run(mg, rt):
+        return gp_evidence_grid_nd(resp, axes, make_prior, beta=beta, outdir=f"{out}/grid", tag=tag, abbrev=abbrev, bounds=bnd,
+                                   scales=scales, n_iter=n_iter, theta0=theta0, max_growth=mg, edge_dlogz=g_edge_dlogz,
+                                   recheck_top=rt, verbose=False)
+    mg, prev_size, prev_len, new_total, new_secs, reason = 0, None, None, 0, 0., None
+    while True:
+        n0, t0 = n_files(), time.perf_counter()
+        grid = run(mg, 0)
+        post = gp_hyper_posterior(grid)
+        n_new = n_files() - n0
+        if n_new > 0:
+            new_total, new_secs = new_total + n_new, new_secs + time.perf_counter() - t0
+        names, logZ = grid["names"], numpy.asarray(grid["logZ"], dtype=float)
+        size = tuple(len(grid["axes"][k]) for k in names)
+        ew = effective_edge_weight(grid, post)
+        if ew < edge_target:
+            reason = "contained"
+        elif prev_size is not None and size == prev_size:
+            reason = "no_growth_possible"
+        elif mg >= growth_cap:
+            reason = "max_growth"
+        if reason is None and "length" in names and prev_len is not None:   # flat length profile over the last growth step?
+            il = names.index("length")
+            conv = numpy.asarray(grid["converged"]).astype(bool)
+            prof = numpy.where(conv, logZ, -numpy.inf).max(axis=tuple(j for j in range(logZ.ndim) if j != il))
+            lv = numpy.asarray(grid["axes"]["length"])
+            lo_add, hi_add = int(numpy.sum(lv < prev_len[0]*(1 - 1e-9))), int(numpy.sum(lv > prev_len[-1]*(1 + 1e-9)))
+            deltas = ([abs(prof[0] - prof[lo_add])] if lo_add else []) + ([abs(prof[-1] - prof[-1 - hi_add])] if hi_add else [])
+            if deltas and max(deltas) < g_flat_dlogz and effective_edge_weight(grid, post, only=("length",)) >= 0.5*ew:
+                reason = "length_unidentified"
+        if reason is None:     # predict the next step: the faces within g_edge_dlogz of the best (and able to grow) get a cell
+            near = logZ > numpy.max(logZ) - g_edge_dlogz
+            nxt = list(size)
+            for i, a in enumerate(_axes(grid)):
+                for lower, face in ((True, 0), (False, -1)):
+                    if numpy.take(near, face, axis=i).any() and a.can_grow(lower, bnd.get(a.name)):
+                        nxt[i] += 1
+            n_pts, n_next = int(logZ.size), int(numpy.prod(nxt))
+            spp = new_secs/new_total if new_total else 1.4
+            pred = (n_next - n_pts)*spp
+            if n_next > points_cap:
+                reason = "max_points"
+            elif time.perf_counter() - t_start + pred > seconds_cap:
+                reason = "time"
+            elif time.perf_counter() + pred > g_deadline:
+                reason = "stage_budget"
+        if reason is not None:
+            break
+        prev_size, prev_len, mg = size, numpy.asarray(grid["axes"]["length"]) if "length" in names else None, mg + 1
+    grid = run(mg, recheck_top)
+    post = gp_hyper_posterior(grid)
+    return grid, post, dict(stop_reason=reason, growth_steps=mg, seconds=float(time.perf_counter() - t_start), new_points=new_total)
+
+
+def rank_models(models):
+    """models {name: record}: ranking by log_evidence, the best over the runner-up and whether that is decisive."""
+    names = sorted(models, key=lambda k_: -models[k_]["log_evidence"])
+    top = models[names[0]]["log_evidence"]
+    d_ru = float(top - models[names[1]]["log_evidence"]) if len(names) > 1 else float("inf")
+    both = bool(models[names[0]]["contained"] and (len(names) < 2 or models[names[1]]["contained"]))
+    return dict(ranking=[dict(model=k_, log_evidence=models[k_]["log_evidence"], dlogE_to_best=float(models[k_]["log_evidence"] - top),
+                              contained=models[k_]["contained"], stop_reason=models[k_].get("stop_reason")) for k_ in names],
+                best=names[0], runner_up=names[1] if len(names) > 1 else None, dlogE_best_minus_runner_up=d_ru,
+                best_contained=bool(models[names[0]]["contained"]),
+                runner_up_contained=bool(models[names[1]]["contained"]) if len(names) > 1 else None,
+                decisive=bool(d_ru > g_decisive_dlogE and both), decisive_threshold_nats=g_decisive_dlogE)
+
+
+def print_models(models, rank):
+    print(f"{'model':<12}{'logE':>10}{'dlogE':>8}{'sigma':>8}{'length':>8}{'edge':>7}{'cont':>6}{'unconv':>7}{'npts':>6}  stop")
+    for r_ in rank["ranking"]:
+        m_ = models[r_["model"]]
+        print(f"{r_['model']:<12}{m_['log_evidence']:>10.2f}{r_['dlogE_to_best']:>8.2f}{m_['best']['sigma']:>8.3f}"
+              f"{m_['best']['length']:>8.1f}{m_['edge_weight']:>7.3f}{str(m_['contained']):>6}{m_['unconverged']:>7}{m_['n_points']:>6}"
+              f"  {m_.get('stop_reason')}")
+
+
+def log_mean_exp(v):
+    v = numpy.asarray(v, dtype=float)
+    return float(numpy.logaddexp.reduce(v) - numpy.log(v.size))
+
+
+g_deadline = time.perf_counter() + g_stage_budget_s    # reset at the start of the stage below
+with timed("G: plain Matern + trend at every order on the final response"):
+    g_deadline = time.perf_counter() + g_stage_budget_s
     fin_resp, fin_beta = current["resp"], current["beta"]
     fin_fp = fingerprint(current["resp_fp"], fin_beta, lp_b, n_iter, code_fp)
-    # trend: fine 7 x 7 grid at ratio 2^(1/4) about the loop's best (the coarse loop grid is its warm start and fallback)
-    fin_grid = gp_evidence_grid_nd(fin_resp, fine_axes(hyp_b), make_b(), beta=fin_beta,
-                                   outdir=f"{out}/grid", tag="final_fine_trend_" + fin_fp, abbrev=ABBREV, bounds=hyper_bounds,
-                                   n_iter=n_iter, theta0=current["theta"], max_growth=fine_max_growth,
-                                   edge_dlogz=grid_edge_dlogz, recheck_top=recheck_top)
-    fin_post = gp_hyper_posterior(fin_grid)
+    # the loop's trend (order best_trend): the same tag and axes as before (saved points reused), now grown until contained
+    fin_grid, fin_post, fin_info = contained_grid(fin_resp, fin_beta, fine_axes(hyp_b), make_b(), "final_fine_trend_" + fin_fp,
+                                                  current["theta"])
     hyp_b = {k: float(fin_grid["axes"][k][i]) for k, i in zip(fin_grid["names"], fin_grid["best"])}   # the fine best
     current = dict(current, grid=fin_grid, theta=np.asarray(fin_grid["thetas"][fin_grid["best"]]), idx=fin_grid["best"],
-                   stage=current["stage"] + "+fine")          # stage F's products / mixture use the fine grid
-    fin_trend = dict(order=best_trend, log_evidence=fin_post["log_evidence_bounds"], best=gp_best(fin_grid),
-                     edge_weight=fin_post["edge_weight"], n_points=int(fin_grid["logZ"].size),
-                     axes_size={k: len(fin_grid["axes"][k]) for k in fin_grid["names"]},
-                     unconverged=int((~fin_grid["converged"].astype(bool)).sum()),
-                     quantiles={k: list(map(float, v_)) for k, v_ in fin_post["quantiles"].items()})
+                   stage=current["stage"] + "+fine")          # stage F's products / mixture use the loop model's fine grid
+    fin_trends = {f"o{best_trend:g}": grid_record(fin_grid, fin_post, fin_info, order=best_trend, coarse_log_evidence=None)}
+    fin_trend_grids = {best_trend: fin_grid}
     print(f"[final trend o{best_trend:g}] log_evidence_bounds {fin_post['log_evidence_bounds']:.2f} at {hyp_b}; edge "
-          f"{fin_post['edge_weight']:.3f}; {fin_trend['n_points']} points")
-    fin_plain = {}
+          f"{fin_trends[f'o{best_trend:g}']['edge_weight']:.3f}; {fin_trends[f'o{best_trend:g}']['n_points']} points; "
+          f"{fin_info['stop_reason']}")
+    # the other orders' trends: coarse pass from the stage-D trend best of that order (its theta warm-starts it), then fine
+    for o_t in orders:
+        if o_t == best_trend:
+            continue
+        gt_o = trends[o_t]
+        gc_t = gp_evidence_grid_nd(fin_resp, local_axes(gp_best(gt_o), outer_steps, n=outer_half_width), tf(o_t), beta=fin_beta,
+                                   outdir=f"{out}/grid", tag=f"final_trend_o{o_t:g}_" + fin_fp, abbrev=ABBREV,
+                                   bounds=hyper_bounds, n_iter=n_iter, theta0=np.asarray(gt_o["thetas"][gt_o["best"]]),
+                                   max_growth=outer_max_growth, edge_dlogz=grid_edge_dlogz, recheck_top=recheck_top)
+        gf_t, pf_t, if_t = contained_grid(fin_resp, fin_beta, fine_axes(gp_best(gc_t)), tf(o_t), f"final_fine_trend_o{o_t:g}_" + fin_fp,
+                                          np.asarray(gc_t["thetas"][gc_t["best"]]))
+        fin_trends[f"o{o_t:g}"] = grid_record(gf_t, pf_t, if_t, order=o_t,
+                                              coarse_log_evidence=float(gp_hyper_posterior(gc_t)["log_evidence_bounds"]))
+        fin_trend_grids[o_t] = gf_t
+        print(f"[final trend o{o_t:g}] log_evidence_bounds {pf_t['log_evidence_bounds']:.2f} at {gp_best(gf_t)}; edge "
+              f"{fin_trends[f'o{o_t:g}']['edge_weight']:.3f}; {fin_trends[f'o{o_t:g}']['n_points']} points; {if_t['stop_reason']}")
+    fin_trend = fin_trends[f"o{best_trend:g}"]
+    fin_plain, fin_plain_grids = {}, {}
     for o_p in orders:
         gs_o = singles[o_p]
         # coarse pass from the stage-D best (the plain optimum may have moved), then the same fine grid as the trend's
@@ -810,40 +986,131 @@ with timed("G: plain Matern on the final response"):
                                    outdir=f"{out}/grid", tag=f"final_plain_o{o_p:g}_" + fin_fp, abbrev=ABBREV,
                                    bounds=hyper_bounds, n_iter=n_iter, theta0=np.asarray(gs_o["thetas"][gs_o["best"]]),
                                    max_growth=outer_max_growth, edge_dlogz=grid_edge_dlogz, recheck_top=recheck_top)
-        gp_p = gp_evidence_grid_nd(fin_resp, fine_axes(gp_best(gc_p)), sg(o_p), beta=fin_beta,
-                                   outdir=f"{out}/grid", tag=f"final_fine_plain_o{o_p:g}_" + fin_fp, abbrev=ABBREV,
-                                   bounds=hyper_bounds, n_iter=n_iter, theta0=np.asarray(gc_p["thetas"][gc_p["best"]]),
-                                   max_growth=fine_max_growth, edge_dlogz=grid_edge_dlogz, recheck_top=recheck_top)
-        pp = gp_hyper_posterior(gp_p)
+        gp_p, pp, if_p = contained_grid(fin_resp, fin_beta, fine_axes(gp_best(gc_p)), sg(o_p), f"final_fine_plain_o{o_p:g}_" + fin_fp,
+                                        np.asarray(gc_p["thetas"][gc_p["best"]]))
         best_p = gp_best(gp_p)
         th_p = np.asarray(gp_p["thetas"][gp_p["best"]])
         # nesting at this point: the trend prior with trend_sigma = 0 (b = 0) must reproduce the plain Matern's log Z
         ev_p0 = gp_log_evidence(fin_resp, sg(o_p)(**best_p), th_p, fin_beta)
         ev_p1 = gp_log_evidence(fin_resp, gp_trend_prior(resolved_wid, best_p["sigma"], best_p["length"], o_p, 0., None,
                                                          lp_b), embed_trend_theta(th_p, n_b), fin_beta)
-        fin_plain[f"o{o_p:g}"] = dict(log_evidence=pp["log_evidence_bounds"], best=best_p, edge_weight=pp["edge_weight"],
-                                      n_points=int(gp_p["logZ"].size), unconverged=int((~gp_p["converged"].astype(bool)).sum()),
-                                      axes_size={k: len(gp_p["axes"][k]) for k in gp_p["names"]},
-                                      max_converged_logZ=float(converged_max(gp_p)),
-                                      coarse_log_evidence=gp_hyper_posterior(gc_p)["log_evidence_bounds"],
-                                      quantiles={k: list(map(float, v_)) for k, v_ in pp["quantiles"].items()},
-                                      nesting_logZ_abs_diff=float(np.abs(ev_p0["logZ"] - ev_p1["logZ"])))
+        fin_plain[f"o{o_p:g}"] = grid_record(gp_p, pp, if_p, order=o_p, coarse_log_evidence=float(gp_hyper_posterior(gc_p)["log_evidence_bounds"]),
+                                             nesting_logZ_abs_diff=float(np.abs(ev_p0["logZ"] - ev_p1["logZ"])))
+        fin_plain_grids[o_p] = gp_p
         print(f"[final plain o{o_p:g}] log_evidence_bounds {pp['log_evidence_bounds']:.2f} (coarse "
-              f"{fin_plain[f'o{o_p:g}']['coarse_log_evidence']:.2f}) at {best_p}; edge {pp['edge_weight']:.3f}; "
-              f"{fin_plain[f'o{o_p:g}']['n_points']} points; nesting |dlogZ| {fin_plain[f'o{o_p:g}']['nesting_logZ_abs_diff']:.1e}")
+              f"{fin_plain[f'o{o_p:g}']['coarse_log_evidence']:.2f}) at {best_p}; edge {fin_plain[f'o{o_p:g}']['edge_weight']:.3f}; "
+              f"{fin_plain[f'o{o_p:g}']['n_points']} points; {if_p['stop_reason']}; nesting |dlogZ| "
+              f"{fin_plain[f'o{o_p:g}']['nesting_logZ_abs_diff']:.1e}")
     best_plain_key = max(fin_plain, key=lambda k_: fin_plain[k_]["log_evidence"])
+    best_trend_key = max(fin_trends, key=lambda k_: fin_trends[k_]["log_evidence"])
     dlogE_final = float(fin_trend["log_evidence"] - fin_plain[best_plain_key]["log_evidence"])
     dlogE_final_same_order = float(fin_trend["log_evidence"] - fin_plain[f"o{best_trend:g}"]["log_evidence"])
-    fin_valid = bool(fin_trend["edge_weight"] < edge_target and all(d_["edge_weight"] < edge_target for d_ in fin_plain.values()))
+    dlogE_best_families = float(fin_trends[best_trend_key]["log_evidence"] - fin_plain[best_plain_key]["log_evidence"])
+    fin_valid = bool(fin_trend["contained"] and all(d_["contained"] for d_ in fin_plain.values()))
+    fin_valid_all = bool(fin_valid and all(d_["contained"] for d_ in fin_trends.values()))
+    all_models = {f"plain_o{k_[1:]}": v_ for k_, v_ in fin_plain.items()} | {f"trend_o{k_[1:]}": v_ for k_, v_ in fin_trends.items()}
+    rank_final = rank_models(all_models)
+    # discrete order marginal (uniform over `orders`) of each family: log mean exp of the per-order evidence
+    order_marginal_discrete = dict(plain=log_mean_exp([v_["log_evidence"] for v_ in fin_plain.values()]),
+                                   trend=log_mean_exp([v_["log_evidence"] for v_ in fin_trends.values()]))
+    order_marginal_discrete["trend_minus_plain"] = order_marginal_discrete["trend"] - order_marginal_discrete["plain"]
+    print("final response, every model (log_evidence_bounds, conditional on the order):")
+    print_models(all_models, rank_final)
+    print(f"best {rank_final['best']}; over the runner-up {rank_final['runner_up']}: {rank_final['dlogE_best_minus_runner_up']:+.2f} nats "
+          f"(runner-up contained: {rank_final['runner_up_contained']}); decisive (> {g_decisive_dlogE:g} nats, both contained): "
+          f"{rank_final['decisive']}; discrete order marginal trend - plain {order_marginal_discrete['trend_minus_plain']:+.2f}; "
+          f"{time.perf_counter() - (g_deadline - g_stage_budget_s):.0f} s of the {g_stage_budget_s:.0f} s stage budget used")
+
+    # recommendation (Stage F's products stay those of the loop's model: its optics were refitted with trend o{best_trend})
+    loop_model = f"trend_o{best_trend:g}"
+    recommendation = dict(loop_model=loop_model, best_model=rank_final["best"], switch_recommended=False)
+    if rank_final["best"] != loop_model:
+        d_loop = float(all_models[rank_final["best"]]["log_evidence"] - all_models[loop_model]["log_evidence"])
+        recommendation |= dict(dlogE_best_minus_loop_model=d_loop, decisive=rank_final["decisive"])
+        if d_loop > g_decisive_dlogE and all_models[rank_final["best"]]["contained"] and all_models[loop_model]["contained"]:
+            recommendation["switch_recommended"] = True
+            print(f"RECOMMENDATION: {rank_final['best']} beats the outer loop's {loop_model} by {d_loop:+.2f} nats on the final response "
+                  f"(both grids contained). Stage F below still uses {loop_model}. The optics were refitted WITH {loop_model}, so a "
+                  "like-for-like comparison needs an outer-loop rerun at the winning model (order / trend or plain): rerun it before "
+                  "trusting this margin.")
+        else:
+            print(f"NOTE: {rank_final['best']} has the highest evidence on the final response ({d_loop:+.2f} nats over the loop's "
+                  f"{loop_model}) but it is not decisive (threshold {g_decisive_dlogE:g} nats, both grids contained: "
+                  f"{all_models[rank_final['best']]['contained'] and all_models[loop_model]['contained']}). Stage F uses {loop_model}; "
+                  "an outer-loop rerun at the preferred order would be needed to settle it.")
+    recommendation["note"] = ("Stage F products come from the outer loop's model; a switch needs an outer-loop rerun (new optics) at the "
+                              "winning model for a like-for-like comparison")
+    cont = {}
     comparison_final = dict(
         dlogE_trend_minus_best_plain=dlogE_final, best_plain=best_plain_key, dlogE_same_order=dlogE_final_same_order,
         grid_quality_valid=fin_valid, edge_target=edge_target, trend=fin_trend, plain=fin_plain,
-        dlogE_stage_D=dlogE, note="fine grids (sigma 9 values at 2^(1/16), length 7 at 2^(1/4)) for both; same final response, same beta, same hyper_bounds and level prior; the trend is the "
-        "outer loop's order only; the optics were refitted WITH the trend, so a plain Matern refit would shift too")
-    with open(f"{out}/comparison-final.json", "w") as f:
+        dlogE_stage_D=dlogE, note="fine grids (sigma 9 values at 2^(1/16), length 7 at 2^(1/4), grown until contained where the budgets "
+        "allow) for both; same final response, same beta, same hyper_bounds and level prior; `trend` is the outer loop's order only "
+        "(see trend_all for every order); the optics were refitted WITH the trend, so a plain Matern refit would shift too",
+        trend_all=fin_trends, best_trend_order_key=best_trend_key, dlogE_best_trend_minus_best_plain=dlogE_best_families,
+        grid_quality_valid_all=fin_valid_all, ranking=rank_final, order_marginal_discrete=order_marginal_discrete,
+        continuous_order=cont, recommendation=recommendation,
+        growth_settings=dict(edge_dlogz=g_edge_dlogz, max_growth=g_max_growth, max_points=g_max_points, max_seconds=g_max_seconds,
+                             stage_budget_s=g_stage_budget_s, flat_dlogz=g_flat_dlogz, decisive_dlogE=g_decisive_dlogE))
+    with open(f"{out}/comparison-final.json", "w") as f:     # written BEFORE G2, rewritten with its results below
         json.dump(comparison_final, f, indent=2, default=float)
-    print(f"final-stage dlogE (trend - plain {best_plain_key}) {dlogE_final:+.2f} nats (same order {dlogE_final_same_order:+.2f}; "
-          f"stage D {dlogE:+.2f}); grid quality valid (edge < {edge_target}): {fin_valid}")
+    print(f"final-stage dlogE (loop trend - plain {best_plain_key}) {dlogE_final:+.2f} nats (same order {dlogE_final_same_order:+.2f}; "
+          f"stage D {dlogE:+.2f}); grid quality valid (loop trend + plain contained): {fin_valid}; all models: {fin_valid_all}")
+
+# %%
+# G2: continuous order (a third, linear axis), plain and trend, local in sigma and length about each family's best discrete point.
+# A failure here is recorded (cont["error"]) and must not lose the G ranking (already written) or stage F.
+if g_continuous_order:
+    with timed("G2: continuous-order evidence grids"):
+        try:
+            if time.perf_counter() > g_deadline:
+                cont["skipped"] = "stage budget already used by G"
+                print(f"G2 skipped: the {g_stage_budget_s:.0f} s stage budget is used up")
+            else:
+                cont_make = dict(
+                    plain=lambda sigma, length, order: gp_prior(resolved_wid, sigma, length, order, None, lp_b),
+                    trend=lambda sigma, length, order: trend_prior_factory(resolved_wid, order, trend_sigma, None, lp_b,
+                                                                           basis=trend_basis)(sigma, length))
+                for kind, recs, grids_k in (("plain", fin_plain, fin_plain_grids), ("trend", fin_trends, fin_trend_grids)):
+                    key_o = max(recs, key=lambda k_: recs[k_]["log_evidence"])
+                    o_best = recs[key_o]["order"]
+                    g_best = grids_k[o_best]
+                    c_ = recs[key_o]["best"]
+                    hi_ = min(g_order_bounds[1], max(g_order_hi0, g_order_step*float(numpy.ceil((o_best + 0.5)/g_order_step))))
+                    n_o = int(round((hi_ - g_order_bounds[0])/g_order_step))
+                    axes_c = {k_: [c_[k_]*g_cont_steps[k_]**i_ for i_ in range(-g_cont_half_width[k_], g_cont_half_width[k_] + 1)]
+                              for k_ in ("sigma", "length")}
+                    axes_c["order"] = [g_order_bounds[0] + g_order_step*i_ for i_ in range(n_o + 1)]
+                    gc_o, pc_o, ic_o = contained_grid(fin_resp, fin_beta, axes_c, cont_make[kind], f"final_cont_{kind}_" + fin_fp,
+                                                      np.asarray(g_best["thetas"][g_best["best"]]), scales={"order": "linear"},
+                                                      bounds=hyper_bounds | {"order": g_order_bounds}, abbrev=ORDER_ABBREV,
+                                                      growth_cap=g_cont_max_growth, points_cap=g_cont_max_points)
+                    w_o = pc_o["weights"].sum(axis=tuple(range(pc_o["weights"].ndim - 1)))    # order is the last axis
+                    cont[kind] = grid_record(gc_o, pc_o, ic_o, centre_order=o_best,
+                                             order_axis=list(map(float, gc_o["axes"]["order"])),
+                                             order_marginal_weights=list(map(float, w_o)),
+                                             order_prior_bounds=list(g_order_bounds), order_scale="linear")
+                    print(f"[continuous order {kind}] order-marginal log_evidence_bounds {cont[kind]['log_evidence']:.2f}; order "
+                          f"16/50/84 % {numpy.round(cont[kind]['quantiles']['order'], 3)}; best {cont[kind]['best']}; edge "
+                          f"{cont[kind]['edge_weight']:.3f} (contained: {cont[kind]['contained']}, {cont[kind]['stop_reason']}); "
+                          f"{cont[kind]['n_points']} points {cont[kind]['axes_size']}")
+                cont["trend_minus_plain"] = float(cont["trend"]["log_evidence"] - cont["plain"]["log_evidence"])
+                cont["both_contained"] = bool(cont["trend"]["contained"] and cont["plain"]["contained"])
+                cont["note"] = ("order-marginal evidence = log_evidence_bounds on sigma, length (log-uniform on hyper_bounds) and order "
+                                "(uniform on order_prior_bounds); sigma / length axes are local windows, so the plain and the trend "
+                                "grids are comparable with each other, not with the per-order evidence of the discrete table")
+                print(f"continuous-order marginal evidence: trend - plain {cont['trend_minus_plain']:+.2f} nats "
+                      f"(both contained: {cont['both_contained']}; discrete-order marginal "
+                      f"{order_marginal_discrete['trend_minus_plain']:+.2f})")
+                q_ = cont["trend"]["quantiles"]["order"]
+                if not (q_[0] <= best_trend <= q_[2]):
+                    print(f"NOTE: the loop's order {best_trend:g} lies outside the continuous-order posterior 16-84 % interval "
+                          f"{numpy.round(q_, 3)} of the trend model: the outer loop's order may be off; rerun it near the posterior median.")
+        except Exception as e_g2:    # keep the G results and stage F
+            cont["error"] = repr(e_g2)
+            print(f"WARNING: G2 (continuous order) failed and was skipped: {e_g2!r}")
+        with open(f"{out}/comparison-final.json", "w") as f:
+            json.dump(comparison_final, f, indent=2, default=float)
 
 # %%
 # ---------------------------------------------------------------- F: products
