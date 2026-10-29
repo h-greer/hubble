@@ -1,16 +1,17 @@
 #!/bin/bash --login
-#SBATCH --job-name=imlup-gp-polar
+#SBATCH --job-name=imlup-gp-polardct
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=12:00:00
 #SBATCH --mem-per-cpu=8000M
-#SBATCH -o imlup-gp-polar.out
+#SBATCH -o imlup-gp-polardct.out
 
-# Needs imlup-adi/ (run imlup-adi.sh first). Shares imlup-gp/ with imlup-gp.sh (DCT prior): reuses its response.npz and
-# verify-*.npz; move the DCT run's other products to imlup-gp/dct-run/ first. Resumable: rerunning skips every stage
-# whose output exists in imlup-gp/.
+# Polar + DCT prior. Needs imlup-adi/ (run imlup-adi.sh first). Writes to imlup-gp-polardct/; READS imlup-gp/ (the earlier
+# DCT / polar-only runs, left untouched): its prior-independent response.npz and verify-*.npz (built into
+# imlup-gp-polardct/ if absent), the polar run's noise scales, grid-dct.npz and summary.json (fallbacks if absent).
+# Resumable: rerunning skips every stage whose output exists in imlup-gp-polardct/.
 
 module load python-scientific/3.13.1-foss-2025a
 

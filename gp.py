@@ -71,6 +71,9 @@ verify_linear_response). Everything below then costs dense n x n linear algebra 
   gp_spectral_diagnostic   posterior power per DCT wavenumber vs the prior (1 per whitened mode);
   gp_polar_diagnostic      the same per azimuthal order m and per radial latent row, for the polar field;
   simulate_response   injection: the response of simulated data, without any optics.
+  multi_gp_prior / MultiGPResolvedFit / two_kernel_prior_factory / capped_posterior   multi-kernel DCT prior (a sum of K
+                      Matern kernels on the one DCT basis) and its fit, kernel factory and length-capped hyper-posterior;
+  SumPrior / PolarDCTResolvedFit   polar + DCT prior (polar field plus a DCT residual field) and its fit.
 """
 import itertools
 import os
@@ -88,7 +91,8 @@ from batching import make_batch
 
 LN10 = float(onp.log(10.0))
 HYPER_NAMES = ("sigma", "length", "order", "length_r", "length_theta", "cos_inc", "pa", "dx", "dy", "mean",
-               "level_prior")   # any GP fit's
+               "level_prior", "sigmas", "lengths", "orders", "sigma_p", "sigma_d", "length_d", "order_d")   # any GP fit's
+# (sigmas, lengths, orders: MultiGPResolvedFit; sigma_p, sigma_d, length_d, order_d: SumPrior / PolarDCTResolvedFit)
 
 
 # ----------------------------------------------------------------------------- prior
@@ -602,6 +606,132 @@ def polar_prior(grid, sigma, length_r, length_theta, cos_inc=1., pa=0., dx=0., d
 def gp_prior_from_fit(fit):
     """The surrogate prior of a GP fit's current hyperparameters."""
     return fit.surrogate_prior()
+
+
+# ----------------------------------------------------------------------------- multi-kernel DCT prior
+# A sum of K independent stationary GPs on the same DCT basis is one GP whose DCT spectrum is the sum of the kernels'
+# spectra, so the field needs the SAME latents z (wid x wid), the same fast transforms and the whole existing machinery:
+#
+#     amp = sqrt(sum_k S_k),   S_k = matern_spectrum(shape, length_k, sigma_k, order_k)   (each S_k has mean sigma_k^2,
+#                                                                                       its zero mode removed)
+#     field = idctn(amp * z),  pixel variance = sum_k sigma_k^2,  covariance = sum_k Cov_k exactly.
+#
+# GPPrior just receives a different `amp` (its sigma / length / order leaves are the (K,) hyperparameter arrays, used only
+# by meta_arrays, i.e. the grid-point digests). Nothing above changes behaviour; HYPER_NAMES only gains the names
+# sigmas, lengths, orders (used by check_gp_setup).
+
+def multi_matern_spectrum(shape, sigmas, lengths, orders):
+    """Sum over kernels of matern_spectrum: sigmas, lengths, orders are (K,) (isotropic lengths in grid px). Traced-safe
+    (changing the hyperparameters never recompiles; K is the only static quantity)."""
+    sigmas, lengths, orders = (np.atleast_1d(np.asarray(x, dtype=float)) for x in (sigmas, lengths, orders))
+    return jax.vmap(lambda s, l, o: matern_spectrum(shape, l, s, o))(sigmas, lengths, orders).sum(axis=0)
+
+
+def multi_matern_amplitude(shape, sigmas, lengths, orders):
+    """sqrt(multi_matern_spectrum), with a finite gradient at the removed constant mode (S = 0 there for every kernel)."""
+    S = multi_matern_spectrum(shape, sigmas, lengths, orders)
+    pos = S > 0
+    return np.where(pos, np.sqrt(np.where(pos, S, 1.)), 0.)
+
+
+def multi_gp_prior(wid, sigmas, lengths, orders, mean=None, level_prior=(0., 1.)):
+    """GPPrior of the K-kernel spectrum; prior.sigma / length / order hold the (K,) arrays (meta_arrays digests them)."""
+    sigmas, lengths, orders = (np.atleast_1d(np.asarray(x, dtype=float)) for x in (sigmas, lengths, orders))
+    assert sigmas.shape == lengths.shape == orders.shape and sigmas.ndim == 1, "sigmas, lengths, orders: (K,) each"
+    mean = np.zeros((wid, wid)) if mean is None else np.asarray(mean, dtype=float)
+    mu, sd = (np.asarray(x, dtype=float) for x in level_prior)
+    return GPPrior(multi_matern_amplitude((wid, wid), sigmas, lengths, orders), mean, mu, sd, sigmas, lengths, orders)
+
+
+# ----------------------------------------------------------------------------- fit
+class MultiGPResolvedFit(_GPFitBase):
+    """GPResolvedFit with a K-kernel spectrum. Hyperparameters (set_hyper names): sigmas, lengths, orders ((K,) each),
+    mean, level_prior. GPResolvedFit itself is untouched (its sigma / length / order names stay as they were)."""
+    HYPER = ("sigmas", "lengths", "orders", "mean", "level_prior")
+    sigmas: jax.Array
+    lengths: jax.Array
+    orders: jax.Array
+
+    def __init__(self, spectrum_basis, filter, wid, sigmas=(0.5, 0.5), lengths=(1.6, 12.8), orders=(2., 2.), mean=None,
+                 level_prior=(0., 1.), n_share=1, resolved_kwargs=None):
+        super().__init__(spectrum_basis, filter, wid, resolved_source="interp", resolved_kwargs=resolved_kwargs)
+        self.sigmas, self.lengths, self.orders = (np.atleast_1d(np.asarray(x, dtype=float))
+                                                  for x in (sigmas, lengths, orders))
+        assert self.sigmas.shape == self.lengths.shape == self.orders.shape and self.sigmas.ndim == 1
+        self._init_gp(wid, mean, level_prior, n_share)
+
+    def amplitude(self):
+        return multi_matern_amplitude(self.mean.shape, self.sigmas, self.lengths, self.orders)
+
+    def log10_field(self, z):
+        return gp_field(z, self.amplitude())
+
+    def surrogate_prior(self):
+        return multi_gp_prior(self.mean.shape[0], self.sigmas, self.lengths, self.orders, self.mean, self.level_prior)
+
+
+# ----------------------------------------------------------------------------- two-kernel grid parametrisation
+# Label-switching is removed by ordering, imposed through the grid axes (the grid has no masks): kernel 1 is the SHORT one,
+# length2 = length1 * ratio with the "ratio" axis bounded below by > 1. The hyperprior is then uniform in
+# (log length1, log ratio) on a box, i.e. on the triangle-like region length1 < length2 (the Jacobian of
+# (log l1, log l2) -> (log l1, log ratio) is 1).
+TWO_AXES = ("sigma1", "length1", "sigma2", "ratio")
+TWO_ABBREV = {"sigma1": "s1", "length1": "l1", "sigma2": "s2", "ratio": "r"}
+
+
+def two_kernel_prior_factory(wid, orders=(2., 2.), mean=None, level_prior=(0., 1.)):
+    """make_prior for gp_evidence_grid_nd with axes sigma1, length1, sigma2, ratio (length2 = length1 * ratio)."""
+    def make_prior(sigma1, length1, sigma2, ratio):
+        return multi_gp_prior(wid, [sigma1, sigma2], [length1, length1*ratio], orders, mean, level_prior)
+    return make_prior
+
+
+def two_kernel_hypers(point):
+    """{sigma1, length1, sigma2, ratio} -> (sigmas, lengths) for MultiGPResolvedFit / set_hyper."""
+    return ([point["sigma1"], point["sigma2"]], [point["length1"], point["length1"]*point["ratio"]])
+
+
+# ----------------------------------------------------------------------------- capped evidence (gp_hyper_posterior has no mask)
+def capped_posterior(grid, max_length2=30., bounds=None):
+    """Posterior weights and log evidence of a two-kernel grid (axes sigma1, length1, sigma2, ratio) under the hyperprior
+    uniform (in logs) on the bounds BUT restricted to length2 = length1 * ratio <= max_length2 (cells whose centre exceeds
+    it get zero prior mass; the rest is renormalised), so a plateau of lengths beyond the box (logZ identical there) does
+    not inflate the prior volume, and the single kernel's length <= 30 bound is matched. Only converged points carry
+    weight (as gp_hyper_posterior). Assumes the grid covers the allowed region (check edge_weight of the unmasked
+    posterior). Returns weights (grid-shaped), log_evidence_bounds, allowed (mask)."""
+    axs = _axes(grid)
+    bounds = {**grid.get("bounds", {}), **(bounds or {})}
+    names = [a.name for a in axs]
+    assert names == list(TWO_AXES), names
+    logZ = onp.asarray(grid["logZ"], dtype=float)
+    ok = onp.asarray(grid["converged"]).astype(bool)
+    shape = logZ.shape
+    logmass = onp.zeros(shape)
+    for i, a in enumerate(axs):
+        sh = [1]*logZ.ndim
+        sh[i] = -1
+        logmass = logmass + a.log_masses(bounds[a.name]).reshape(sh)
+    l1 = onp.asarray(axs[1].vals).reshape(1, -1, 1, 1)
+    r = onp.asarray(axs[3].vals).reshape(1, 1, 1, -1)
+    allowed = onp.broadcast_to(l1*r <= max_length2*(1 + 1e-9), shape)
+    log_prior = onp.where(allowed, logmass, -onp.inf)
+    log_prior = log_prior - onp.logaddexp.reduce(log_prior.ravel())          # renormalised on the allowed region
+    logpost = onp.where(ok, logZ, -onp.inf) + log_prior
+    lse = onp.logaddexp.reduce(logpost.ravel())
+    return dict(weights=onp.exp(logpost - lse), log_evidence_bounds=float(lse), allowed=allowed)
+
+
+def converged_max(grid):
+    """max log Z over the converged points (gp_best's rule)."""
+    logZ, ok = onp.asarray(grid["logZ"], dtype=float), onp.asarray(grid["converged"]).astype(bool)
+    return float(onp.max(onp.where(ok, logZ, -onp.inf)) if ok.any() else onp.max(logZ))
+
+
+def capped_best(grid, allowed):
+    """(index tuple, {name: value}) of the best converged point among the `allowed` cells."""
+    logZ = onp.where(onp.asarray(grid["converged"]).astype(bool) & allowed, onp.asarray(grid["logZ"], dtype=float), -onp.inf)
+    idx = tuple(int(i) for i in onp.unravel_index(onp.argmax(logZ), logZ.shape))
+    return idx, {k: float(grid["axes"][k][i]) for k, i in zip(grid["names"], idx)}
 
 
 # ----------------------------------------------------------------------------- linear response
@@ -1371,3 +1501,313 @@ def gp_polar_diagnostic(prior, theta, laplace):
                 var_m=onp.array([var[:, m == k].mean() for k in ms]), count_m=count, power_m_err=onp.sqrt(2/count),
                 r=onp.asarray(prior.nodes), power_r=onp.asarray(theta[:-1].reshape(n_r, n_t)**2 + zvar).mean(1),
                 var_r=zvar.mean(1))
+
+
+# =====================================================================================================================
+# Polar + DCT (sum) prior
+# =====================================================================================================================
+# The two-component disc prior
+#
+#     log10 I = level + mean + field_polar(z_p) + field_dct(z_d)
+#
+# a smooth polar (multipole) field PLUS a stationary DCT Matern field. It is built on the gp.py machinery and plugs into the unchanged generic machinery (build_linear_response, verify_linear_response, gp_map,
+# gp_log_evidence, gp_error_scale, gp_evidence_grid_nd, gp_laplace, gp_log10_std, ...) because that machinery only uses the
+# prior through n_latent, field, field_T, congruence, field_matrix, fit_field, meta_arrays, distribution, params.
+#
+# Latents. theta = (z, u) with z = concat(z_p.ravel(), z_d.ravel()) FLAT, one fit parameter "resolved" of length
+# n_p + wid^2 (so the L1/TSV-free GP plumbing, precond's C = 1 for "resolved", check_gp_setup, gp_image, optimise_new_resolved
+# and `things_gp` all work unchanged; a second target-keyed parameter "resolved_dct" would need precond.py / fitting.py to
+# learn it too: fitting.optimise_new_resolved hard-codes ones=("resolved",)). Split with split_latents.
+#
+# Polar part, optional azimuthal cutoff. With m_max the polar latents are the orthonormal real-Fourier coordinates of the
+# theta axis, orders 0..m_max (2 m_max + 1 per ring: 1, cos m, sin m): Z = z_p Q^T with Q (n_theta, 2 m_max + 1)
+# orthonormal, so z_p stays white N(0, 1) (a projection of white noise onto an orthonormal subspace). This is a HARD
+# low-pass in m, but the cutoff is mainly a saving: it shrinks the latents (49 x 128 -> 49 x 9 for m_max = 4) and the build
+# of B (one field evaluation per latent). What keeps the polar part smooth (no small-scale non-axisymmetric structure, i.e.
+# no radial spokes) is the lower bound length_theta >= 1 rad together with sigma_p's prior; the cutoff makes that exact. sigma_p is the pointwise rms BEFORE the cutoff x 1 (the retained variance fraction of the
+# azimuthal spectrum is divided out, so sigma_p is the rms of the retained field and decouples from length_theta).
+# m_max = None keeps all n_theta latents (full polar field of gp.PolarGrid).
+
+
+# ----------------------------------------------------------------------------- polar part with a cutoff
+def azimuthal_basis(n_theta, m_max=None):
+    """Q (n_theta, k): orthonormal real Fourier columns on the theta axis, orders 0..m_max as (1, cos m, sin m) (k = 2 m_max
+    + 1; m_max < n_theta / 2, so no Nyquist), or the identity (k = n_theta) for m_max None."""
+    if m_max is None:
+        return np.eye(n_theta)
+    assert 0 <= m_max and 2*m_max < n_theta, f"m_max {m_max} needs 2 m_max < n_theta = {n_theta}"
+    th = 2*onp.pi*onp.arange(n_theta)/n_theta
+    cols = [onp.full(n_theta, 1/onp.sqrt(n_theta))]
+    for m in range(1, m_max + 1):
+        cols += [onp.sqrt(2/n_theta)*onp.cos(m*th), onp.sqrt(2/n_theta)*onp.sin(m*th)]
+    return np.asarray(onp.stack(cols, 1))
+
+
+def retained_scale(length_theta, nu_theta, n_theta, m_max):
+    """1/sqrt(f): f the fraction of the azimuthal spectrum's variance (azimuthal_filter's normalisation) at |m| <=
+    m_max; 1 for m_max None."""
+    if m_max is None:
+        return np.asarray(1.)
+    m = _orders(n_theta)
+    lp = log_azimuthal_spectrum(m, length_theta, nu_theta)
+    w = np.exp(lp - jsp.special.logsumexp(lp))
+    return 1/np.sqrt(np.sum(np.where(m <= m_max, w, 0.)))
+
+
+def polar_part(grid, Q, m_max, z_p, sigma, length_r, length_theta, geometry, interp=None):
+    """log10 polar field on the disc pixels (wid, wid) from the (reduced) latents z_p, any shape with n_r x k entries."""
+    Z = z_p.reshape(grid.shape[0], Q.shape[1]) @ Q.T
+    s = sigma*retained_scale(length_theta, grid.nu_theta, grid.shape[1], m_max)
+    return grid.field(Z, s, length_r, length_theta, geometry, interp)
+
+
+@eqx.filter_jit
+def _basis_unit(grid, Q, m_max, length_r, length_theta, geometry):
+    """B_p at sigma = 1: column i = the polar field of the i-th unit (reduced) latent (field is linear in z_p). One field
+    evaluation per column, built from the traced index (cf. _polar_basis), batched to bound memory."""
+    n = grid.shape[0]*Q.shape[1]
+    interp = grid.interpolation(geometry)
+    cols = jax.lax.map(lambda i: polar_part(grid, Q, m_max, jax.nn.one_hot(i, n, dtype=float), 1., length_r,
+                                            length_theta, geometry, interp).ravel(), np.arange(n), batch_size=256)
+    return cols.T
+
+
+_CACHE = {}
+FIT_RIDGE = 0.01      # fit_field's ridge as a fraction of the mean eigenvalue of B B^T (unit ridge in z-units over-shrinks: B is in dex)
+CACHE_MAX_ENTRIES = 16        # a grid over the polar axes (3^3 shape x 3^2 geometry ...) needs ~12-16 distinct bases
+CACHE_MAX_BYTES = 2.5e9       # (3600 x 441 float64 = 13 MB each for m_max 4; 180 MB each with no cutoff)
+
+
+def clear_basis_cache():
+    """Call between grids (the cache is keyed on the polar hyperparameters, so a stale entry is only wasted memory)."""
+    _CACHE.clear()
+
+
+def _basis(grid, Q, m_max, length_r, length_theta, geometry):
+    """B_p at sigma = 1, memoised (FIFO, by count and bytes) on (grid, m_max, length_r, length_theta, geometry): a grid
+    that moves only sigma_p, sigma_d, length_d never rebuilds it."""
+    key = (grid.digest(), m_max, float(length_r), float(length_theta), onp.asarray(geometry).tobytes())
+    if key not in _CACHE:
+        B = _basis_unit(grid, Q, m_max, np.asarray(length_r, dtype=float), np.asarray(length_theta, dtype=float), geometry)
+        while _CACHE and (len(_CACHE) >= CACHE_MAX_ENTRIES or sum(v.nbytes for v in _CACHE.values()) + B.nbytes > CACHE_MAX_BYTES):
+            _CACHE.pop(next(iter(_CACHE)))
+        _CACHE[key] = B
+    return _CACHE[key]
+
+
+# ----------------------------------------------------------------------------- surrogate prior
+class SumPrior(_SurrogatePrior):
+    """theta = (z_p, z_d, u), log10 I = level + mean + B_p z_p + Psi diag(amp) z_d. B_p (wid^2, n_p) dense (built once per
+    polar hyperparameter point, sigma_p a plain scale of the memoised unit basis); the DCT part by fast transforms."""
+    Bp: jax.Array
+    amp: jax.Array
+    mean: jax.Array
+    level_mu: jax.Array
+    level_sd: jax.Array
+    sigma_p: jax.Array
+    length_r: jax.Array
+    length_theta: jax.Array
+    geometry: jax.Array
+    sigma_d: jax.Array
+    length_d: jax.Array
+    order_d: jax.Array
+    nodes: jax.Array
+    p_shape: tuple = eqx.field(static=True)
+    m_max: int = eqx.field(static=True)          # -1: no cutoff
+    grid_digest: str = eqx.field(static=True)
+
+    @property
+    def n_p(self):
+        return self.Bp.shape[1]
+
+    @property
+    def n_latent(self):
+        return self.n_p + self.amp.size
+
+    @property
+    def latent_shape(self):
+        return (self.n_latent,)
+
+    def split(self, z):
+        return z[:self.n_p], z[self.n_p:]
+
+    def field_p(self, z_p):
+        w = self.mean.shape[0]
+        return (self.Bp @ np.ravel(z_p)).reshape(w, w)
+
+    def field_d(self, z_d):
+        return gp_field(np.reshape(z_d, self.amp.shape), self.amp)
+
+    def field(self, z):
+        zp, zd = self.split(np.ravel(z))
+        return self.field_p(zp) + self.field_d(zd)
+
+    def field_T(self, v):
+        w = self.amp.shape[0]
+        return np.concatenate([self.Bp.T @ np.ravel(v), self.amp.ravel()*_dct2(np.reshape(v, (w, w))).ravel()])
+
+    def congruence(self, H):
+        """B^T H B, B = [B_p | X], X = Psi diag(amp): blocks B_p^T H B_p (dense), B_p^T H X (one DCT of H B_p) and
+        X^T H X (two DCTs of H, as GPPrior.congruence)."""
+        w = self.amp.shape[0]
+        a = self.amp.ravel()
+        C = H @ self.Bp                                              # (w^2, n_p)
+        Spp = self.Bp.T @ C
+        Xt_C = a[:, None]*_dct2(C.reshape(w, w, -1)).reshape(w*w, -1)   # X^T H B_p, (w^2, n_p)
+        Sdd = _congruence_dct(H.reshape(w, w, w, w)).reshape(w*w, w*w)*a[:, None]*a[None, :]
+        return np.block([[Spp, Xt_C.T], [Xt_C, Sdd]])
+
+    def field_matrix(self, Wz):
+        w = self.amp.shape[0]
+        Wp, Wd = Wz[:self.n_p], Wz[self.n_p:]
+        fd = jsp.fft.idctn(self.amp[:, :, None]*Wd.reshape(w, w, -1), type=2, norm="ortho", axes=(0, 1)).reshape(w*w, -1)
+        return self.Bp @ Wp + fd
+
+    def fit_field(self, f):
+        """The prior-MAP latents of the log10 field f (a warm start): the minimum-norm z with B z ~ f under a ridge
+        tau^2 = FIT_RIDGE mean(eig(B B^T)) (a unit ridge, tau^2 = 1, is far above B B^T's eigenvalues, which are in dex^2, and
+        would return z ~ 0), z = B^T (B B^T + tau^2 I)^-1 f with B = [B_p | X], B B^T = B_p B_p^T + X X^T (X = Psi diag(amp)).
+        The polar / DCT split is the one the prior prefers (smooth structure goes to whichever component explains it with
+        the smaller latent norm), and |z| stays of the order of a prior draw's (not the huge near-exact solve of the DCT
+        modes with tiny amp). Costs one (wid^2)^3 solve; call it eagerly."""
+        f = np.ravel(f)
+        w = self.amp.shape[0]
+        X = jsp.fft.idctn(self.amp[:, :, None]*np.eye(w*w).reshape(w, w, w*w), type=2, norm="ortho",
+                          axes=(0, 1)).reshape(w*w, w*w)
+        K = self.Bp @ self.Bp.T + X @ X.T
+        ridge = FIT_RIDGE*np.trace(K)/K.shape[0]
+        y = np.linalg.solve(K + ridge*np.eye(K.shape[0]), f)
+        return np.concatenate([self.Bp.T @ y, X.T @ y])
+
+    def meta_arrays(self):
+        return (self.sigma_p, self.length_r, self.length_theta, self.geometry, self.sigma_d, self.length_d, self.order_d,
+                self.mean, self.level_mu, self.level_sd, onp.asarray([self.m_max]),
+                onp.frombuffer(self.grid_digest.encode(), dtype=onp.uint8))
+
+
+def sum_prior(grid, m_max, sigma_p, length_r, length_theta, cos_inc, pa, sigma_d, length_d, order_d=1., dx=0., dy=0.,
+              mean=None, level_prior=(0., 1.)):
+    """Surrogate prior of the polar (+ cutoff m_max) plus DCT fields at these hyperparameters."""
+    w = grid.wid
+    mean = np.zeros((w, w)) if mean is None else np.asarray(mean, dtype=float)
+    mu, sd = (np.asarray(x, dtype=float) for x in level_prior)
+    sigma_p, length_r, length_theta, sigma_d, length_d, order_d = (
+        np.asarray(x, dtype=float) for x in (sigma_p, length_r, length_theta, sigma_d, length_d, order_d))
+    geometry = _geometry(cos_inc, pa, dx, dy)
+    Q = azimuthal_basis(grid.shape[1], m_max)
+    Bp = sigma_p*_basis(grid, Q, m_max, length_r, length_theta, geometry)
+    amp = matern_amplitude((w, w), np.broadcast_to(length_d, (2,)), sigma_d, order_d)
+    return SumPrior(Bp, amp, mean, mu, sd, sigma_p, length_r, length_theta, geometry, sigma_d, length_d, order_d,
+                    grid.nodes, (grid.shape[0], Q.shape[1]), -1 if m_max is None else int(m_max), grid.digest())
+
+
+# ----------------------------------------------------------------------------- the fit
+class PolarDCTResolvedFit(_GPFitBase):
+    """Polar (+ optional m cutoff) plus DCT Matern prior on an InterpolatedResolvedSource. ONE parameter "resolved":
+    the flat latents (z_p, z_d), length n_p + wid^2 (see the module docstring), and "resolved_level". Hyperparameters:
+    sigma_p, length_r, length_theta, cos_inc, pa, dx, dy (as PolarGPResolvedFit) and sigma_d, length_d (grid px,
+    isotropic), order_d (the DCT Matern order, fixed by the caller), mean, level_prior. get_distribution is the base's
+    (it calls log10_field(z) with the flat z), so LinearResponse's checks pass."""
+    HYPER = ("sigma_p", "length_r", "length_theta", "cos_inc", "pa", "dx", "dy", "sigma_d", "length_d", "order_d", "mean",
+             "level_prior")
+    grid: PolarGrid
+    basis: jax.Array
+    m_max: int = eqx.field(static=True)
+    sigma_p: jax.Array
+    length_r: jax.Array
+    length_theta: jax.Array
+    cos_inc: jax.Array
+    pa: jax.Array
+    dx: jax.Array
+    dy: jax.Array
+    sigma_d: jax.Array
+    length_d: jax.Array
+    order_d: jax.Array
+
+    def __init__(self, spectrum_basis, filter, wid, grid, m_max=None, sigma_p=0.3, length_r=8., length_theta=2.,
+                 cos_inc=1., pa=0., dx=0., dy=0., sigma_d=0.3, length_d=1.6, order_d=1., mean=None, level_prior=(0., 1.),
+                 n_share=1, resolved_kwargs=None):
+        assert grid.wid == wid, f"PolarGrid is for a {grid.wid} px disc, not {wid}"
+        super().__init__(spectrum_basis, filter, wid, resolved_source="interp", resolved_kwargs=resolved_kwargs)
+        self.grid = grid
+        self.basis = azimuthal_basis(grid.shape[1], m_max)
+        self.m_max = -1 if m_max is None else int(m_max)
+        (self.sigma_p, self.length_r, self.length_theta, self.cos_inc, self.pa, self.dx, self.dy, self.sigma_d,
+         self.length_d, self.order_d) = (np.asarray(x, dtype=float) for x in (
+             sigma_p, length_r, length_theta, cos_inc, pa, dx, dy, sigma_d, length_d, order_d))
+        self._init_gp(wid, mean, level_prior, n_share)
+
+    @property
+    def n_p(self):
+        return self.grid.shape[0]*self.basis.shape[1]
+
+    def geometry(self):
+        return _geometry(self.cos_inc, self.pa, self.dx, self.dy)
+
+    def log10_field(self, z):
+        z = np.ravel(z)
+        w = self.mean.shape[0]
+        amp = matern_amplitude((w, w), np.broadcast_to(self.length_d, (2,)), self.sigma_d, self.order_d)
+        return (polar_part(self.grid, self.basis, None if self.m_max < 0 else self.m_max, z[:self.n_p], self.sigma_p,
+                           self.length_r, self.length_theta, self.geometry())
+                + gp_field(z[self.n_p:].reshape(w, w), amp))
+
+    def surrogate_prior(self):
+        return sum_prior(self.grid, None if self.m_max < 0 else self.m_max, self.sigma_p, self.length_r,
+                         self.length_theta, self.cos_inc, self.pa, self.sigma_d, self.length_d, self.order_d, self.dx,
+                         self.dy, self.mean, self.level_prior)
+
+
+def split_latents(z, grid, m_max, wid):
+    """(z_p (n_r, k), z_d (wid, wid)) from the flat latents z."""
+    k = grid.shape[1] if m_max is None else 2*m_max + 1
+    n_p = grid.shape[0]*k
+    return z[:n_p].reshape(grid.shape[0], k), z[n_p:].reshape(wid, wid)
+
+
+# ----------------------------------------------------------------------------- diagnostics
+def dct_view(prior, theta, laplace):
+    """(GPPrior, theta, laplace) of the DCT component alone, for gp_spectral_diagnostic."""
+    mu, V = laplace
+    n_p = prior.n_p
+    sub = GPPrior(prior.amp, prior.mean, prior.level_mu, prior.level_sd, prior.sigma_d,
+                  np.broadcast_to(prior.length_d, (2,)), prior.order_d)
+    return sub, np.concatenate([theta[n_p:-1], theta[-1:]]), (mu, np.concatenate([V[n_p:-1], V[-1:]]))
+
+
+def sum_components(prior, theta, laplace):
+    """Per-pixel split of the log10 field at the MAP and of its Laplace posterior: f_p, f_d (MAP components), std_p, std_d,
+    std_total (posterior std of each and of the sum), and corr (posterior correlation of the two components per pixel:
+    near -1 = they trade off, the identifiability warning), plus the rms of each and var_share = var_p / (var_p + var_d)
+    of the MAP field."""
+    mu, V = laplace
+    w = prior.wid
+    n_p = prior.n_p
+    W = V/np.sqrt(1 + mu)
+    Wp = prior.Bp @ W[:n_p]
+    Wd = prior.field_matrix(W[:-1]) - Wp
+    var_p, var_d = np.sum(Wp**2, 1), np.sum(Wd**2, 1)
+    cov = np.sum(Wp*Wd, 1)
+    z = theta[:-1]
+    f_p, f_d = prior.field_p(z[:n_p]), prior.field_d(z[n_p:])
+    return dict(f_p=f_p, f_d=f_d, std_p=np.sqrt(var_p).reshape(w, w), std_d=np.sqrt(var_d).reshape(w, w),
+                std_total=np.sqrt(var_p + var_d + 2*cov).reshape(w, w),
+                corr=(cov/np.sqrt(var_p*var_d + 1e-300)).reshape(w, w),
+                rms_p=np.sqrt(np.mean(f_p**2)), rms_d=np.sqrt(np.mean(f_d**2)),
+                var_share=np.mean(f_p**2)/(np.mean(f_p**2) + np.mean(f_d**2)))
+
+
+def polar_orders_diagnostic(prior, theta, laplace):
+    """Posterior power of the polar latents per azimuthal order m (reduced Fourier latents: the two columns of each m
+    >= 1), <z^2> = z_map^2 + posterior variance (prior 1), and the mean posterior variance. Only for m_max not None."""
+    assert prior.m_max >= 0, "reduced polar latents only (m_max not None)"
+    mu, V = laplace
+    n_r, k = prior.p_shape
+    n_p = prior.n_p
+    var = np.sum(V[:n_p]**2/(1 + mu), 1).reshape(n_r, k)
+    power = theta[:n_p].reshape(n_r, k)**2 + var
+    cols = [[0]] + [[2*m - 1, 2*m] for m in range(1, prior.m_max + 1)]
+    return dict(m=onp.arange(prior.m_max + 1),
+                power_m=onp.array([float(power[:, c].mean()) for c in cols]),
+                var_m=onp.array([float(var[:, c].mean()) for c in cols]),
+                count_m=onp.array([n_r*len(c) for c in cols]))
