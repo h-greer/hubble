@@ -75,6 +75,8 @@ verify_linear_response). Everything below then costs dense n x n linear algebra 
                       Matern kernels on the one DCT basis) and its fit, kernel factory and length-capped hyper-posterior;
   bpl_gp_prior / BPLGPResolvedFit / bpl_prior_factory   broken-power-law spectrum prior (one spectrum, four hyperparameters;
                       gamma1 = 0 is exactly the Matern prior of order gamma2 / 2);
+  TrendGPPrior / TrendGPResolvedFit / gp_trend_prior / trend_prior_factory / trend_components   Matern DCT prior plus a
+                      radial trend (degenerate basis kernel; trend_sigma = 0 is exactly the Matern prior);
   SumPrior / PolarDCTResolvedFit   polar + DCT prior (polar field plus a DCT residual field) and its fit.
 """
 import itertools
@@ -94,9 +96,9 @@ from batching import make_batch
 LN10 = float(onp.log(10.0))
 HYPER_NAMES = ("sigma", "length", "order", "length_r", "length_theta", "cos_inc", "pa", "dx", "dy", "mean",
                "level_prior", "sigmas", "lengths", "orders", "sigma_p", "sigma_d", "length_d", "order_d",
-               "length_b", "gamma1", "gamma2")   # any GP fit's
+               "length_b", "gamma1", "gamma2", "trend_sigma")   # any GP fit's
 # (sigmas, lengths, orders: MultiGPResolvedFit; sigma_p, sigma_d, length_d, order_d: SumPrior / PolarDCTResolvedFit;
-# length_b, gamma1, gamma2: BPLGPResolvedFit)
+# length_b, gamma1, gamma2: BPLGPResolvedFit; trend_sigma: TrendGPResolvedFit)
 
 
 # ----------------------------------------------------------------------------- prior
@@ -836,6 +838,182 @@ def bpl_hypers(point):
 
 
 
+# ----------------------------------------------------------------------------- radial trend (degenerate basis kernel)
+# A stationary zero-mean DCT field can make a disc's ~3 dex radial fall-off from the star only from its lowest cosine modes
+# (z ~ -5 in modes (0, 2) and (2, 0) at order 1, ~27 nats of prior cost, and a spectrum shape that then looks wrong). A
+# degenerate (basis-function) kernel (Rasmussen & Williams 2006, sec. 2.7) adds the fall-off explicitly:
+#
+#     log10 I = level + mean + H s_h b + idctn(amp z),    b ~ N(0, I_nb),  H (wid^2, nb) fixed,  s_h in dex,
+#
+# i.e. the covariance sigma^2 K_matern + s_h^2 H H^T. The columns of H are radial functions about the star (the box centre
+# (wid - 1) / 2, the polar field's centre at dx = dy = 0), made orthogonal to the constant (the level carries the constant:
+# otherwise level and trend are degenerate), orthogonal to each other (Gram-Schmidt in the order of `kinds`) and of unit
+# pixel rms, so s_h is the rms in dex of each component's contribution. s_h = 0 is EXACTLY the Matern prior (the b latents
+# then feed nothing: zero Jacobian columns, prior 0.5 |b|^2 minimised at b = 0, log(1 + 0) = 0 in the Occam term).
+# theta = (z_dct, b, u). The Laplace evidence charges the trend through its Occam term 0.5 log(1 + mu_b) ~ log s_h per
+# latent, so s_h is a FIXED broad hyperparameter (not a grid axis): the trend then adds no hyperprior volume and the
+# comparison with the plain Matern under the same (sigma, length) hyperpriors is like for like.
+TREND_KINDS = ("log_r", "r2")
+
+
+def radial_trend_basis(wid, kinds=TREND_KINDS, r_soft=1.):
+    """H (wid^2, len(kinds)): radial functions about the box centre, each with zero pixel mean, mutually orthogonal and of
+    unit pixel rms (so H^T H = wid^2 I). kinds: "log_r" = log10 sqrt(r^2 + r_soft^2) (softened at r_soft px: finite at the
+    star), "r" = sqrt(r^2 + r_soft^2), "r2" = r^2; Gram-Schmidt in the given order (later columns lose what earlier ones
+    explain)."""
+    c = (wid - 1)/2
+    y, x = onp.mgrid[:wid, :wid] - c
+    r2 = (x**2 + y**2).ravel()
+    funcs = {"log_r": lambda: 0.5*onp.log10(r2 + r_soft**2), "r": lambda: onp.sqrt(r2 + r_soft**2), "r2": lambda: r2}
+    cols = []
+    for k in kinds:
+        assert k in funcs, f"radial_trend_basis: unknown kind {k!r}; use {tuple(funcs)}"
+        v = funcs[k]()
+        v = v - v.mean()
+        for q in cols:
+            v = v - q*onp.mean(v*q)
+        rms = onp.sqrt(onp.mean(v**2))
+        assert rms > 1e-9, f"radial_trend_basis: {k!r} is linearly dependent on the earlier columns"
+        cols.append(v/rms)
+    return np.asarray(onp.stack(cols, axis=1))
+
+
+class TrendGPPrior(GPPrior):
+    """GPPrior (any spectrum's `amp`) plus the radial trend: theta = (z_dct (wid^2), b (n_b), u), log10 I = level + mean +
+    idctn(amp z) + basis (trend_sigma b). The first wid^2 latents are the DCT modes exactly as GPPrior's (row j, col k =
+    index j wid + k), the last n_b the trend's. basis (wid^2, n_b) is unit-rms, orthogonal to the constant (radial_trend_basis)."""
+    basis: jax.Array
+    trend_sigma: jax.Array
+
+    @property
+    def n_dct(self):
+        return self.amp.size
+
+    @property
+    def latent_shape(self):
+        return (self.n_latent,)
+
+    @property
+    def n_latent(self):
+        return self.amp.size + self.basis.shape[1]
+
+    def trend(self, z):
+        """The trend's log10 map (wid, wid) from the latents z (b = z[n_dct:])."""
+        w = self.amp.shape[0]
+        return (self.basis @ (self.trend_sigma*np.ravel(z)[self.n_dct:])).reshape(w, w)
+
+    def field(self, z):
+        z = np.ravel(z)
+        return gp_field(z[:self.n_dct].reshape(self.amp.shape), self.amp) + self.trend(z)
+
+    def field_T(self, v):
+        return np.concatenate([GPPrior.field_T(self, v), self.trend_sigma*(self.basis.T @ np.ravel(v))])
+
+    def congruence(self, H):
+        """B^T H B, B = [X | s H_b], X = Psi diag(amp): blocks X^T H X (GPPrior's), X^T H H_b s (one DCT of H H_b) and
+        s^2 H_b^T H H_b."""
+        w = self.amp.shape[0]
+        a = self.amp.ravel()
+        C = H @ self.basis                                                   # (w^2, n_b)
+        Sdt = self.trend_sigma*a[:, None]*_dct2(C.reshape(w, w, -1)).reshape(w*w, -1)
+        Stt = self.trend_sigma**2*(self.basis.T @ C)
+        return np.block([[GPPrior.congruence(self, H), Sdt], [Sdt.T, Stt]])
+
+    def field_matrix(self, Wz):
+        return GPPrior.field_matrix(self, Wz[:self.n_dct]) + self.trend_sigma*(self.basis @ Wz[self.n_dct:])
+
+    def fit_field(self, f):
+        """A warm start for the field f: the trend takes f's projection on the basis (b = H^T f / (wid^2 s_h); b = 0 when
+        s_h = 0, so the plain Matern start is recovered), the DCT modes the rest."""
+        f = np.ravel(f)
+        s = self.trend_sigma
+        b = np.where(s > 0, self.basis.T @ f/(f.size*np.where(s > 0, s, 1.)), 0.)
+        rest = f - s*(self.basis @ b)
+        return np.concatenate([GPPrior.fit_field(self, rest), b])
+
+    def meta_arrays(self):
+        return GPPrior.meta_arrays(self) + (self.trend_sigma, self.basis)
+
+
+def with_trend(prior, trend_sigma=1., basis=None, kinds=TREND_KINDS):
+    """The TrendGPPrior of a GPPrior (any spectrum) with the radial trend of width trend_sigma (dex)."""
+    basis = radial_trend_basis(prior.wid, kinds) if basis is None else np.asarray(basis, dtype=float)
+    return TrendGPPrior(prior.amp, prior.mean, prior.level_mu, prior.level_sd, prior.sigma, prior.length, prior.order,
+                        basis, np.asarray(trend_sigma, dtype=float))
+
+
+def gp_trend_prior(wid, sigma, length, order=2., trend_sigma=1., mean=None, level_prior=(0., 1.), basis=None,
+                   kinds=TREND_KINDS):
+    """Matern DCT prior plus the radial trend (trend_sigma = 0: exactly gp_prior)."""
+    return with_trend(gp_prior(wid, sigma, length, order, mean, level_prior), trend_sigma, basis, kinds)
+
+
+def trend_prior_factory(wid, order=2., trend_sigma=1., mean=None, level_prior=(0., 1.), basis=None, kinds=TREND_KINDS):
+    """make_prior for gp_evidence_grid_nd over axes (sigma, length) (the Matern's: same grid, same hyperpriors)."""
+    basis = radial_trend_basis(wid, kinds) if basis is None else basis
+
+    def make_prior(sigma, length):
+        return gp_trend_prior(wid, sigma, length, order, trend_sigma, mean, level_prior, basis)
+    return make_prior
+
+
+def embed_trend_theta(theta, n_b, b=None):
+    """theta of a plain DCT prior (z, u) -> the trend prior's (z, b, u) with b (zeros by default)."""
+    b = np.zeros(n_b) if b is None else np.asarray(b, dtype=float)
+    return np.concatenate([np.asarray(theta)[:-1], b, np.asarray(theta)[-1:]])
+
+
+def trend_components(prior, theta, laplace):
+    """The trend at the MAP: coef (n_b, dex: the contribution of each unit-rms basis column, s_h b) and coef_sd (its
+    Laplace posterior sd), the trend's log10 map (wid, wid) and its posterior std map, the DCT field's map, and the whitened
+    DCT latents z_dct (wid, wid) (e.g. the (0, 2), (2, 0) modes)."""
+    mu, V = laplace
+    nd, s = prior.n_dct, prior.trend_sigma
+    w = prior.amp.shape[0]
+    Wb = V[nd:-1]/np.sqrt(1 + mu)
+    var_b = np.sum(Wb**2, axis=1)
+    std_map = np.sqrt(np.sum((s*(prior.basis @ Wb))**2, axis=1)).reshape(w, w)
+    z = np.asarray(theta)[:-1]
+    return dict(coef=s*z[nd:], coef_sd=s*np.sqrt(var_b), trend=prior.trend(z), trend_std=std_map,
+                field_dct=gp_field(z[:nd].reshape(prior.amp.shape), prior.amp), z_dct=z[:nd].reshape(prior.amp.shape))
+
+
+class TrendGPResolvedFit(_GPFitBase):
+    """GPResolvedFit (Matern DCT) plus the radial trend: ONE parameter "resolved", the flat latents (z_dct, b), length
+    wid^2 + n_b, and "resolved_level". Hyperparameters: sigma (dex), length (grid px, (row, col)), order, trend_sigma (dex),
+    mean, level_prior. basis is the fixed radial_trend_basis (a leaf, built from `kinds`)."""
+    HYPER = ("sigma", "length", "order", "trend_sigma", "mean", "level_prior")
+    sigma: jax.Array
+    length: jax.Array
+    order: jax.Array
+    trend_sigma: jax.Array
+    basis: jax.Array
+
+    def __init__(self, spectrum_basis, filter, wid, sigma=1., length=1.6, order=2., trend_sigma=1., kinds=TREND_KINDS,
+                 mean=None, level_prior=(0., 1.), n_share=1, resolved_kwargs=None):
+        super().__init__(spectrum_basis, filter, wid, resolved_source="interp", resolved_kwargs=resolved_kwargs)
+        self.sigma = np.asarray(sigma, dtype=float)
+        self.length = np.broadcast_to(np.asarray(length, dtype=float), (2,))
+        self.order = np.asarray(order, dtype=float)
+        self.trend_sigma = np.asarray(trend_sigma, dtype=float)
+        self.basis = radial_trend_basis(wid, kinds)
+        self._init_gp(wid, mean, level_prior, n_share)
+
+    @property
+    def n_latent(self):
+        return self.mean.size + self.basis.shape[1]
+
+    def log10_field(self, z):
+        z = np.ravel(z)
+        w = self.mean.shape[0]
+        amp = matern_amplitude(self.mean.shape, self.length, self.sigma, self.order)
+        return gp_field(z[:w*w].reshape(w, w), amp) + (self.basis @ (self.trend_sigma*z[w*w:])).reshape(w, w)
+
+    def surrogate_prior(self):
+        return with_trend(gp_prior(self.mean.shape[0], self.sigma, self.length, self.order, self.mean, self.level_prior),
+                          self.trend_sigma, self.basis)
+
+
 # ----------------------------------------------------------------------------- linear response
 def _save_npz(path, **arrays):
     """Atomic np.savez (safe with concurrent array tasks and against a job killed mid-write)."""
@@ -1561,8 +1739,9 @@ def gp_spectral_diagnostic(prior, theta, laplace):
     assert isinstance(prior, GPPrior), "gp_spectral_diagnostic is for the DCT prior; use gp_polar_diagnostic"
     mu, V = laplace
     w = prior.amp.shape[0]
-    var = np.sum(V[:-1]**2/(1 + mu), axis=1)
-    power = onp.asarray(theta[:-1]**2 + var)
+    nd = prior.amp.size      # the DCT latents only: a TrendGPPrior's trend latents (after them) are not modes
+    var = np.sum(V[:nd]**2/(1 + mu), axis=1)
+    power = onp.asarray(theta[:nd]**2 + var)
     var = onp.asarray(var)
     j, k = onp.meshgrid(onp.arange(w), onp.arange(w), indexing="ij")
     kappa = onp.hypot(j, k).ravel()
