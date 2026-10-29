@@ -69,7 +69,7 @@ from batching import make_batch
 from gp import *
 from gp import _save_npz, _axes   # the trend prior comes with `import *`; underscore names are not covered
 
-out = "imlup-gp-radial"
+out = "imlup-gp-radial-m12"   # Matern 1/2 outer loop; the order-1 loop's results stay in imlup-gp-radial/
 ref_dir = "imlup-adi"
 shared_dir = "imlup-gp"     # the prior-independent response.npz / verify-*.npz are read from here (no recompute)
 os.makedirs(out, exist_ok=True)
@@ -135,6 +135,8 @@ lengths0 = [200/2**0.5/2**i for i in range(5, -1, -1)]          # 4.42 .. 141.4 
 hyper_bounds = dict(sigma=(0.03, 8.), length=(0.1, 200.))        # log-uniform hyperpriors, the SAME for both models
 ABBREV = {"sigma": "s", "length": "l"}
 orders = [1., 1.5, 2., 2.5, 3.5]   # 2-D Matern nu = order - 1: nu 0 (TSV-like), 1/2, 1, 3/2, 5/2; with and without the trend
+loop_order = 1.5            # the outer loop's Matern order: 1.5 = nu 1/2 (exponential), the final-response winner of the
+                            # order-1 loop's stage G; None: stage D's best trend order (which ranked order 1 first)
 trend_kinds = ("log_r", "r2")   # radial basis (gp.py radial_trend_basis): log10 sqrt(r^2 + 1 px^2), then r^2, orthonormalised
 trend_sigma = 1.            # dex, rms contribution of each unit-rms basis column: FIXED broad (the evidence is insensitive to
                             # it: NOTES.md), not a grid axis, so the trend adds no hyperprior volume
@@ -512,6 +514,17 @@ if not use_trend:
     print("the radial trend does not beat the single Matern under the matched hyperpriors: stages E/F are not run; "
           "use imlup-gp.py's single-kernel pipeline. See comparison-D.json")
     sys.exit(0)
+
+# the outer loop's order: stage D's best trend order, or loop_order (stage D's ranking flipped once the optics were refitted)
+best_trend_D = best_trend
+if loop_order is not None:
+    assert loop_order in trends, f"loop_order {loop_order} is not in orders {orders}"
+    best_trend = float(loop_order)
+    gt = trends[best_trend]
+    bt = gp_best(gt)
+    th_t = np.asarray(gt["thetas"][gt["best"]])
+    prior_t = tf(best_trend)(**bt)
+    print(f"outer loop at order {best_trend:g} (loop_order; stage D's best trend order was {best_trend_D:g}), starting at {bt}")
 
 # %%
 # ---------------------------------------------------------------- E: outer iteration (Matern + radial trend)

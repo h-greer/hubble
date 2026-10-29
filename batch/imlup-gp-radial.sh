@@ -6,9 +6,9 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=12:00:00
 #SBATCH --mem-per-cpu=8000M
-#SBATCH -o imlup-gp-radial.out
+#SBATCH -o imlup-gp-radial-m12.out
 
-# Needs imlup-adi/ (run imlup-adi.sh first). Resumable: rerunning skips every stage whose output exists in imlup-gp-radial/.
+# Needs imlup-adi/ (run imlup-adi.sh first). Resumable: rerunning skips every stage whose output exists in imlup-gp-radial-m12/.
 
 module load python-scientific/3.13.1-foss-2025a
 
