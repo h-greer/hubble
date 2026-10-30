@@ -225,13 +225,9 @@ def fine_axes(center):
 backfill_grad_split = False # True: compute a |sqrt(C) g| split for resumed refits lacking one (a fresh gn_probe compile + run per resumed outer,
                             # fresh C so not comparable with grad_norm_u_end; a GPU OOM there is not caught): off by default
 
-if os.path.isdir('../data/data/'):
-    ddir = '../data/data/'                 # the cluster copy, as imlup-adi
-else:
-    ddir = '../data/NICMOS-LAPL-DD2/LAPL_DATA_DD2/comtemp_flats-DD2/'
-    print(f"WARNING: ../data/data/ not found; using {ddir}. The reference (imlup-adi) must have been fitted to the "
-          "same reduction, which the linearity check (stage B) cannot detect")
-print(f"data directory: {ddir}")
+
+ddir = '../data/NICMOS-LAPL-DD2/LAPL_DATA_DD2/comtemp_flats-DD2/'
+
 
 # %%
 # ---------------------------------------------------------------- end-to-end configuration (new)
