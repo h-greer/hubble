@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=08:00:00
-#SBATCH --mem-per-cpu=4000M
+#SBATCH --mem-per-cpu=8000M
 #SBATCH -o imlup-gp-e2e.out
 
 # Needs ../data/calibrator_optical_params.npy (not imlup-adi/). Resumable: rerunning skips every stage whose output exists in imlup-gp-e2e/.

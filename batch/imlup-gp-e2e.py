@@ -199,7 +199,7 @@ precond_kwargs = dict(n_probes=32, chunk=4, per_block=False, exact_max_size=32)
 fo_epochs = 200         # first-order epochs (~1.15 s each at production size)
 fo_lr_opd = 5e-3        # Adam rate on primary_opd from step 0 (the old one: 2e-2 from epoch 50)
 fo_lr_disc = 3e-3       # Adam rate on the disc latents z, C = 1 (the old one: 1e-2, which raised the loss by ~470)
-optx_max_steps = 800    # L-BFGS iterations, accepted AND rejected line-search trials (each costs one loss+grad)
+optx_max_steps = 1500   # L-BFGS iterations, accepted AND rejected line-search trials (each costs one loss+grad)
 # Cost of an outer iteration (timings.txt of the first run): refit 400-840 s (the first one pays the compiles) + response 250 s +
 # grid 12-15 s ~ 11-17 min, so n_outer = 4 adds at most ~25 min to the 33 min run (12 h allocation); the loop exits early once
 # the hyperparameters stop moving (exact test) or have moved by <= 1 grid step at < converge_dlogz nats (a flat length plateau
@@ -283,9 +283,8 @@ level_f_min = 0.5           # estimate_level: use pixels whose unit-disc respons
 n_outer = int(os.environ.get("E2E_N_OUTER", 8))   # v2 (5) exhausted its 4 iterations with the re-linearisation still moving log Z by +330 nats; not in any fingerprint (resumable)
 relin_dlogz_tol = float(os.environ.get("E2E_RELIN_TOL", 10.))   # nats: the loop may only exit when |d log Z| of the re-linearisation (fixed hyper, beta) is below this AND the hyperparameter
                             # test passes; None-like: set E2E_RELIN_TOL=inf to restore the hyperparameter-only rule
-a3_max_steps = int(os.environ.get("E2E_A3_MAX_STEPS", 1000))   # L-BFGS iterations in A3 only (v2: 400 hit the cap, |sqrt(C) g| 336). Part of fp3: E2E_A3_MAX_STEPS=400 reproduces v2's fp3
+a3_max_steps = int(os.environ.get("E2E_A3_MAX_STEPS", 2000))   # L-BFGS iterations in A3 only (v2: 400 hit the cap, |sqrt(C) g| 336). Part of fp3: E2E_A3_MAX_STEPS=400 reproduces v2's fp3
 min_outer = 2               # at least this many outer iterations before "converged" (the first only re-linearises at the refit optics)
-lin_dlogz_warn = 5.         # nats: warn if re-linearising changed log Z at fixed hyperparameters (and noise) by more than this
 verify_draw_sigmas = (0.5, 1.0)   # dex rms of the random GP-draw test discs in the response verification (zero disc is always included)
 
 # ---------------------------------------------------------------- pure helpers (tested in a tiny exec harness, no jax needed)
@@ -805,7 +804,7 @@ if optics_source == "calibrator":
         assert n_keep == n_all, "the unmasked stage A must use the same pixels as the full model"
     fpA = fingerprint(E2E_VERSION, hashlib.sha256(open(calibrator_file, "rb").read()).hexdigest()[:12], repr(files), repr(stage_a_mask_radii), repr(stage_a_use_mask),
                       repr(stage_a_freeze), fo_lr_opd_A, stage_a_max_steps, fo_retry_scale, fo_retries,
-                      tilt_init, a1_epochs, fo_epochs, fo_lr_opd, optx_max_steps, g_a, g_sgd, repr(sorted(things_start_A)), repr(sorted(things_A)),
+                      tilt_init, a1_epochs, fo_epochs, fo_lr_opd, g_a, g_sgd, repr(sorted(things_start_A)), repr(sorted(things_A)),
                       repr(sorted(precond_kwargs.items())), core_fp, wid, n_modes, n_zernikes, nwavels, npoly, oversample, pad, exposures_fp(exposures_A))
     pA1, pA, iA = (f"{out}/stageA1-{fpA}-params.npy", f"{out}/stageA-{fpA}-params.npy", f"{out}/stageA-{fpA}-info.json")
     with timed("A: optics-only fit (disc off)"):
@@ -1546,7 +1545,7 @@ for it in range(1, n_outer + 1):
              and dlogZ_old > -converge_dlogz and bool(grid_new["converged"][old_cell]))
     hyper_converged = bool(not moved or loose)
     relin_ok = relin_ok_test(relin, relin_dlogz_tol)
-    outer_history.append(dict(it=it, hyper_converged=hyper_converged, relin_ok=bool(relin_ok), relin_dlogz_tol=relin_dlogz_tol,
+    outer_history.append(dict(it=it, hyper_converged=hyper_converged, relin_ok=bool(relin_ok), exit_pass=bool(not moved and relin_ok and it >= min_outer), relin_dlogz_tol=relin_dlogz_tol,
                               refit_at=dict(hyp_b), best=new, moved=bool(moved), steps_moved=steps_moved,
                               dlogZ_refit_cell_minus_best=dlogZ_old, loose_converged=bool(loose),
                               edge_weight=post_new["edge_weight"], contained=bool(post_new["edge_weight"] < edge_target),
@@ -1561,12 +1560,14 @@ for it in range(1, n_outer + 1):
     if hyper_converged and it < min_outer:
         print(f"outer {it}: hyperparameters stationary, but at least {min_outer} iterations are required (the first only re-linearises at the "
               "refit optics): continuing")
-    elif hyper_converged and relin_ok:
+    elif outer_history[-1]["exit_pass"] and len(outer_history) > 1 and outer_history[-2]["exit_pass"]:   # two consecutive passes
         outer_converged, outer_reason = True, ((f"best cell did not move" if not moved else
                                                 f"moved <= 1 step and {-dlogZ_old:.2f} < {converge_dlogz} nats (refit cell nearly as good)")
-                                               + f"; re-linearisation |d log Z| {abs(relin['dlogZ']):.1f} < {relin_dlogz_tol:g} nats")
+                                               + f"; re-linearisation |d log Z| {abs(relin['dlogZ']):.1f} < {relin_dlogz_tol:g} nats; second consecutive pass")
         print(f"outer {it}: converged ({outer_reason})")
         break
+    elif outer_history[-1]["exit_pass"]:
+        print(f"outer {it}: exit test passed once, a second consecutive pass is required: continuing", flush=True)
     elif hyper_converged:
         print(f"outer {it}: hyperparameters stationary, but the re-linearisation still moved log Z by {relin.get('dlogZ', float('nan')):+.1f} nats "
               f"(tolerance {relin_dlogz_tol:g}): continuing", flush=True)
@@ -1584,9 +1585,9 @@ try:   # parameter trajectory over the outer iterations (imlup-adi's params.png;
     plt.close("all")
 except Exception as e_pp:
     print(f"[products] params.png failed: {e_pp!r}", flush=True)
-if outer_history and abs(outer_history[-1]["relinearisation"].get("dlogZ", 0.)) > lin_dlogz_warn:
+if outer_history and not relin_ok_test(outer_history[-1]["relinearisation"], relin_dlogz_tol):
     print(f"WARNING: the last outer iteration's re-linearisation still changed log Z by {outer_history[-1]['relinearisation']['dlogZ']:+.1f} nats "
-          f"(> {lin_dlogz_warn:g}) at fixed hyperparameters: the optics are not at the joint optimum; raise n_outer")
+          f"(tolerance {relin_dlogz_tol:g}) at fixed hyperparameters: the optics are not at the joint optimum; raise n_outer")
 checks["outer_history_relinearisation"] = [dict(it=h_["it"], refit_loss_drop=h_["refit_loss_drop"], **{k_: h_["relinearisation"].get(k_) for k_ in ("dlogZ", "map_disc_rms_change_dex")},
                                                primary_opd_rms_change_nm=h_["optics_change"]["primary_opd_rms_change_nm"], star_shift_px=h_["optics_change"]["star_shift_px"],
                                                spectrum0_ratio=h_["optics_change"]["spectrum0_ratio"]) for h_ in outer_history]
