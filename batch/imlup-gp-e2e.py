@@ -505,9 +505,9 @@ def grad_split(gr):
 
 def precond_grad_split(x, C, model_b, exps_b):
     """grad_split of |sqrt(C) grad loss| at x: the gradient in L-BFGS's own coordinates u = (x - x0) / sqrt(C). The same
-    _loss_grad call (already compiled by the refit) as before; norm is nan (and the split empty) if it fails."""
+    checkpointed _loss_grad call as the refit; norm is nan (and the split empty) if it fails."""
     try:
-        _, gr = _loss_grad(x, jax.tree.map(np.sqrt, C), make_batch(exps_b, model_b), model_b)
+        _, gr = _loss_grad(x, jax.tree.map(np.sqrt, C), make_batch(exps_b, model_b, checkpoint=True), model_b)
         return grad_split(gr)
     except Exception as e:   # never lose a 15-minute refit to a diagnostic
         print(f"[refit] gradient norm failed: {e!r}")
@@ -539,7 +539,10 @@ def _print_split(label, sp, top):
 def get_C(opt_params, model_b, exps_b, things):
     """The gn_probe preconditioner C for all parameters (one discarded 1-epoch step), as refit() computes it."""
     return optimise_new(opt_params, model_b, exps_b, things, 1, precond_method="gn_probe",
-                        precond_kwargs=precond_kwargs, mapped=True, return_c=True, progress=False)[2]
+                        precond_kwargs=precond_kwargs, mapped=True, checkpoint=True, return_c=True, progress=False)[2]
+
+
+fo_hist = []   # refit()'s last first-order parameter history (the L-BFGS has no per-step history)
 
 
 def refit(opt_params, model_b, exps_b, things, log=print, lr_opd=None, lr_disc=None, disc_delay=0, max_steps=None):
@@ -561,13 +564,14 @@ def refit(opt_params, model_b, exps_b, things, log=print, lr_opd=None, lr_disc=N
     has_disc = "resolved" in opt_params      # stage A (no disc) has none
     C_fo = dict(C) | ({"resolved": jax.tree.map(np.ones_like, C["resolved"])} if has_disc else {})      # first order: C = 1 for z, as before
     attempts, x1, losses = [], opt_params, None
+    fo_hist.clear()
     for attempt in range(fo_retries + 1):
         sc = fo_retry_scale**attempt
         things_fo = dict(things) | {"primary_opd": adam(lr_opd, 0)} | ({"resolved": adam(lr_disc, disc_delay)} if has_disc else {})
         if sc != 1.:   # a retry scales EVERY optimiser's update (sgd rates on the preconditioned gradients too, not only the Adam ones): update * sc
             things_fo = {k_: optax.chain(v_, optax.scale(sc)) for k_, v_ in things_fo.items()}
         t0 = time.time()
-        losses_a, history = optimise_new_resolved(opt_params, model_b, exps_b, things_fo, fo_epochs, use_c=C_fo, mapped=True)
+        losses_a, history = optimise_new_resolved(opt_params, model_b, exps_b, things_fo, fo_epochs, use_c=C_fo, mapped=True, checkpoint=True)
         la = numpy.asarray(losses_a, dtype=float)
         why = None
         if len(la) < fo_epochs:
@@ -584,13 +588,14 @@ def refit(opt_params, model_b, exps_b, things, log=print, lr_opd=None, lr_disc=N
             # losses[i] is the loss BEFORE step i, so the last step's result (history[-1]) was never evaluated: continue from history[-2],
             # the last point whose loss (la[-1]) was checked above (needs fo_epochs >= 2)
             x1, losses = history[len(la) - 2], la
+            fo_hist[:] = [to_host({k_: v_ for k_, v_ in x_.items() if k_ != "resolved"}) for x_ in history[:len(la)]]   # for the params plots (no disc latents)
             log(f"[refit] first order: {fo_epochs} epochs (all first-order rates x{sc:.3g}; primary_opd Adam rate {lr_opd*sc:.2g}, attempt {attempt + 1}), loss {la[0]:.1f} -> {la[-1]:.1f} ({time.time() - t0:.0f} s)")
             break
         log(f"[refit] first-order attempt {attempt + 1}/{fo_retries + 1} at rate scale {sc:.3g} FAILED: {why}" +
             ("; retrying at a lower rate" if attempt < fo_retries else "; skipping the first-order stage (L-BFGS from the start point)"))
     t0 = time.time()
     x2, info = optimise_optimistix(x1, model_b, exps_b, use_c=C, max_steps=max_steps, return_info=True,
-                                   mapped=True, verbose=True)
+                                   mapped=True, checkpoint=True, verbose=True)
     if losses is None:      # all attempts failed: the losses are the L-BFGS start only
         losses = numpy.array([info["loss_start"]])
     try:   # diagnostics must never discard the refit
@@ -813,27 +818,51 @@ if optics_source == "calibrator":
             check_param_keys(exposures_A, p0)
             p0, c_star = scale_star_flux(exposures_A, p0)
             print(f"initial star flux scaling: x{c_star:.3g}", flush=True)
+            try:   # calibrator start, star only; a plotting failure never stops the run
+                if not os.path.exists(f"{out}/initial-comparison_0.png"):
+                    plot_comparison_detailed(set_array(NICMOSModel(exposures_A, p0, optics, detector)), ModelParams(set_array(p0)), exposures_A, quadrature=False, wf_size=wf_wid, percentile=99, save=f"{out}/initial-comparison")
+                    plt.close("all")
+            except Exception as e_c:
+                print(f"[initial] comparison plot failed: {e_c!r}", flush=True)
             if os.path.exists(pA1):
                 p1 = numpy.load(pA1, allow_pickle=True).item()
             else:   # A1: optics-first stage (imlup-adi's stage 1, shorter)
                 model0 = set_array(NICMOSModel(exposures_A, p0, optics, detector))
                 opt0 = set_array({k_: p0[k_] for k_ in things_start_A})
                 losses1, hist1 = optimise_new(opt0, model0, exposures_A, things_start_A, a1_epochs, precond_method="gn_probe",
-                                              precond_kwargs=precond_kwargs, mapped=True)
+                                              precond_kwargs=precond_kwargs, mapped=True, checkpoint=True)
                 if not (numpy.all(numpy.isfinite(losses1)) and losses1[-1] <= losses1[0]):
                     raise RuntimeError(f"stage A1: loss {losses1[0]:.1f} -> {losses1[-1]:.1f} (non-finite or worse than the start)")
                 p1 = to_host(dict(p0) | dict(hist1[-1]))
                 save_npy(pA1, p1)
                 save_npy(f"{out}/stageA1-{fpA}-losses.npy", losses1)
                 fig = plt.figure(figsize=(10, 10)); plt.plot(losses1); fig.savefig(f"{out}/stageA1-losses.png"); plt.close(fig)
+                try:   # parameter trajectory of the first-order stage (imlup-adi's params.png); a plotting failure never stops the run
+                    if hist1 and not os.path.exists(f"{out}/stageA1-params.png"):
+                        plot_params(hist1, [k_ for k_ in things_start_A if k_ != "resolved" and k_ in hist1[0]], xw=5, save=f"{out}/stageA1-params")
+                except Exception as e_pp:
+                    print(f"[stageA1-params] params plot failed: {e_pp!r}", flush=True)
+                plt.close("all")
                 print(f"A1: loss {losses1[0]:.1f} -> {losses1[-1]:.1f} ({a1_epochs} epochs)", flush=True)
             # A2: the hybrid refit with the wavefront (primary_opd), same parameter set as stage E, no disc
             model1 = set_array(NICMOSModel(exposures_A, p1, optics, detector))
+            try:   # after A1, star only; a plotting failure never stops the run
+                if not os.path.exists(f"{out}/stageA1-comparison_0.png"):
+                    plot_comparison_detailed(model1, ModelParams(set_array(p1)), exposures_A, quadrature=False, wf_size=wf_wid, percentile=99, save=f"{out}/stageA1-comparison")
+                    plt.close("all")
+            except Exception as e_c:
+                print(f"[stageA1] comparison plot failed: {e_c!r}", flush=True)
             opt1 = set_array({k_: p1[k_] for k_ in things_A})
             x2, losses2, optx2 = refit(opt1, model1, exposures_A, things_A, lr_opd=fo_lr_opd_A, max_steps=stage_a_max_steps)
             if not (numpy.all(numpy.isfinite(losses2)) and losses2[-1] <= losses2[0]):
                 raise RuntimeError(f"stage A2: loss {losses2[0]:.1f} -> {losses2[-1]:.1f} (non-finite or worse than the start)")
             params_opt = dict(p1) | x2
+            try:   # parameter trajectory of the first-order stage (imlup-adi's params.png); a plotting failure never stops the run
+                if fo_hist and not os.path.exists(f"{out}/stageA2-params.png"):
+                    plot_params(fo_hist, [k_ for k_ in things_A if k_ != "resolved" and k_ in fo_hist[0]], xw=5, save=f"{out}/stageA2-params")
+            except Exception as e_pp:
+                print(f"[stageA2-params] params plot failed: {e_pp!r}", flush=True)
+            plt.close("all")
             fig = plt.figure(figsize=(10, 10)); plt.plot(losses2[:-1]); plt.plot([len(losses2) - 1], losses2[-1:], "o"); fig.savefig(f"{out}/stageA2-losses.png"); plt.close(fig)
             ok_str = str(optx.RESULTS.successful)
             stage_a_info = dict(initial_flux_scale=c_star, loss_A2_start=float(losses2[0]), loss_A2_end=float(losses2[-1]),
@@ -889,7 +918,7 @@ if optics_source == "calibrator":
         axs[2].axhline(0, color="k"); (axs[2].axvspan(*stage_a_mask_radii, color="c", alpha=0.15) if stage_a_use_mask else None); axs[2].set(xlabel="r (arcsec)", ylabel="(data - star)/data", ylim=(-1, 1))
         fig.savefig(f"{out}/stageA-residual.png"); plt.close(fig)
         try:
-            plot_comparison_detailed(model_A, ModelParams(set_array(params_opt)), exposures_A, quadrature=False, wf_size=wf_wid, percentile=99, save=f"{out}/stageA-comparison")
+            plot_comparison_detailed(model_A, ModelParams(set_array(params_opt)), exposures_A, quadrature=False, wf_size=wf_wid, percentile=99, save=f"{out}/stageA2-comparison")
         except Exception as e_:
             print(f"[stage A] comparison plot failed: {e_!r}")
 
@@ -1070,6 +1099,12 @@ if optics_source == "calibrator" and a3_enabled:
             if not a3_ok:   # never adopt a worse / non-finite A3 result: keep stage A's optics (stage E refits them anyway)
                 print(f"WARNING: stage A3 loss {losses3[0]:.1f} -> {losses3[-1]:.1f} (non-finite or worse than the start): keeping stage A's optics", flush=True)
             params_a3 = dict(ref_params) | (x3 if a3_ok else {})
+            try:   # parameter trajectory of the first-order stage (imlup-adi's params.png); a plotting failure never stops the run
+                if fo_hist and not os.path.exists(f"{out}/stageA3-params.png"):
+                    plot_params(fo_hist, [k_ for k_ in things_A3 if k_ != "resolved" and k_ in fo_hist[0]], xw=5, save=f"{out}/stageA3-params")
+            except Exception as e_pp:
+                print(f"[stageA3-params] params plot failed: {e_pp!r}", flush=True)
+            plt.close("all")
             fig = plt.figure(figsize=(10, 10)); plt.plot(losses3[:-1]); plt.plot([len(losses3) - 1], losses3[-1:], "o"); fig.savefig(f"{out}/stageA3-losses.png"); plt.close(fig)
             a3_info = dict(loss_start=float(losses3[0]), loss_end=float(losses3[-1]), adopted=a3_ok, lbfgs=dict(optx3), sigma=a3_sigma, length=a3_length, disc_delay=a3_disc_delay,
                            optics_change=optics_deltas(ref_params, params_a3, exposures, wid, support_scale), fingerprint=fp3)
@@ -1189,7 +1224,7 @@ with timed("C: noise"):
         # z = 0; and its loss should equal the surrogate's (including the prior)
         # trend_sigma = 0 (and b = 0) is exactly the Matern prior0: this also checks the trend fit's nesting
         exps0 = set_hyper(exposures, sigma=1., length=1.6, order=2., trend_sigma=0., level_prior=lp_of(False))
-        batch0 = make_batch(exps0, model_single)
+        batch0 = make_batch(exps0, model_single, checkpoint=True)
 
         def full_grad(z, level):
             sub = set_array({"resolved": {key: z}, "resolved_level": {key: level}})
@@ -1403,7 +1438,7 @@ try:
                                       level_prior=lp_of(False)), numpy.asarray(s_noise))
     z_c, l_c = prior_t.params(th_t)
     sub = set_array({"resolved": {key: z_c}, "resolved_level": {key: l_c}})
-    loss_c, g_c = _loss_grad(sub, jax.tree.map(np.ones_like, sub), make_batch(exps_chk, model_single), model_single)
+    loss_c, g_c = _loss_grad(sub, jax.tree.map(np.ones_like, sub), make_batch(exps_chk, model_single, checkpoint=True), model_single)
     ev_c = gp_log_evidence(resp, prior_t, th_t, beta)
     sur_loss = float(ev_c['nll'].sum() + ev_c['prior'])
     checks["stage_D_surrogate"] = dict(full_loss=float(loss_c), surrogate_loss=sur_loss, abs_diff=abs(float(loss_c) - sur_loss),
@@ -1471,6 +1506,12 @@ for it in range(1, n_outer + 1):
                 raise RuntimeError(f"outer refit {it}: loss {losses[0]:.1f} -> {losses[-1]:.1f} (non-finite or worse "
                                    "than the start); not saving it")
             p_new = start | x_new
+            try:   # parameter trajectory of the first-order stage (imlup-adi's params.png); a plotting failure never stops the run
+                if fo_hist and not os.path.exists(f"{out}/outer{it}-params.png"):
+                    plot_params(fo_hist, [k_ for k_ in things_gp if k_ != "resolved" and k_ in fo_hist[0]], xw=5, save=f"{out}/outer{it}-params")
+            except Exception as e_pp:
+                print(f"[outer{it}-params] params plot failed: {e_pp!r}", flush=True)
+            plt.close("all")
             save_npy(f"{out}/outer{it}-{h}-losses.npy", losses)
             with open(ipath, "w") as f:
                 json.dump(lbfgs_info[it], f, indent=2, default=str)
@@ -1478,6 +1519,12 @@ for it in range(1, n_outer + 1):
 
     with timed(f"E{it}: response"):
         model_new = set_array(ModelParams(p_new).inject(model_single))
+        try:   # after the refit, disc on; a plotting failure never stops the run
+            if not os.path.exists(f"{out}/outer{it}-comparison_0.png"):
+                plot_comparison_detailed(model_new, ModelParams(set_array(p_new)), exps_b, quadrature=False, wf_size=wf_wid, percentile=99, save=f"{out}/outer{it}-comparison")
+                plt.close("all")
+        except Exception as e_c:
+            print(f"[outer{it}] comparison plot failed: {e_c!r}", flush=True)
         rpath = f"{out}/response-outer{it}-{h}.npz"
         if os.path.exists(rpath):
             resp_new = LinearResponse.load(rpath)
@@ -2010,8 +2057,12 @@ with timed("F: products"):
     exps_f = scale_errors(set_hyper(exposures, **hypers_of(hyp_b), mean=numpy.zeros((resolved_wid, resolved_wid)),
                                     level_prior=lp_b), current["s"])
     model_f = set_array(ModelParams(p_final).inject(model_single))
-    plot_comparison_detailed(model_f, ModelParams(set_array(p_final)), exps_f, quadrature=False, wf_size=wf_wid,
-                             percentile=99, save=f"{out}/comparison")
+    try:   # a plotting failure never stops the run
+        plot_comparison_detailed(model_f, ModelParams(set_array(p_final)), exps_f, quadrature=False, wf_size=wf_wid,
+                                 percentile=99, save=f"{out}/comparison")
+        plt.close("all")
+    except Exception as e_c:
+        print(f"[comparison] comparison plot failed: {e_c!r}", flush=True)
 
     # imlup-adi-style products: params_amp.npy (resolved -> {key: log10 disc}), imlup.npy / imlup.png / imlup-log.png, spectrum.png.
     # Off-support NaNs -> nanmin - 1 dex (a documented floor, only for these adi-style products; pictures.ipynb reads gp-disc-log10.npy). Each in its own try: nothing here may lose the run.

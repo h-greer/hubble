@@ -38,9 +38,10 @@ class Group(eqx.Module):
 
 class ExposureBatch(eqx.Module):
     groups: tuple
+    checkpoint: bool = eqx.field(static=True, default=False)  # remat each exposure's forward in the backward pass
 
 
-def make_batch(exposures, model):
+def make_batch(exposures, model, checkpoint=False):
     """ExposureBatch of `exposures` (host side, outside jit). `model` must hold every dict param (values unused)."""
     def sig(l):
         return (onp.shape(l), str(onp.asarray(l).dtype)) if isinstance(l, (jax.Array, onp.ndarray, onp.generic, int, float, bool)) else repr(l)
@@ -57,13 +58,15 @@ def make_batch(exposures, model):
         keys = tuple((n, tuple(e.get_key(n) for e in es)) for n, v in model.params.items()
                      if isinstance(v, dict) and n in es[0].fit.PARAM_KEYS)
         out.append(Group(es[0], jtu.tree_unflatten(jtu.tree_structure(es[0]), xs), np.asarray(ps, np.int32), keys))
-    return ExposureBatch(tuple(out))
+    return ExposureBatch(tuple(out), checkpoint)
 
 
 def loss_fn_mapped(params, batch, model):
     """fitting.loss_fn for an ExposureBatch."""
     mdl = params.inject(model)
-    return sum(np.nansum(jax.lax.map(lambda a: posterior(*g.at(mdl, *a)), (g.rows(mdl), g.xs))) for g in batch.groups)
+    one = lambda g: lambda a: posterior(*g.at(mdl, *a))
+    ck = jax.checkpoint if batch.checkpoint else lambda f: f
+    return sum(np.nansum(jax.lax.map(ck(one(g)), (g.rows(mdl), g.xs))) for g in batch.groups)
 
 
 # ----------------------------------------------------------------------------- Gauss-Newton

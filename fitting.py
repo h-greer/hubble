@@ -174,11 +174,11 @@ def _get_C(params, model, exposures, use_c, ones, precond_method, precond_kwargs
     return {k: C[k] for k in params}
 
 
-def _prepare(model, exposures, mapped, precond_kwargs):
+def _prepare(model, exposures, mapped, precond_kwargs, checkpoint=False):
     """(loss exposures, precond_kwargs): unchanged unless mapped, then an ExposureBatch and mapped=True preconditioning."""
     if not mapped:
         return exposures, precond_kwargs
-    return make_batch(exposures, model), {"mapped": True, **(precond_kwargs or {})}
+    return make_batch(exposures, model, checkpoint), {"mapped": True, **(precond_kwargs or {})}
 
 
 def _run(params, model, exposures, optimisers, epochs, C, history_dtype, progress):
@@ -237,7 +237,7 @@ def _run(params, model, exposures, optimisers, epochs, C, history_dtype, progres
 
 def optimise_new_resolved(params, model, exposures, optimisers, epochs, use_c=False,
                           return_c=False, precond_method="gn_probe", precond_kwargs=None,
-                          precond_resolved=False, history_dtype=None, progress=True, mapped=False):
+                          precond_resolved=False, history_dtype=None, progress=True, mapped=False, checkpoint=False):
     """Preconditioned first-order optimisation, with C = 1 for the 'resolved' params
     unless precond_resolved=True.
 
@@ -246,10 +246,11 @@ def optimise_new_resolved(params, model, exposures, optimisers, epochs, use_c=Fa
     Batching is controlled via `precond_kwargs`, e.g. dict(chunk=16) for gn_exact.
     mapped=True: lax.map over stacked exposures instead of unrolling them, for the loss and the preconditioner
     (batching.py): flat compile time, ~half the memory, ~1.1-1.3x slower per step.
+    checkpoint=True (mapped only): remat each exposure's forward in the backward pass, trading time for memory.
     Returns (losses, params_history[, C]); params_history is a ParamsHistory.
     """
     ones = () if precond_resolved else ("resolved",)
-    loss_exposures, precond_kwargs = _prepare(model, exposures, mapped, precond_kwargs)
+    loss_exposures, precond_kwargs = _prepare(model, exposures, mapped, precond_kwargs, checkpoint)
     C = _get_C(params, model, exposures, use_c, ones, precond_method, precond_kwargs)
     losses, history = _run(params, model, loss_exposures, optimisers, epochs, C, history_dtype, progress)
     return (losses, history, C) if return_c else (losses, history)
@@ -257,18 +258,19 @@ def optimise_new_resolved(params, model, exposures, optimisers, epochs, use_c=Fa
 
 def optimise_new(params, model, exposures, optimisers, epochs, use_c=False, return_c=False,
                  precond_method="gn_probe", precond_kwargs=None, history_dtype=None,
-                 progress=True, mapped=False):
+                 progress=True, mapped=False, checkpoint=False):
     """As optimise_new_resolved, but preconditioning every param (including 'resolved')."""
     return optimise_new_resolved(params, model, exposures, optimisers, epochs, use_c=use_c,
                                  return_c=return_c, precond_method=precond_method,
                                  precond_kwargs=precond_kwargs, precond_resolved=True,
-                                 history_dtype=history_dtype, progress=progress, mapped=mapped)
+                                 history_dtype=history_dtype, progress=progress, mapped=mapped,
+                                 checkpoint=checkpoint)
 
 
 def optimise_optimistix(params, model, exposures, use_c=False, precond_method="gn_exact",
                         precond_kwargs=None, precond_damping=1e-3, max_steps=1024, rtol=1e-9,
                         atol=1e-2, history_length=10, step_init=None, verbose=False,
-                        return_info=False, ones=(), mapped=False):
+                        return_info=False, ones=(), mapped=False, checkpoint=False):
     """optimistix L-BFGS on u, with params = x0 + sqrt(C) * u and C the diagonal
     preconditioner (see optimise_new).
 
@@ -287,7 +289,7 @@ def optimise_optimistix(params, model, exposures, use_c=False, precond_method="g
     Returns the optimised params dict (and an info dict if return_info). If the solve ends
     non-finite or worse than the start, warns and returns the start; if it did not converge,
     warns and returns the best point found. ones : params with C = 1 (e.g. ("resolved",), as
-    optimise_new_resolved). mapped: as optimise_new_resolved.
+    optimise_new_resolved). mapped, checkpoint: as optimise_new_resolved.
     """
     if not jax.config.x64_enabled:
         warnings.warn("optimise_optimistix: x64 is disabled; L-BFGS curvature pairs lose precision in float32")
@@ -295,7 +297,7 @@ def optimise_optimistix(params, model, exposures, use_c=False, precond_method="g
     x0 = _as_float(dict(params))
     if precond_kwargs is None and precond_method == "gn_exact":
         precond_kwargs = dict(chunk=1)       # lowest memory, same result
-    loss_exposures, precond_kwargs = _prepare(model, exposures, mapped, precond_kwargs)
+    loss_exposures, precond_kwargs = _prepare(model, exposures, mapped, precond_kwargs, checkpoint)
     C = _get_C(x0, model, exposures, use_c, ones, precond_method, precond_kwargs, precond_damping)
     S = jax.tree.map(lambda c, x: np.sqrt(np.asarray(c, x.dtype)), C, x0)
     frozen = [k for k, s in S.items() if any(bool(np.any(l == 0)) for l in jax.tree.leaves(s))]
