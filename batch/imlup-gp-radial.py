@@ -17,8 +17,8 @@ SUPPORT MASK: the 60 x 60 disc box (corners 3.6" from the star) extends beyond t
 outside the crop are free "sinks" for unmodelled smooth light at the crop edge. A fixed support M (gp.py support_mask, built below
 from the exposures' own roll angles and star positions) multiplies the disc's linear brightness, I = M 10**(level + field),
 for EVERY model here (plain, trend, all orders; response.npz is mask-independent, so imlup-gp's is reused). Default: the
-pixels whose whole (rotated) footprint is inside the crop of at least one exposure (support_cover = "any",
-footprint, margin 0), with the star at the MODEL's fitted position (primary_tilt + cold_mask_tilt of the reference params), built once at the start
+pixels whose whole (rotated) footprint is inside the crop of at least one exposure of EACH roll angle (support_cover = "rolls",
+footprint, margin 0: no disc pixel is constrained by a single roll; "any" = one exposure of either roll, the earlier -support run), with the star at the MODEL's fitted position (primary_tilt + cold_mask_tilt of the reference params), built once at the start
 and fixed for the run; "circle" is the largest star-centred circle of those (costs far more evidence on IM Lup, see
 support-mask/NOTES.md). Results go to a new output dir. The refit is imlup-gp-bpl.py's hybrid (short first-order stage, then one L-BFGS call); the
 prior-independent response.npz / verify-*.npz are read from imlup-gp/ when present. Resumable and fingerprinted as
@@ -78,7 +78,7 @@ from batching import make_batch
 from gp import *
 from gp import _save_npz, _axes   # the trend prior comes with `import *`; underscore names are not covered
 
-out = "imlup-gp-radial-m12-support"   # Matern 1/2 outer loop with the support mask; earlier results (imlup-gp-radial*/) are kept
+out = "imlup-gp-radial-m12-both"   # Matern 1/2 outer loop with the support mask; earlier results (imlup-gp-radial*/) are kept
 ref_dir = "imlup-adi"
 shared_dir = "imlup-gp"     # the prior-independent response.npz / verify-*.npz are read from here (no recompute)
 os.makedirs(out, exist_ok=True)
@@ -281,7 +281,8 @@ for f in ("intermediate-params.npy", "params_amp.npy"):
 # FITS header's TARSIAFX/Y (printed for comparison) is ~1-2 px away. The mask is FIXED for the run: built once here from the
 # reference params, not updated by the outer-loop refits.
 support_shape = "coverage"   # "coverage": keep covered pixels; "circle": the largest star-centred circle of them
-support_cover = "any"        # "any": keep a pixel if at least one exposure covers it; "all": only if every exposure does
+support_cover = "rolls"      # "rolls": keep a pixel only if EACH roll angle has an exposure covering it (no pixel is constrained by a single roll);
+                             # "any": at least one exposure covers it; "all": every exposure does
 support_footprint = True     # cover = the whole rotated pixel footprint (4 corners) inside the crop, not just its centre
 support_margin_px = 0.       # data px a pixel must be inside the crop edge (evidence cost grows quickly with it: NOTES.md)
 support_radius = None        # arcsec: override the circle's radius (shape "circle" only)
@@ -304,10 +305,32 @@ stars_fitted = numpy.array([(wid - 1)/2 + (tilt_of(e, "primary_tilt") + tilt_of(
                             for e in exposures])
 support_stars = stars_fitted if support_star == "fitted" else stars_header
 support_orients = numpy.array([float(e.orient) for e in exposures])
-sm_kw = dict(margin=support_margin_px, shape=support_shape, cover=support_cover, footprint=support_footprint,
-             radius=support_radius, taper=support_taper)
-support, support_info = support_mask(resolved_wid, disc_pitch, support_orients, support_stars, wid, support_scale, **sm_kw)
-n_header = support_mask(resolved_wid, disc_pitch, support_orients, stars_header, wid, support_scale, **sm_kw)[1]["n_support"]
+sm_kw = dict(margin=support_margin_px, shape=support_shape, footprint=support_footprint, radius=support_radius, taper=support_taper)
+# cover="rolls" is built here from gp.support_mask's "any": group the exposures by roll angle (ORIENTAT rounded to 0.1 deg; the
+# visit prefix, roots[i][:6], must agree), take "any" within each roll, and multiply the masks (shape "coverage" only).
+def build_support(stars):
+    if support_cover != "rolls":
+        return support_mask(resolved_wid, disc_pitch, support_orients, stars, wid, support_scale, cover=support_cover, **sm_kw)
+    assert support_shape == "coverage", "cover='rolls' is for shape='coverage'"
+    rolls = {}
+    for i_, o_ in enumerate(support_orients):
+        rolls.setdefault(round(float(o_), 1), []).append(i_)
+    assert len(rolls) == len({r_[:6] for r_ in roots}) == 2 and all(len(v_) == 2 for v_ in rolls.values()), (rolls, roots)
+    assert all(len({roots[i_][:6] for i_ in v_}) == 1 for v_ in rolls.values()), (rolls, roots)   # roll groups = visits
+    parts = [support_mask(resolved_wid, disc_pitch, support_orients[v_], stars[v_], wid, support_scale, cover="any", **sm_kw)
+             for v_ in rolls.values()]
+    M_ = parts[0][0]*parts[1][0]
+    kept_ = M_ > 0
+    xs_ = (numpy.arange(resolved_wid) - (resolved_wid - 1)/2)*disc_pitch
+    R_ = numpy.hypot(*numpy.meshgrid(xs_, xs_))
+    cov_ = disc_coverage(resolved_wid, disc_pitch, support_orients, stars, wid, support_scale, support_margin_px, support_footprint)
+    info_ = dict(parts[0][1], cover="rolls", n_support=int(kept_.sum()), all_coverage_fraction=float(kept_.mean()),
+                 r_coverage_arcsec=float(R_[~kept_].min()) if (~kept_).any() else float("inf"),
+                 r_support_max_arcsec=float(R_[kept_].max()), coverage_fraction=[float(c_.mean()) for c_ in cov_], coverage=cov_,
+                 rolls={str(k_): v_ for k_, v_ in rolls.items()})
+    return M_, info_
+support, support_info = build_support(support_stars)
+n_header = build_support(stars_header)[1]["n_support"]
 circle_txt = (f"circle radius {support_info['radius_arcsec']:.3f}\" = {support_info['radius_px']:.1f} px; "
               if support_shape == "circle" else "")
 print(f"support mask ({support_shape}, cover {support_cover}, footprint {support_footprint}, margin {support_margin_px:g} px): "

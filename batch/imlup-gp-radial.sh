@@ -1,14 +1,14 @@
 #!/bin/bash --login
-#SBATCH --job-name=imlup-gp-radial
+#SBATCH --job-name=imlup-gp-radial-both
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --time=12:00:00
 #SBATCH --mem-per-cpu=8000M
-#SBATCH -o imlup-gp-radial-m12-support.out
+#SBATCH -o imlup-gp-radial-m12-both.out
 
-# Needs imlup-adi/ (run imlup-adi.sh first). Resumable: rerunning skips every stage whose output exists in imlup-gp-radial-m12-support/.
+# Needs imlup-adi/ (run imlup-adi.sh first). Resumable: rerunning skips every stage whose output exists in imlup-gp-radial-m12-both/.
 
 module load python-scientific/3.13.1-foss-2025a
 

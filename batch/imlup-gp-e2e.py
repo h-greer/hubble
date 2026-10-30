@@ -1,4 +1,8 @@
 """DRAFT batch/imlup-gp-e2e.py: END-TO-END GP fit of IM Lup that does not depend on the regularised L1/TSV fit (imlup-adi/).
+v2 (outputs in imlup-gp-e2e-v2/, the first run's imlup-gp-e2e/ is never reused): stage A fits the FULL image (no annulus mask unless E2E_STAGEA_MASK=1)
+with occulter_radius / occulter_ellipticity held at the calibrator values and a gentler primary_opd; stage A3 then introduces the disc (joint refit with the
+GP prior at fixed hyperparameters, disc learning delayed) before the response is built; refit() retries a diverging first-order stage at a lower rate; the
+run stops with a message if a noise scale s > E2E_S_MAX (10). See NOTES.md. The text below describes the original design where it is unchanged.
 Same model as imlup-gp-radial.py (Matern 1/2 DCT disc prior + radial trend, support mask, loop_order = 1.5, stages C-G2, F) but
 every input that imlup-gp-radial.py took from the L1/TSV fit is derived here from the data and the calibrators:
   A   (new) optics-only fit with the disc OFF (a star-only fit, models.SinglePointFit) from the CALIBRATOR optics
@@ -8,6 +12,8 @@ every input that imlup-gp-radial.py took from the L1/TSV fit is derived here fro
       imlup-gp-radial.py (A2: short first-order stage + one L-BFGS call), both without any disc.
   L   level_mu from (data - stage-A star model) over the support in disc units, no reference disc (estimate_level).
   S   support mask from the stage-A fitted tilts (primary_tilt + cold_mask_tilt), or the header (support_star = "header").
+      support_cover = "rolls" (default, as imlup-gp-radial.py): a disc pixel is kept only if at least one exposure of EACH roll angle
+      covers its whole footprint (build_support, copied from the radial script); "any" / "all" remain options.
   B   a NEW LinearResponse at the stage-A optics in this run's own directory (never imlup-gp's, which is built at the L1/TSV
       optics), verified against the full model with zero disc and random GP-draw discs (no reference disc).
   C-G2, F as imlup-gp-radial.py (noise scales, D grids, E outer loop with the hybrid refit, G/G2 comparisons, products), with
@@ -87,22 +93,24 @@ support_star = os.environ.get("E2E_SUPPORT_STAR", "fitted")     # "fitted" | "he
 tilt_init = os.environ.get("E2E_TILT_INIT", "header")           # calibrator mode: "header" (TARSIAFX/Y) | "adi" (imlup-adi's hand-set)
 assert optics_source in ("calibrator", "l1tsv") and level_source in ("data", "l1tsv"), (optics_source, level_source)
 assert support_star in ("fitted", "header") and tilt_init in ("header", "adi"), (support_star, tilt_init)
+E2E_VERSION = "v2"     # new run lineage: the first cluster run (stage A annulus-masked, no disc introduction) is imlup-gp-e2e/ and is never reused
 _suffix = "".join([f"-optics-{optics_source}" if optics_source != "calibrator" else "",
                    f"-level-{level_source}" if level_source != "data" else "",
                    "-hdrstar" if support_star == "header" else ""])
 # every other non-default setting also names the directory (a second pass must not overwrite the first): short hash of the set
-_nondefault = {k_: os.environ[k_] for k_ in ("E2E_TILT_INIT", "E2E_LEVEL_SD", "E2E_LEVEL_MU", "E2E_MASK_RIN", "E2E_MASK_ROUT")
+_nondefault = {k_: os.environ[k_] for k_ in ("E2E_TILT_INIT", "E2E_LEVEL_SD", "E2E_LEVEL_MU", "E2E_MASK_RIN", "E2E_MASK_ROUT", "E2E_STAGEA_MASK", "E2E_STAGEA_FREEZE", "E2E_A3",
+                                                    "E2E_A3_SIGMA", "E2E_A3_LENGTH", "E2E_S_MAX")
                if k_ in os.environ and not (k_ == "E2E_TILT_INIT" and os.environ[k_] == "header")}
 if _nondefault:
     _suffix += "-" + hashlib.sha256(repr(sorted(_nondefault.items())).encode()).hexdigest()[:6]
-out = "imlup-gp-e2e" + _suffix        # the default run (calibrator optics, data level, fitted star) is plain imlup-gp-e2e/
+out = f"imlup-gp-e2e-{E2E_VERSION}" + _suffix   # the default run (calibrator optics, data level, fitted star) is imlup-gp-e2e-v2/ (never the first run's imlup-gp-e2e/)
 ref_dir = "imlup-adi"                # read only with an l1tsv flag
 shared_dir = "imlup-gp"              # its response.npz / verify-*.npz are reused ONLY with optics_source = "l1tsv" (the L1/TSV optics)
 compare_dirs = ["imlup-gp-radial-m12-support", "imlup-gp-radial-m12"]   # validation hook: first one with a summary.json
 calibrator_file = "../data/calibrator_optical_params.npy"
 os.makedirs(out, exist_ok=True)
 with open(f"{out}/flags.json", "w") as f_:
-    json.dump(dict(optics_source=optics_source, level_source=level_source, support_star=support_star, tilt_init=tilt_init, nondefault_env=_nondefault), f_, indent=2)
+    json.dump(dict(version=E2E_VERSION, optics_source=optics_source, level_source=level_source, support_star=support_star, tilt_init=tilt_init, nondefault_env=_nondefault), f_, indent=2)
 
 @contextmanager
 def timed(stage):
@@ -243,7 +251,28 @@ print(f"data directory: {ddir}")
 # The defaults are an a-priori compromise, not tuned: stage A reports the star-only residual in the masked annulus (a smooth positive
 # excess = the disc; a structured / negative one = a bad star model) and chi2 / N kept vs masked. Smaller r_out -> more optics
 # information, more disc contamination; E2E_MASK_RIN / E2E_MASK_ROUT override.
+stage_a_use_mask = os.environ.get("E2E_STAGEA_MASK", "0") == "1"    # the first run's annulus mask (default OFF: it left the optics unconstrained where the halo is
+                            # most informative, the disc is only ~15-30 % of the light there; the star overshot the data by up to 2x). OFF = full image.
 stage_a_mask_radii = (float(os.environ.get("E2E_MASK_RIN", 0.9)), float(os.environ.get("E2E_MASK_ROUT", 2.4)))
+# v2 stage A (imlup-adi's proven staging): A1/A2 fit star + optics on the FULL image with the disc off (as imlup-adi's stages 1 and the first 1200 epochs of
+# stage 2 do), while the parameters that ran away in the first run are held back; then A3 introduces the disc (the GP prior as the regulariser instead of
+# L1/TSV) in a joint refit at FIXED prior hyperparameters, with the disc learning delayed. See NOTES.md.
+stage_a_freeze = tuple(k_ for k_ in os.environ.get("E2E_STAGEA_FREEZE", "occulter_radius,occulter_ellipticity").split(",") if k_)   # held at the calibrator values in A1-A3
+fo_lr_opd_A = 1e-3          # Adam rate on primary_opd in A2 / A3 (the first run's 5e-3 let it grow to norm 87 vs the L1/TSV fit's 60)
+stage_a_max_steps = 400     # L-BFGS iterations in A2 / A3 (an early stop is the only regulariser of primary_opd: no quadratic prior exists in fitting.py)
+a3_enabled = os.environ.get("E2E_A3", "1") == "1"        # introduce the disc before stage B (calibrator mode only)
+a3_sigma = float(os.environ.get("E2E_A3_SIGMA", 1.0))    # dex: NEUTRAL default = stage C's prior0 (sigma 1, length 1.6 px), independent of any earlier fit. (The radial run's
+a3_length = float(os.environ.get("E2E_A3_LENGTH", 1.6))  # Matern 1/2 + trend optimum, 0.44 dex / 6.3 px, came from the L1/TSV-started run: using it would leak that fit into this
+                            # "end-to-end" one; override only knowingly and say so, E2E_A3_SIGMA / E2E_A3_LENGTH, which also name the directory.)
+a3_s_clip = (1., 3.)        # A3 error scale per exposure = sqrt(chi2/n_good) of the disc-free stage-A residuals, clipped here (the disc-free chi2 includes the disc light, so
+                            # the upper clip is the realistic noise-scale range of the radial run, s ~ 2-3; the lower clip never shrinks the errors)
+a3_disc_delay = 100         # first-order epochs before the disc Adam rate switches on (of fo_epochs = 200): optics settle with the disc at its level prior
+fo_lr_opd_first = 1e-3      # Adam rate on primary_opd in the FIRST outer refit (the first run diverged at 5e-3: loss 4e97)
+optx_first_max_steps = 400  # L-BFGS iterations of the FIRST outer refit (calibrator mode): occulter_radius / ellipticity are released there for the first time and
+                            # the first run's ellipticity ran 0.036 -> 0.16 in one long fit; 400 (= stage A's cap) moves them part way and iteration 2 (min_outer) continues
+fo_retry_scale = 0.3        # a first-order stage that diverges is retried at this factor of its Adam rates, up to fo_retries times, then skipped (L-BFGS only)
+fo_retries = 2
+s_max = float(os.environ.get("E2E_S_MAX", 10.))   # stage C / outer noise scale above which the run stops (the first run: s ~ 121 = a broken star model)
 a1_epochs = 300             # A1: imlup-adi's stage 1 schedule (500 epochs from hand-set optics; the calibrator state needs fewer)
 level_sd = float(os.environ.get("E2E_LEVEL_SD", 2.0 if level_source == "data" else 1.0))   # dex; first pass 1.5-2 (see estimate_level),
                             # 1 when the level comes from the L1/TSV disc (imlup-gp-radial.py's)
@@ -322,6 +351,22 @@ def estimate_level(data, err, good, star, f, smooth=2.0, k_floor=2.0, f_min_frac
                 f_median=fmeds)
 
 
+def check_noise_scale(s_noise, s_max, where, outdir=None):
+    """Stop the run with a clear message if any noise scale s is non-finite or > s_max (a model failure: the errors would be rescaled by
+    a huge factor and every later grid is meaningless; the first run had s ~ 121). Writes STOPPED.json to outdir (if given)."""
+    s_ = numpy.asarray(s_noise, dtype=float)
+    if numpy.all(numpy.isfinite(s_)) and numpy.all(s_ <= s_max):
+        return
+    msg = (f"STOPPING at {where}: noise scales s = {numpy.round(s_, 3).tolist()} (> {s_max:g} or non-finite): the optics do not fit the data, "
+           "so rescaling the errors by that factor would hide a model failure and the evidence grids would be meaningless. Inspect "
+           "stageA-diagnostics.json / stageA-residual.png and the stage A3 / refit logs (E2E_S_MAX overrides the threshold).")
+    print(msg, flush=True)
+    if outdir is not None:
+        with open(f"{outdir}/STOPPED.json", "w") as f_:
+            json.dump(dict(where=where, s=s_.tolist(), s_max=s_max, message=msg), f_, indent=2)
+    raise SystemExit(msg)
+
+
 def tilt_of(p, e, name):
     """Exposure e's tilt (arcsec, (x, y)) from the params dict p: keyed by get_key, or per exposure (cold_mask_tilt is "global" in
     PARAM_KEYS but stored per exposure in the imlup-adi params)."""
@@ -353,6 +398,9 @@ def optics_deltas(p_old, p_new, exps, wid, scale):
                                                                       - numpy.asarray(p_old[name][e.fit.get_key(e, name)], dtype=float)))
                                                   for e in exps))
     res["occulter_radius_change"] = float(numpy.asarray(p_new["occulter_radius"]) - numpy.asarray(p_old["occulter_radius"]))
+    ell = lambda p_: numpy.asarray(p_.get("occulter_ellipticity", numpy.zeros(2)), dtype=float)
+    res["occulter_ellipticity_change"] = float(numpy.linalg.norm(ell(p_new) - ell(p_old)))
+    res["occulter_ellipticity_new_norm"] = float(numpy.linalg.norm(ell(p_new)))
     ks = e0.fit.get_key(e0, "spectrum")
     res["spectrum0_ratio"] = float(numpy.asarray(p_new["spectrum"][ks])[0]/numpy.asarray(p_old["spectrum"][ks])[0])
     return res
@@ -477,33 +525,69 @@ def get_C(opt_params, model_b, exps_b, things):
                         precond_kwargs=precond_kwargs, mapped=True, return_c=True, progress=False)[2]
 
 
-def refit(opt_params, model_b, exps_b, things, log=print):
+def refit(opt_params, model_b, exps_b, things, log=print, lr_opd=None, lr_disc=None, disc_delay=0, max_steps=None):
     """Hybrid refit of opt_params (the things keys): fo_epochs of first-order steps (C = 1 on the disc), then one L-BFGS
     call from there (C = gn_probe on everything). Returns (params, losses, info): losses = the first-order losses (before
     each step) followed by the L-BFGS end loss; info = optimise_optimistix's info dict (result, num_steps, loss_start,
-    loss_end) plus grad_norm_u_start / grad_norm_u_end (|sqrt(C) grad| before / after L-BFGS) and max_steps."""
+    loss_end) plus grad_norm_u_start / grad_norm_u_end (|sqrt(C) grad| before / after L-BFGS), max_steps and fo_attempts.
+    lr_opd / lr_disc: Adam rates of the first-order stage (default fo_lr_opd / fo_lr_disc); disc_delay: epochs before the disc rate
+    switches on; max_steps: L-BFGS iterations (default optx_max_steps).
+    The first-order result handed to L-BFGS is the last EVALUATED point (one step before the end). A first-order stage that stops early (non-finite), blows up (a loss > 1e3 x its start) or ends above its start is RETRIED at
+    fo_retry_scale x ALL the first-order update sizes (optax.scale on every optimiser; up to fo_retries retries); if all fail the stage is skipped and L-BFGS (which never accepts a
+    worse point) starts from opt_params. Nothing raises here for that."""
+    assert fo_epochs >= 2, "refit needs fo_epochs >= 2 (the last first-order step is never evaluated)"
+    lr_opd = fo_lr_opd if lr_opd is None else lr_opd
+    lr_disc = fo_lr_disc if lr_disc is None else lr_disc
+    max_steps = optx_max_steps if max_steps is None else max_steps
     # the preconditioner for all parameters (disc included) at the start: one gn_probe call, via a discarded 1-epoch step
     C = get_C(opt_params, model_b, exps_b, things)
     has_disc = "resolved" in opt_params      # stage A (no disc) has none
     C_fo = dict(C) | ({"resolved": jax.tree.map(np.ones_like, C["resolved"])} if has_disc else {})      # first order: C = 1 for z, as before
-    things_fo = dict(things) | {"primary_opd": adam(fo_lr_opd, 0)} | ({"resolved": adam(fo_lr_disc, 0)} if has_disc else {})
+    attempts, x1, losses = [], opt_params, None
+    for attempt in range(fo_retries + 1):
+        sc = fo_retry_scale**attempt
+        things_fo = dict(things) | {"primary_opd": adam(lr_opd, 0)} | ({"resolved": adam(lr_disc, disc_delay)} if has_disc else {})
+        if sc != 1.:   # a retry scales EVERY optimiser's update (sgd rates on the preconditioned gradients too, not only the Adam ones): update * sc
+            things_fo = {k_: optax.chain(v_, optax.scale(sc)) for k_, v_ in things_fo.items()}
+        t0 = time.time()
+        losses_a, history = optimise_new_resolved(opt_params, model_b, exps_b, things_fo, fo_epochs, use_c=C_fo, mapped=True)
+        la = numpy.asarray(losses_a, dtype=float)
+        why = None
+        if len(la) < fo_epochs:
+            why = f"stopped after {len(la)}/{fo_epochs} steps (non-finite)"
+        elif not numpy.all(numpy.isfinite(la)):
+            why = "non-finite loss"
+        elif la.max() > 1e3*max(abs(la[0]), 1.):
+            why = f"diverged (max loss {la.max():.3g} vs start {la[0]:.3g})"
+        elif la[-1] > la[0]:
+            why = f"ended above its start ({la[0]:.1f} -> {la[-1]:.1f})"
+        attempts.append(dict(attempt=attempt, lr_scale=sc, lr_opd=lr_opd*sc, failure=why, loss_start=float(la[0]) if len(la) else None,
+                             loss_end=float(la[-1]) if len(la) else None))
+        if why is None:
+            # losses[i] is the loss BEFORE step i, so the last step's result (history[-1]) was never evaluated: continue from history[-2],
+            # the last point whose loss (la[-1]) was checked above (needs fo_epochs >= 2)
+            x1, losses = history[len(la) - 2], la
+            log(f"[refit] first order: {fo_epochs} epochs (all first-order rates x{sc:.3g}; primary_opd Adam rate {lr_opd*sc:.2g}, attempt {attempt + 1}), loss {la[0]:.1f} -> {la[-1]:.1f} ({time.time() - t0:.0f} s)")
+            break
+        log(f"[refit] first-order attempt {attempt + 1}/{fo_retries + 1} at rate scale {sc:.3g} FAILED: {why}" +
+            ("; retrying at a lower rate" if attempt < fo_retries else "; skipping the first-order stage (L-BFGS from the start point)"))
     t0 = time.time()
-    losses, history = optimise_new_resolved(opt_params, model_b, exps_b, things_fo, fo_epochs, use_c=C_fo, mapped=True)
-    if len(losses) < fo_epochs:
-        raise RuntimeError(f"first-order stage stopped after {len(losses)}/{fo_epochs} steps (non-finite)")
-    x1 = history[-1]
-    log(f"[refit] first order: {fo_epochs} epochs, loss {losses[0]:.1f} -> {losses[-1]:.1f} ({time.time() - t0:.0f} s)")
-    t0 = time.time()
-    x2, info = optimise_optimistix(x1, model_b, exps_b, use_c=C, max_steps=optx_max_steps, return_info=True,
+    x2, info = optimise_optimistix(x1, model_b, exps_b, use_c=C, max_steps=max_steps, return_info=True,
                                    mapped=True, verbose=True)
+    if losses is None:      # all attempts failed: the losses are the L-BFGS start only
+        losses = numpy.array([info["loss_start"]])
     try:   # diagnostics must never discard the refit
         gs_start, gs_end = precond_grad_split(x1, C, model_b, exps_b), precond_grad_split(x2, C, model_b, exps_b)
     except Exception as e:
         print(f"[refit] gradient diagnostics failed: {e!r}")
         gs_start = gs_end = dict(norm=float("nan"), groups={}, frac_sq={}, top_leaves=[])
-    info = dict(info, max_steps=optx_max_steps, grad_norm_u_start=gs_start["norm"], grad_norm_u_end=gs_end["norm"],
+    # optimise_optimistix returns the START point when its end loss is worse / non-finite while info["loss_end"] stays the REJECTED value: the effective
+    # end loss of the returned params is then loss_start (the first-order end). loss_end is replaced by it (raw value kept as loss_end_raw)
+    rejected = not (numpy.isfinite(info["loss_end"]) and info["loss_end"] <= info["loss_start"])
+    info = dict(info, loss_end_raw=info["loss_end"], lbfgs_rejected=bool(rejected), loss_end=info["loss_start"] if rejected else info["loss_end"], max_steps=max_steps, fo_attempts=attempts, fo_skipped=bool(all(a_["failure"] for a_ in attempts)),
+                grad_norm_u_start=gs_start["norm"], grad_norm_u_end=gs_end["norm"],
                 grad_split_start=gs_start, grad_split_end=gs_end)
-    log(f"[refit] L-BFGS: {info['result']} after {info['num_steps']}/{optx_max_steps} iterations, loss "
+    log(f"[refit] L-BFGS: {info['result']} after {info['num_steps']}/{max_steps} iterations, loss "
         f"{info['loss_start']:.1f} -> {info['loss_end']:.1f}, |sqrt(C) grad| {info['grad_norm_u_start']:.3g} -> "
         f"{info['grad_norm_u_end']:.3g} ({time.time() - t0:.0f} s)")
     print_split("L-BFGS start", gs_start)
@@ -515,7 +599,7 @@ def refit(opt_params, model_b, exps_b, things, log=print):
 
 # Stage A schedules (no disc, so no "resolved" / "resolved_level"). A1: imlup-adi's stage 1 (optics-first: no wavefront yet, the geometry,
 # focus, cold mask, low orders and spectrum, delayed starts staggered); A2: stage E's parameter set (refit() above).
-things_A = {k: v for k, v in things_gp.items() if k not in ("resolved", "resolved_level")}
+things_A = {k: v for k, v in things_gp.items() if k not in ("resolved", "resolved_level") + stage_a_freeze}    # stage_a_freeze: held at the calibrator values
 g_a = 5e-2
 things_start_A = {
     "spectrum": sgd(g_a*3, 30.), "primary_tilt": sgd(g_a*5., 15.), "cold_mask_tilt": sgd(g_a*1., 0), "cold_mask_opd": sgd(g_a*0.1, 40),
@@ -527,6 +611,8 @@ things_start_A = {
     "primary_pad": sgd(g_a*0.1, 120), "primary_outer": sgd(g_a*0.1, 120), "secondary_shift": sgd(g_a*0.3, 120),
     "primary_distortion": sgd(g_a*0.1, 150), "fnumber": sgd(g_a*1., 200), "anisotropy": sgd(g_a*2., 200),
 }
+things_start_A = {k: v for k, v in things_start_A.items() if k not in stage_a_freeze}
+things_A3 = {k: v for k, v in things_gp.items() if k not in stage_a_freeze}      # A3: the full joint set (disc included) minus the held-back parameters
 
 
 # %%
@@ -681,15 +767,22 @@ def scale_star_flux(exps, params):
 stage_a_info = None
 if optics_source == "calibrator":
     # the stage-A bad mask: the annulus around the header star on top of the usual bad / hole pixels
+    # v2: the FULL image (the usual bad / hole pixels only) unless E2E_STAGEA_MASK=1 (the first run's annulus mask, kept behind the flag)
     exposures_A = [exposure_from_file(f, StarFit(spectrum_basis, "F160W"), crop=wid, hole_margin=0.3,
-                                      extra_bad=stage_a_mask((wid, wid), sh, scale0, *stage_a_mask_radii))
+                                      extra_bad=stage_a_mask((wid, wid), sh, scale0, *stage_a_mask_radii) if stage_a_use_mask else None)
                    for f, sh in zip(files, stars_header)]
     n_keep = [int((~numpy.asarray(e.bad)).sum()) for e in exposures_A]
     n_all = [int((~numpy.asarray(e.bad)).sum()) for e in exposures]
-    print(f"stage A: annulus {stage_a_mask_radii[0]:.2f}-{stage_a_mask_radii[1]:.2f}\" masked; good pixels per exposure {n_keep} "
-          f"of {n_all} (the disc-free fit uses {100*sum(n_keep)/sum(n_all):.0f} %)", flush=True)
-    assert all(a_ < b_ for a_, b_ in zip(n_keep, n_all)) and min(n_keep) > 500, "stage-A mask empty or too aggressive"
-    fpA = fingerprint(hashlib.sha256(open(calibrator_file, "rb").read()).hexdigest()[:12], repr(files), repr(stage_a_mask_radii),
+    if stage_a_use_mask:
+        print(f"stage A: annulus {stage_a_mask_radii[0]:.2f}-{stage_a_mask_radii[1]:.2f}\" masked; good pixels per exposure {n_keep} "
+              f"of {n_all} (the disc-free fit uses {100*sum(n_keep)/sum(n_all):.0f} %)", flush=True)
+        assert all(a_ < b_ for a_, b_ in zip(n_keep, n_all)) and min(n_keep) > 500, "stage-A mask empty or too aggressive"
+    else:
+        print(f"stage A: FULL image, disc off; good pixels per exposure {n_keep}; held at the calibrator values: {list(stage_a_freeze)}; "
+              f"primary_opd Adam rate {fo_lr_opd_A:g}, L-BFGS <= {stage_a_max_steps} steps", flush=True)
+        assert n_keep == n_all, "the unmasked stage A must use the same pixels as the full model"
+    fpA = fingerprint(E2E_VERSION, hashlib.sha256(open(calibrator_file, "rb").read()).hexdigest()[:12], repr(files), repr(stage_a_mask_radii), repr(stage_a_use_mask),
+                      repr(stage_a_freeze), fo_lr_opd_A, stage_a_max_steps, fo_retry_scale, fo_retries,
                       tilt_init, a1_epochs, fo_epochs, fo_lr_opd, optx_max_steps, g_a, g_sgd, repr(sorted(things_start_A)), repr(sorted(things_A)),
                       repr(sorted(precond_kwargs.items())), core_fp, wid, n_modes, n_zernikes, nwavels, npoly, oversample, pad, exposures_fp(exposures_A))
     pA1, pA, iA = (f"{out}/stageA1-{fpA}-params.npy", f"{out}/stageA-{fpA}-params.npy", f"{out}/stageA-{fpA}-info.json")
@@ -720,15 +813,15 @@ if optics_source == "calibrator":
             # A2: the hybrid refit with the wavefront (primary_opd), same parameter set as stage E, no disc
             model1 = set_array(NICMOSModel(exposures_A, p1, optics, detector))
             opt1 = set_array({k_: p1[k_] for k_ in things_A})
-            x2, losses2, optx2 = refit(opt1, model1, exposures_A, things_A)
+            x2, losses2, optx2 = refit(opt1, model1, exposures_A, things_A, lr_opd=fo_lr_opd_A, max_steps=stage_a_max_steps)
             if not (numpy.all(numpy.isfinite(losses2)) and losses2[-1] <= losses2[0]):
                 raise RuntimeError(f"stage A2: loss {losses2[0]:.1f} -> {losses2[-1]:.1f} (non-finite or worse than the start)")
             params_opt = dict(p1) | x2
-            fig = plt.figure(figsize=(10, 10)); plt.plot(losses2[:-1]); plt.plot([fo_epochs], losses2[-1:], "o"); fig.savefig(f"{out}/stageA2-losses.png"); plt.close(fig)
+            fig = plt.figure(figsize=(10, 10)); plt.plot(losses2[:-1]); plt.plot([len(losses2) - 1], losses2[-1:], "o"); fig.savefig(f"{out}/stageA2-losses.png"); plt.close(fig)
             ok_str = str(optx.RESULTS.successful)
             stage_a_info = dict(initial_flux_scale=c_star, loss_A2_start=float(losses2[0]), loss_A2_end=float(losses2[-1]),
-                                lbfgs=dict(optx2), successful=bool(str(optx2["result"]) == ok_str and optx2["num_steps"] < optx_max_steps),
-                                mask_radii_arcsec=list(stage_a_mask_radii), n_good_per_exposure=n_keep, n_good_all=n_all, tilt_init=tilt_init,
+                                lbfgs=dict(optx2), successful=bool(str(optx2["result"]) == ok_str and optx2["num_steps"] < stage_a_max_steps),
+                                mask_used=bool(stage_a_use_mask), frozen=list(stage_a_freeze), mask_radii_arcsec=list(stage_a_mask_radii), n_good_per_exposure=n_keep, n_good_all=n_all, tilt_init=tilt_init,
                                 n_epochs_A1=a1_epochs, fingerprint=fpA)
             save_npy(pA, params_opt)
             with open(iA, "w") as f_:
@@ -776,7 +869,7 @@ if optics_source == "calibrator":
         for k_, (y_, im_, kk, qq, r_) in enumerate(rad):
             m_ = kk | qq
             axs[2].plot(r_[m_], ((y_ - im_)/numpy.where(y_ == 0, numpy.nan, y_))[m_], ",", color=f"C{k_}", alpha=0.3)
-        axs[2].axhline(0, color="k"); axs[2].axvspan(*stage_a_mask_radii, color="c", alpha=0.15); axs[2].set(xlabel="r (arcsec)", ylabel="(data - star)/data", ylim=(-1, 1))
+        axs[2].axhline(0, color="k"); (axs[2].axvspan(*stage_a_mask_radii, color="c", alpha=0.15) if stage_a_use_mask else None); axs[2].set(xlabel="r (arcsec)", ylabel="(data - star)/data", ylim=(-1, 1))
         fig.savefig(f"{out}/stageA-residual.png"); plt.close(fig)
         try:
             plot_comparison_detailed(model_A, ModelParams(set_array(params_opt)), exposures_A, quadrature=False, wf_size=wf_wid, percentile=99, save=f"{out}/stageA-comparison")
@@ -806,7 +899,8 @@ check_param_keys(exposures, params_opt)
 # or the header's with support_star = "header". Fixed for the run: the outer-loop refits do not update it (print below: how far the final
 # star ends up from it).
 support_shape = "coverage"   # "coverage": keep covered pixels; "circle": the largest star-centred circle of them
-support_cover = "any"        # "any": keep a pixel if at least one exposure covers it; "all": only if every exposure does
+support_cover = "rolls"      # "rolls": keep a pixel only if EACH roll angle has an exposure covering it (no pixel is constrained by a single roll);
+                             # "any": at least one exposure covers it; "all": every exposure does
 support_footprint = True     # cover = the whole rotated pixel footprint (4 corners) inside the crop, not just its centre
 support_margin_px = 0.       # data px a pixel must be inside the crop edge (evidence cost grows quickly with it)
 support_radius = None        # arcsec: override the circle's radius (shape "circle" only)
@@ -815,10 +909,32 @@ support_scale = pixel_scale(params_opt["fnumber"])    # arcsec / data px
 stars_fitted = numpy.array([star_pixel(params_opt, e, wid, support_scale) for e in exposures])
 support_stars = stars_fitted if support_star == "fitted" else stars_header
 support_orients = numpy.array([float(e.orient) for e in exposures])
-sm_kw = dict(margin=support_margin_px, shape=support_shape, cover=support_cover, footprint=support_footprint,
-             radius=support_radius, taper=support_taper)
-support, support_info = support_mask(resolved_wid, disc_pitch, support_orients, support_stars, wid, support_scale, **sm_kw)
-n_header = support_mask(resolved_wid, disc_pitch, support_orients, stars_header, wid, support_scale, **sm_kw)[1]["n_support"]
+sm_kw = dict(margin=support_margin_px, shape=support_shape, footprint=support_footprint, radius=support_radius, taper=support_taper)
+# cover="rolls" is built here from gp.support_mask's "any": group the exposures by roll angle (ORIENTAT rounded to 0.1 deg; the
+# visit prefix, roots[i][:6], must agree), take "any" within each roll, and multiply the masks (shape "coverage" only).
+def build_support(stars):
+    if support_cover != "rolls":
+        return support_mask(resolved_wid, disc_pitch, support_orients, stars, wid, support_scale, cover=support_cover, **sm_kw)
+    assert support_shape == "coverage", "cover='rolls' is for shape='coverage'"
+    rolls = {}
+    for i_, o_ in enumerate(support_orients):
+        rolls.setdefault(round(float(o_), 1), []).append(i_)
+    assert len(rolls) == len({r_[:6] for r_ in roots}) == 2 and all(len(v_) == 2 for v_ in rolls.values()), (rolls, roots)
+    assert all(len({roots[i_][:6] for i_ in v_}) == 1 for v_ in rolls.values()), (rolls, roots)   # roll groups = visits
+    parts = [support_mask(resolved_wid, disc_pitch, support_orients[v_], stars[v_], wid, support_scale, cover="any", **sm_kw)
+             for v_ in rolls.values()]
+    M_ = parts[0][0]*parts[1][0]
+    kept_ = M_ > 0
+    xs_ = (numpy.arange(resolved_wid) - (resolved_wid - 1)/2)*disc_pitch
+    R_ = numpy.hypot(*numpy.meshgrid(xs_, xs_))
+    cov_ = disc_coverage(resolved_wid, disc_pitch, support_orients, stars, wid, support_scale, support_margin_px, support_footprint)
+    info_ = dict(parts[0][1], cover="rolls", n_support=int(kept_.sum()), all_coverage_fraction=float(kept_.mean()),
+                 r_coverage_arcsec=float(R_[~kept_].min()) if (~kept_).any() else float("inf"),
+                 r_support_max_arcsec=float(R_[kept_].max()), coverage_fraction=[float(c_.mean()) for c_ in cov_], coverage=cov_,
+                 rolls={str(k_): v_ for k_, v_ in rolls.items()})
+    return M_, info_
+support, support_info = build_support(support_stars)
+n_header = build_support(stars_header)[1]["n_support"]
 circle_txt = (f"circle radius {support_info['radius_arcsec']:.3f}\" = {support_info['radius_px']:.1f} px; "
               if support_shape == "circle" else "")
 print(f"support mask ({support_shape}, cover {support_cover}, footprint {support_footprint}, margin {support_margin_px:g} px, star {support_star}): "
@@ -845,16 +961,23 @@ code_fp = hashlib.sha256(open("../gp.py", "rb").read() + numpy.asarray(support, 
 # `level` is the mean of log10 d over the support in model disc units (module docstring of gp.py). level_source "data": estimate_level
 # from (data - star model) over the good pixels of the full exposures, with the unit-disc response f measured from the full forward
 # model at the stage-A optics; "l1tsv": reference_level of the L1/TSV disc over the support (imlup-gp-radial.py).
+def level_inputs(p_opt, exps, sup):
+    """(estimate_level result, star-only images img0, good masks) for the optics p_opt, exposures exps (carrying the support) and support sup:
+    the full forward model at disc = 0 and at a unit disc over the support (the response f), as the level block needs."""
+    p_ = dict(p_opt) | {"resolved": {key: np.zeros(resolved_wid**2 + n_b)}, "resolved_level": {key: np.asarray(0.)}}
+    m_ = set_array(NICMOSModel(exps, p_, optics, detector))
+    i0 = [numpy.asarray(render_d(m_, e, np.zeros((resolved_wid, resolved_wid)))) for e in exps]
+    i1 = [numpy.asarray(render_d(m_, e, np.asarray(sup, dtype=float))) for e in exps]
+    g_ = [~numpy.asarray(e.bad) & numpy.isfinite(numpy.asarray(e.err)) & numpy.isfinite(numpy.asarray(e.data)) for e in exps]
+    return (estimate_level([numpy.asarray(e.data) for e in exps], [numpy.asarray(e.err) for e in exps], g_, i0, [a_ - b_ for a_, b_ in zip(i1, i0)],
+                           level_smooth_px, level_k_floor, level_f_min), i0, g_)
+
+
 params0 = dict(params_opt) | {"resolved": {key: np.zeros(resolved_wid**2 + n_b)}, "resolved_level": {key: np.asarray(0.)}}
 model_single = set_array(NICMOSModel(exposures, params0, optics, detector))
 level_report = {}
 with timed("L: level estimate"):
-    img0 = [numpy.asarray(render_d(model_single, e, np.zeros((resolved_wid, resolved_wid)))) for e in exposures]
-    img1 = [numpy.asarray(render_d(model_single, e, np.asarray(support, dtype=float))) for e in exposures]
-    f_unit = [a_ - b_ for a_, b_ in zip(img1, img0)]
-    good_full = [~numpy.asarray(e.bad) & numpy.isfinite(numpy.asarray(e.err)) & numpy.isfinite(numpy.asarray(e.data)) for e in exposures]
-    est = estimate_level([numpy.asarray(e.data) for e in exposures], [numpy.asarray(e.err) for e in exposures], good_full, img0, f_unit,
-                         level_smooth_px, level_k_floor, level_f_min)
+    est, img0, good_full = level_inputs(params_opt, exposures, support)
     f_analytic = support_scale**2/disc_pitch**2
     level_report |= dict(data_estimate=est["level"], per_exposure=est["level_per_exposure"], n_pixels=est["n_pixels"], frac_floored=est["frac_floored"],
                          f_median_measured=est["f_median"], f_analytic_no_throughput=f_analytic, smooth_px=level_smooth_px, k_floor=level_k_floor,
@@ -893,6 +1016,85 @@ n = resolved_wid**2
 mean_of = lambda template: mean_t if template else None
 lp_of = lambda template: (level_mu[template], level_sd)
 check_gp_setup(ref_params, things_gp)
+
+# %%
+# ---------------------------------------------------------------- A3 (new, calibrator mode): introduce the disc before the response is built
+# imlup-adi's staging: optics first with the disc off (A1/A2 above), then the disc joins a joint fit with a REGULARISER. Here the regulariser is the GP
+# prior itself at a FIXED guess of its hyperparameters (the radial run's Matern 1/2 + trend optimum: sigma ~ 0.44 dex, length ~ 6.3 px; level prior from
+# estimate_level), the disc Adam rate delayed by a3_disc_delay epochs (imlup-adi's adam(.., 1200)), errors unscaled (s = 1), occulter parameters still
+# held. Simplest robust choice: it re-uses refit() (the machinery stage E uses, so no new optimiser code), needs no L1/TSV, and puts the optics at a state
+# that has already absorbed the disc light BEFORE stage B's response is built and stage C's noise scales are measured (the first run's stage A did not,
+# so C saw a bad star model: s ~ 121). Only the OPTICS (and star) are kept; the disc latents / level are reset (the response is linear in the disc,
+# the GP stages refit it under the evidence-chosen hyperparameters).
+a3_info = None
+optics_start = params_opt          # od_final's reference: stage A's (or the L1/TSV) optics, or A3's when A3 ran
+if optics_source == "calibrator" and a3_enabled:
+    zero_map = numpy.zeros((resolved_wid, resolved_wid))
+    exps_a3 = set_hyper(exposures, sigma=a3_sigma, length=a3_length, order=loop_order, trend_sigma=trend_sigma, mean=zero_map, level_prior=lp_of(False))
+    # error scale from the disc-free stage-A residuals (img0 / good_full from the level estimate above): s_i = sqrt(chi2_i / n_good_i), clipped to a3_s_clip
+    s_a3 = numpy.clip([float(numpy.sqrt(numpy.sum(((numpy.asarray(e.data) - im_)[g_]/numpy.asarray(e.err)[g_])**2)/max(int(g_.sum()), 1)))
+                       for e, im_, g_ in zip(exposures, img0, good_full)], *a3_s_clip)
+    print(f"A3 prior sigma {a3_sigma:g} dex, length {a3_length:g} px; error scales (disc-free chi2, clipped to {a3_s_clip}): {numpy.round(s_a3, 3).tolist()}", flush=True)
+    exps_a3 = scale_errors(exps_a3, s_a3)
+    fp3 = fingerprint(E2E_VERSION, a3_sigma, a3_length, repr(a3_s_clip), s_a3, loop_order, trend_sigma, level_mu[False], level_sd, repr(sorted(things_A3)), fo_lr_opd_A, a3_disc_delay,
+                      stage_a_max_steps, fo_epochs, fo_lr_disc, repr(sorted(precond_kwargs.items())), code_fp, core_fp, data_fp,
+                      *[numpy.asarray(l_) for l_ in jax.tree.leaves({k_: v_ for k_, v_ in ref_params.items() if k_ not in ("resolved", "resolved_level")})])
+    p3, i3 = f"{out}/stageA3-{fp3}-params.npy", f"{out}/stageA3-{fp3}-info.json"
+    with timed("A3: disc introduction (joint refit, fixed GP prior)"):
+        if os.path.exists(p3) and os.path.exists(i3):
+            params_a3 = numpy.load(p3, allow_pickle=True).item()
+            a3_info = json.load(open(i3))
+            print(f"stage A3 resumed from {p3}")
+        else:
+            model_a3 = set_array(NICMOSModel(exps_a3, ref_params, optics, detector))
+            opt_a3 = set_array({k_: ref_params[k_] for k_ in things_A3})
+            x3, losses3, optx3 = refit(opt_a3, model_a3, exps_a3, things_A3, lr_opd=fo_lr_opd_A, disc_delay=a3_disc_delay, max_steps=stage_a_max_steps)
+            a3_ok = bool(numpy.all(numpy.isfinite(losses3)) and losses3[-1] <= losses3[0])
+            if not a3_ok:   # never adopt a worse / non-finite A3 result: keep stage A's optics (stage E refits them anyway)
+                print(f"WARNING: stage A3 loss {losses3[0]:.1f} -> {losses3[-1]:.1f} (non-finite or worse than the start): keeping stage A's optics", flush=True)
+            params_a3 = dict(ref_params) | (x3 if a3_ok else {})
+            fig = plt.figure(figsize=(10, 10)); plt.plot(losses3[:-1]); plt.plot([len(losses3) - 1], losses3[-1:], "o"); fig.savefig(f"{out}/stageA3-losses.png"); plt.close(fig)
+            a3_info = dict(loss_start=float(losses3[0]), loss_end=float(losses3[-1]), adopted=a3_ok, lbfgs=dict(optx3), sigma=a3_sigma, length=a3_length, disc_delay=a3_disc_delay,
+                           optics_change=optics_deltas(ref_params, params_a3, exposures, wid, support_scale), fingerprint=fp3)
+            save_npy(p3, params_a3)
+            with open(i3, "w") as f_:
+                json.dump(a3_info, f_, indent=2, default=str)
+    print(f"A3: loss {a3_info['loss_start']:.1f} -> {a3_info['loss_end']:.1f}; optics change vs stage A: "
+          f"primary_opd rms {a3_info['optics_change']['primary_opd_rms_change_nm']:.2f} nm (new rms {a3_info['optics_change']['primary_opd_rms_new_nm']:.1f}), "
+          f"star moved {numpy.round(a3_info['optics_change']['star_shift_px'], 3).tolist()} px, spectrum x{a3_info['optics_change']['spectrum0_ratio']:.3f}", flush=True)
+    optics_start = params_a3       # the optics the GP stages start from (od_final compares against these)
+    if a3_info.get("adopted", True):
+        # A3 moved the spectrum / star position / fnumber: the support (fitted star, pixel scale) and the level prior (data - star over the support) built from
+        # stage A's optics are stale. Recompute both at the A3 optics; the stage-A values stay in the diagnostics (a3_info["pre_a3"], level_report["pre_a3"]).
+        pre = dict(n_support=int(support_info["n_support"]), support_scale=float(support_scale), stars_fitted=stars_fitted.tolist(), level_mu=float(level_mu[False]),
+                   level_estimate=float(est["level"]))
+        numpy.save(f"{out}/support-preA3.npy", support)
+        support_scale = pixel_scale(params_a3["fnumber"])
+        stars_fitted = numpy.array([star_pixel(params_a3, e, wid, support_scale) for e in exposures])
+        support_stars = stars_fitted if support_star == "fitted" else stars_header
+        support, support_info = build_support(support_stars)
+        numpy.save(f"{out}/support.npy", support)
+        exposures = with_support(exposures, support)
+        check_n_share(exposures)
+        code_fp = hashlib.sha256(open("../gp.py", "rb").read() + numpy.asarray(support, dtype=float).tobytes()).hexdigest()[:12]
+        with timed("L: level estimate after A3"):
+            est3, img0, good_full = level_inputs(params_a3, exposures, support)
+        if level_mu_override is None and level_source == "data":
+            level_mu0 = est3["level"]
+        level_mu = {t: level_mu0 for t in templates}
+        pre |= dict(n_support_after=int(support_info["n_support"]), support_scale_after=float(support_scale), level_estimate_after=float(est3["level"]), level_mu_after=float(level_mu0))
+        a3_info["pre_a3"] = pre
+        level_report |= dict(pre_a3=pre, data_estimate=est3["level"], level_mu=level_mu0)
+        print(f"after A3: support {pre['n_support']} -> {pre['n_support_after']} disc pixels, scale {pre['support_scale']:.5f} -> {support_scale:.5f}\", stars (px) "
+              f"{numpy.round(numpy.array(pre['stars_fitted']), 2).tolist()} -> {numpy.round(stars_fitted, 2).tolist()}; level estimate {pre['level_estimate']:.3f} -> "
+              f"{est3['level']:.3f} dex (prior mu {level_mu0:.3f})", flush=True)
+        with open(i3, "w") as f_:
+            json.dump(a3_info, f_, indent=2, default=str)
+    # optics (and star) only: the disc latents / level go back to the prior centre (as before A3), so stage B / C start from the same state as without A3
+    ref_params = dict(params_a3) | {"resolved": params0["resolved"], "resolved_level": {key: np.asarray(level_mu[False])}}
+    check_gp_setup(ref_params, things_gp)
+    check_param_keys(exposures, ref_params)
+    model_single = set_array(NICMOSModel(exposures, ref_params, optics, detector))
 
 # %%
 # ---------------------------------------------------------------- B: linear response at the stage-A optics (a NEW one in this run's directory)
@@ -986,6 +1188,7 @@ with timed("C: noise"):
               "its value at z = 0): the MAP is unconverged or the surrogate is not the full model")
     if numpy.any(s_noise > 3):
         print("WARNING: s >> 1: the model does not fit those exposures; rescaling the errors hides a model failure")
+    check_noise_scale(s_noise, s_max, "stage C (noise scales)", out)
 beta = 1/np.asarray(s_noise)**2
 
 
@@ -1192,7 +1395,10 @@ outer_history = []
 lbfgs_info = {}
 for it in range(1, n_outer + 1):
     prior_b = make_b()(**hyp_b)
-    h = fingerprint(it, list(hyp_b.values()), best_trend, trend_sigma, current["s"], current["resp_fp"], current["theta"], fo_epochs,
+    first_cal = (it == 1 and optics_source == "calibrator")     # l1tsv mode follows the radial path (rates / steps of imlup-gp-radial.py)
+    lr_opd_it = fo_lr_opd_first if first_cal else fo_lr_opd      # a lower primary_opd Adam rate in the first refit (the first run diverged there)
+    steps_it = optx_first_max_steps if (first_cal and stage_a_freeze) else optx_max_steps   # the occulter parameters are released here: shorter L-BFGS
+    h = fingerprint(it, E2E_VERSION, lr_opd_it, steps_it, fo_retry_scale, fo_retries, list(hyp_b.values()), best_trend, trend_sigma, current["s"], current["resp_fp"], current["theta"], fo_epochs,
                     fo_lr_opd, fo_lr_disc, optx_max_steps, lp_b, repr(sorted(precond_kwargs.items())),
                     repr(sorted(things_gp)), code_fp)
     with timed(f"E{it}: refit"):
@@ -1222,15 +1428,15 @@ for it in range(1, n_outer + 1):
             start = dict(current["params"]) | {"resolved": {key: z_b}, "resolved_level": {key: l_b}}
             model_b = set_array(ModelParams(start).inject(model_single))
             opt_params = set_array({k: start[k] for k in things_gp})
-            x_new, losses, optx_info = refit(opt_params, model_b, exps_b, things_gp)
+            x_new, losses, optx_info = refit(opt_params, model_b, exps_b, things_gp, lr_opd=lr_opd_it, max_steps=steps_it)
             ok_str = str(optx.RESULTS.successful)     # core returns str(sol.result); this version prints 'optimistix._solution.RESULTS<>'
             lbfgs_info[it] = dict(optx_info, fo_loss_start=float(losses[0]), fo_loss_end=float(losses[-2]),
-                                  reached_max_steps=bool(optx_info["num_steps"] >= optx_max_steps),
+                                  reached_max_steps=bool(optx_info["num_steps"] >= steps_it),
                                   successful=bool(str(optx_info["result"]) == ok_str
-                                                  and optx_info["num_steps"] < optx_max_steps))
+                                                  and optx_info["num_steps"] < steps_it))
             fig = plt.figure(figsize=(10, 10))
             plt.plot(losses[:-1])
-            plt.plot([fo_epochs], losses[-1:], "o", label=f"after L-BFGS ({optx_info['num_steps']} its)")
+            plt.plot([len(losses) - 1], losses[-1:], "o", label=f"after L-BFGS ({optx_info['num_steps']} its)")
             plt.legend()
             fig.savefig(f"{out}/outer{it}-losses.png")
             plt.close(fig)
@@ -1262,6 +1468,7 @@ for it in range(1, n_outer + 1):
             theta_new = prior_b.theta(np.asarray(p_new["resolved"][key]), np.asarray(p_new["resolved_level"][key]))
             s_new, theta_new, _ = gp_error_scale(resp_new, prior_b, theta_new)
             _save_npz(npath, s=s_new, theta=theta_new)
+        check_noise_scale(s_new, s_max, f"outer iteration {it} (noise scales)", out)
         beta_new = 1/np.asarray(s_new)**2
         tag = f"outer{it}_trend_" + fingerprint(resp_new_fp, beta_new, lp_b, n_iter, code_fp)
         # local (2n + 1)^2 grid about the refit hyperparameters, grown (within hyper_bounds, at most outer_max_growth steps) while
@@ -1295,7 +1502,8 @@ for it in range(1, n_outer + 1):
     print(f"outer {it} re-linearisation: refit loss drop {refit_drop:.1f}; at fixed (hyper, beta) log Z {relin.get('logZ_old_response', float('nan')):.1f} -> "
           f"{relin.get('logZ_new_response', float('nan')):.1f} (d {relin.get('dlogZ', float('nan')):+.1f}); MAP disc moved "
           f"{relin.get('map_disc_rms_change_dex', float('nan')):.3f} dex rms; optics: primary_opd rms change {od['primary_opd_rms_change_nm']:.2f} nm "
-          f"(new rms {od['primary_opd_rms_new_nm']:.1f}), star moved {numpy.round(od['star_shift_px'], 3).tolist()} px, spectrum x{od['spectrum0_ratio']:.3f}", flush=True)
+          f"(new rms {od['primary_opd_rms_new_nm']:.1f}), star moved {numpy.round(od['star_shift_px'], 3).tolist()} px, spectrum x{od['spectrum0_ratio']:.3f}; occulter radius {od['occulter_radius_change']:+.4f}, ellipticity |change| {od['occulter_ellipticity_change']:.4f} "
+          f"(|e| now {od['occulter_ellipticity_new_norm']:.4f})", flush=True)
     moved = not all(numpy.isclose(new[k], hyp_b[k], rtol=1e-6, atol=1e-9) for k in hyp_b)
     # how far (grid steps, per axis) and how much log Z (nats) the best cell moved relative to the refit hyperparameters
     steps_moved = {k: float(abs(numpy.log(new[k]/hyp_b[k]))/numpy.log(outer_steps[k])) for k in hyp_b}
@@ -1758,15 +1966,16 @@ with timed("F: products"):
                              percentile=99, save=f"{out}/comparison")
 
     n_good = numpy.asarray(resp_f.n_good)
-    od_final = optics_deltas(params_opt, p_final, exposures, wid, support_scale)     # stage-A (or L1/TSV) optics -> the final ones
+    od_final = optics_deltas(optics_start, p_final, exposures, wid, support_scale)     # A3 (else stage-A / L1/TSV) optics -> the final ones
+    od_final_A = optics_deltas(params_opt, p_final, exposures, wid, support_scale)   # stage-A (or L1/TSV) optics -> the final ones
     star_final = numpy.array([star_pixel(p_final, e, wid, support_scale) for e in exposures])
-    checks |= dict(gradient_ratio_stage_C=float(noise["g_ratio"]), verify_max_abs_B=verify_max_abs, optics_stageA_to_final=od_final,
+    checks |= dict(gradient_ratio_stage_C=float(noise["g_ratio"]), verify_max_abs_B=verify_max_abs, optics_start_to_final=od_final, optics_start_is_A3=bool(a3_info is not None and a3_info.get("adopted", True)), optics_stageA_to_final=od_final_A,
                    star_px_final_minus_support_star=(star_final - support_stars).tolist(),
                    star_only_vs_full_model_max_rel_diff=level_report.get("star_only_vs_full_model_max_rel_diff"),
                    final_level=float(l_f), level_prior_mu=float(level_mu[False]), level_prior_sd=float(level_sd),
                    final_level_minus_prior_mu_in_sd=float((float(l_f) - level_mu[False])/level_sd))
     print(f"[e2e] final level {float(l_f):.3f} vs prior mu {level_mu[False]:.3f} sd {level_sd:g} ({checks['final_level_minus_prior_mu_in_sd']:+.2f} sd); "
-          f"optics stage A -> final: primary_opd rms change {od_final['primary_opd_rms_change_nm']:.1f} nm, star moved {numpy.round(od_final['star_shift_px'], 2).tolist()} px, "
+          f"optics ({'A3' if (a3_info is not None and a3_info.get('adopted', True)) else 'stage A / L1/TSV'}) -> final: primary_opd rms change {od_final['primary_opd_rms_change_nm']:.1f} nm, star moved {numpy.round(od_final['star_shift_px'], 2).tolist()} px, "
           f"spectrum x{od_final['spectrum0_ratio']:.3f}; support star vs final star (px) {numpy.round(star_final - support_stars, 2).tolist()}")
     if numpy.max(numpy.abs(star_final - support_stars)) > 1.:
         print("WARNING: the final star is > 1 px from the support mask's star: the fixed support (built once) may be off at the crop edge; rebuild with "
@@ -1775,7 +1984,7 @@ with timed("F: products"):
         print("WARNING: the final level is > 1.5 prior sd from the data-estimated centre: the level prior was mis-centred (see estimate_level's caveats); "
               "a second pass with E2E_LEVEL_MU = the final level and a smaller E2E_LEVEL_SD is advised")
     e2e_report = dict(flags=dict(optics_source=optics_source, level_source=level_source, support_star=support_star, tilt_init=tilt_init),
-                      stage_a=stage_a_info, level=level_report, checks=checks, out=out, n_outer=n_outer, min_outer=min_outer)
+                      stage_a=stage_a_info, stage_a3=a3_info, level=level_report, checks=checks, out=out, n_outer=n_outer, min_outer=min_outer)
     with open(f"{out}/e2e-checks.json", "w") as f:
         json.dump(e2e_report, f, indent=2, default=str)
     summary = dict(
