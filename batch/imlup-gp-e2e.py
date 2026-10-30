@@ -161,7 +161,7 @@ npoly = 8
 n_modes = 50
 n_zernikes = 50
 resolved_wid = 60          # 5.18" box at 0.0864" / px; a larger box is a later evidence comparison (gp-plan.md)
-roots = ["n8zu11epq", "n8zu11eqq", "n8zu12exq", "n8zu12eyq"]
+roots = ["n8zu11epq", "n8zu11eqq", "n8zu11erq", "n8zu12exq", "n8zu12eyq", "n8zu12ezq"]
 
 
 # Hyperparameter grids (gp_evidence_grid_nd extends an axis by one step while the optimum is on an edge, within its bounds),
@@ -690,7 +690,7 @@ star_offsets = (stars_header - (wid - 1)/2)*scale0      # arcsec (x, y) of the h
 print(f"header stars (col, row) {numpy.round(stars_header, 2).tolist()}; offsets from the crop centre {numpy.round(star_offsets/scale0, 2).tolist()} px; "
       f"pixel scale {scale0:.5f}\"; optics_source {optics_source}, level_source {level_source}, support_star {support_star}", flush=True)
 
-# n_share: all four exposures share the target-keyed disc, so each carries 1/4 of its prior
+# n_share: all exposures share the target-keyed disc, so each carries 1/n of its prior
 exposures = with_n_share([
     exposure_from_file(f, GPDiscFit(spectrum_basis, "F160W", wid=resolved_wid, trend_sigma=1., kinds=trend_kinds),
                        crop=wid, extra_bad=None, hole_margin=0.3)
@@ -941,11 +941,11 @@ def build_support(stars):
     rolls = {}
     for i_, o_ in enumerate(support_orients):
         rolls.setdefault(round(float(o_), 1), []).append(i_)
-    assert len(rolls) == len({r_[:6] for r_ in roots}) == 2 and all(len(v_) == 2 for v_ in rolls.values()), (rolls, roots)
+    assert len(rolls) == len({r_[:6] for r_ in roots}), (rolls, roots)
     assert all(len({roots[i_][:6] for i_ in v_}) == 1 for v_ in rolls.values()), (rolls, roots)   # roll groups = visits
     parts = [support_mask(resolved_wid, disc_pitch, support_orients[v_], stars[v_], wid, support_scale, cover="any", **sm_kw)
              for v_ in rolls.values()]
-    M_ = parts[0][0]*parts[1][0]
+    M_ = numpy.prod([p_[0] for p_ in parts], axis=0)
     kept_ = M_ > 0
     xs_ = (numpy.arange(resolved_wid) - (resolved_wid - 1)/2)*disc_pitch
     R_ = numpy.hypot(*numpy.meshgrid(xs_, xs_))
