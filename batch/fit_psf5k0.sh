@@ -9,8 +9,8 @@
 #SBATCH -o psf5k0-%j.out
 
 # Time: estimated, not measured. calibrator-joint (3 exposures, 2500 steps + polish) takes ~31 min; here 2 exposures,
-# 2500 + 1000 steps (the linear-chromatic s3/s4 ~1.5-3x per step), 6 compiles (~3-5 min each) and an exact-chromatic
-# polish: ~1.5-2 h. If it times out, resubmit: the fit resumes after the last saved stage.
+# 2000 + 1000 steps (the linear-chromatic s3/s4 ~1.5-3x per step), 5 compiles (~3-5 min each) and an exact-chromatic
+# polish: ~1-1.5 h. If it times out, resubmit: the fit resumes after the last saved stage.
 
 module load python-scientific/3.13.1-foss-2025a
 

@@ -59,9 +59,9 @@ SIGMA_OPD, SIGMA_AMP, SIGMA_EDGE, SIGMA_POS_AMP = 30., 0.01, 0.01, 3e-3
 RIM_OPD_MAX_STEP = 5.      # s3-s4: per-step clip of rim_opd updates (nm). A rate limit only, NOT a bound on the total
                            # (600 steps x 5 nm); how far the linear chromatic mode is off is recorded in summary.json
 
-# Warm start: the calibrator-joint L-BFGS result; intermediate-params.npy only fills the 5 entries it alone holds
-# (cold_mask_shear, primary_shear, outer_radius, primary_outer, primary_pad)
-WARM = ["calibrator-joint/192-PSF-5-K0/params_amp_optx.npy", "calibrator-joint/192-PSF-5-K0/intermediate-params.npy"]
+# Warm start: calibrator-joint/192-PSF-5-K0's L-BFGS result (params_amp_optx.npy) plus the 5 entries only its
+# intermediate-params.npy held (cold_mask_shear, primary_shear, outer_radius, primary_outer, primary_pad), merged
+WARM = ["psf5k0_warm_start.npy"]
 
 DRY_RUN = os.environ.get("FIT_DRY_RUN") == "1"
 STOP_AFTER = os.environ.get("FIT_STOP_AFTER")       # stage name: exit after it (dry run: one stage per process)
@@ -70,7 +70,7 @@ INJECT_NAN = os.environ.get("FIT_INJECT_NAN")       # test: stage name whose sta
 if DRY_RUN:
     wf_wid, wid, oversample, pad = 32, 16, 2, 2
     nwavels, npoly, n_modes, n_zernikes, n_nodes = 3, 2, 4, 4, 2
-    n_probes, epochs, polish_steps = 1, [3, 3, 3, 3, 3], 8
+    n_probes, epochs, polish_steps = 1, [3, 3, 3, 3], 8
     out = os.path.join(os.environ.get("FIT_DRY_RUN_OUT", os.path.join(tempfile.gettempdir(), "fit_psf5k0_dryrun")), OCCULTER)
     if not os.environ.get("JAX_COMPILATION_CACHE_DIR"):
         jax.config.update("jax_compilation_cache_dir", os.path.join(os.path.dirname(out), "jax_cache"))
@@ -78,7 +78,7 @@ else:
     # as calibrator-joint.py
     wf_wid, wid, oversample, pad = 512, 64, 4, 2
     nwavels, npoly, n_modes, n_zernikes, n_nodes = 200, 8, 48, 50, 20
-    n_probes, epochs, polish_steps = 32, [500, 2000, 400, 300, 300], 512
+    n_probes, epochs, polish_steps = 32, [2000, 400, 300, 300], 512
     out = f"psf5k0/{OCCULTER}"
 os.makedirs(out, exist_ok=True)
 
@@ -185,7 +185,7 @@ for f in WARM:
                     v[kk] = np.asarray(s, float)
                 seeded[tag] = f
 n_tags = sum(len(v) if isinstance(v, dict) else 1 for k, v in params.items() if k not in GLINT_KEYS and k != "defocus3")
-print(f"warm start: seeded {len(seeded)}/{n_tags};", "from", WARM[1], sorted(t for t, f in seeded.items() if f == WARM[1]))
+print(f"warm start: seeded {len(seeded)}/{n_tags} from {WARM}")
 assert DRY_RUN or len(seeded) == n_tags == 39, sorted(seeded)      # dry run: sizes differ, some shapes do not match
 
 # %%
@@ -197,17 +197,9 @@ def sgd_clip(lr, delay, step):
     return optax.chain(sgd(lr, delay), optax.clip(step))
 
 
-# calibrator-joint's things_start and things, with the occulter frozen at the warm start (released in s2)
-things_start = {
-    "spectrum": sgd(g*3, 30.), "primary_tilt": sgd(g*5., 15.), "cold_mask_tilt": sgd(g*1., 0), "cold_mask_opd": sgd(g*0.1, 40),
-    "defocus1": sgd(g*1, 60), "defocus2": sgd(g*10, 60), "bias": sgd(g*3, 50), "cold_mask_shift": sgd(g*0.3, 70),
-    "cold_mask_rot": sgd(g*0.1, 85), "primary_rot": sgd(g*0.03, 85), "primary_low": sgd(g*2., 150),
-    "cold_mask_shear": sgd(g*0.1, 100), "cold_mask_distortion": sgd(g*0.1, 150), "primary_shear": sgd(g*1, 100),
-    "outer_radius": sgd(g*0.1, 120), "secondary_radius": sgd(g*0.1, 120), "spider_width": sgd(g*0.1, 120),
-    "primary_spider": sgd(g*0.1, 120), "primary_secondary": sgd(g*0.1, 120), "primary_pad": sgd(g*0.1, 120),
-    "primary_outer": sgd(g*0.1, 120), "secondary_shift": sgd(g*0.3, 120), "primary_distortion": sgd(g*0.1, 150),
-    "fnumber": sgd(g*1., 200), "anisotropy": sgd(g*2., 200),
-}
+# calibrator-joint's second-stage things, with the occulter frozen at the warm start (released in s2). Its first stage
+# (things_start) is skipped: the warm start is already its converged result. The entries only things_start fitted
+# (cold_mask_shear, primary_shear, outer_radius, primary_outer, primary_pad) stay at their warm-start values
 things = {
     "primary_opd": adam(2e-2, 50),
     "spectrum": sgd(g*1, 0), "primary_tilt": sgd(g*1., 0), "cold_mask_tilt": sgd(g*1, 0), "cold_mask_opd": sgd(g*1., 0),
@@ -218,21 +210,20 @@ things = {
     "primary_secondary": sgd(g*1., 0), "secondary_shift": sgd(g*1, 0), "primary_distortion": sgd(g*3, 0),
     "fnumber": sgd(g*1., 0), "anisotropy": sgd(g*1., 0), "distortion": sgd(g*1, 0),
 }
-late = things | {"primary_opd": adam(2e-2, 0)}        # after s1b the wavefront is converged: no delay
+late = things | {"primary_opd": adam(2e-2, 0)}        # after s1 the wavefront is converged: no delay
 # Occulter geometry: the edge (climb) / rotation (image) starts after a third of s2
 geom = {"occulter_radius": sgd(g*1., 0), "occulter_ellipticity": sgd(g*3, 0),
-        ("occulter_edge" if OCCULTER == "climb" else "occulter_rotation"): sgd(g*0.3, epochs[2]//3)}
+        ("occulter_edge" if OCCULTER == "climb" else "occulter_rotation"): sgd(g*0.3, epochs[1]//3)}
 rim_opd = {"occulter_rim_opd": sgd_clip(g*1., 0, RIM_OPD_MAX_STEP)}
 rim_amp = {"occulter_rim_amp": sgd(g*0.3, 0)}
 
 # (name, optimisers, epochs (s5: L-BFGS max steps), chromatic mode). r, e and the edge are
 # frozen in s3 and s4 (they trade against the rim leaves) and released again in the s5 polish
 stages = [
-    ("s1a", things_start, epochs[0], None),
-    ("s1b", things, epochs[1], None),
-    ("s2", late | geom, epochs[2], None),
-    ("s3", late | rim_opd, epochs[3], "linear"),
-    ("s4", late | rim_opd | rim_amp, epochs[4], "linear"),
+    ("s1", things, epochs[0], None),
+    ("s2", late | geom, epochs[1], None),
+    ("s3", late | rim_opd, epochs[2], "linear"),
+    ("s4", late | rim_opd | rim_amp, epochs[3], "linear"),
     ("s5", late | geom | rim_opd | rim_amp, polish_steps, "exact"),
 ]
 precond_kwargs = dict(n_probes=n_probes, chunk=4, per_block=False, exact_max_size=32,
