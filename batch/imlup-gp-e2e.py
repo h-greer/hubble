@@ -1,5 +1,5 @@
 """DRAFT batch/imlup-gp-e2e.py: END-TO-END GP fit of IM Lup that does not depend on the regularised L1/TSV fit (imlup-adi/).
-v2 (outputs in imlup-gp-e2e-v2/, the first run's imlup-gp-e2e/ is never reused): stage A fits the FULL image (no annulus mask unless E2E_STAGEA_MASK=1)
+v2: stage A fits the FULL image (no annulus mask unless E2E_STAGEA_MASK=1)
 with occulter_radius / occulter_ellipticity held at the calibrator values and a gentler primary_opd; stage A3 then introduces the disc (joint refit with the
 GP prior at fixed hyperparameters, disc learning delayed) before the response is built; refit() retries a diverging first-order stage at a lower rate; the
 run stops with a message if a noise scale s > E2E_S_MAX (10). See NOTES.md. The text below describes the original design where it is unchanged.
@@ -26,7 +26,7 @@ Flags (environment variables override the defaults; every result goes to a direc
   level_source   "data" (estimate_level) | "l1tsv" (reference_level of imlup-adi's disc)
   support_star   "fitted" (stage-A / reference tilts) | "header" (TARSIAFX/Y minus the crop origin)
 Needs: data/calibrator_optical_params.npy (calibrator mode); imlup-adi/ only for the l1tsv flags. Resumable and fingerprinted
-(stage A, response, noise, grids, outer refits). The validation hook at the end compares with imlup-gp-radial-m12-support/ (or -m12/)
+(stage A, response, noise, grids, outer refits). The validation hook at the end compares with imlup-gp-radial/ (or an earlier radial run dir)
 when present: comparison-l1tsv.json."""
 import sys
 sys.path.insert(0, '..')
@@ -103,10 +103,10 @@ _nondefault = {k_: os.environ[k_] for k_ in ("E2E_TILT_INIT", "E2E_LEVEL_SD", "E
                if k_ in os.environ and not (k_ == "E2E_TILT_INIT" and os.environ[k_] == "header")}
 if _nondefault:
     _suffix += "-" + hashlib.sha256(repr(sorted(_nondefault.items())).encode()).hexdigest()[:6]
-out = f"imlup-gp-e2e-{E2E_VERSION}" + _suffix   # the default run (calibrator optics, data level, fitted star) is imlup-gp-e2e-v2/ (never the first run's imlup-gp-e2e/)
+out = "imlup-gp-e2e" + _suffix   # fixed name: a rerun overwrites (cached stages are fingerprinted); non-default flags get a suffix
 ref_dir = "imlup-adi"                # read only with an l1tsv flag
 shared_dir = "imlup-gp"              # its response.npz / verify-*.npz are reused ONLY with optics_source = "l1tsv" (the L1/TSV optics)
-compare_dirs = ["imlup-gp-radial-m12-support", "imlup-gp-radial-m12"]   # validation hook: first one with a summary.json
+compare_dirs = ["imlup-gp-radial", "imlup-gp-radial-m12-both", "imlup-gp-radial-m12-support"]   # validation hook: the most recent one with a summary.json
 calibrator_file = "../data/calibrator_optical_params.npy"
 os.makedirs(out, exist_ok=True)
 with open(f"{out}/flags.json", "w") as f_:
@@ -280,12 +280,34 @@ level_mu_override = os.environ.get("E2E_LEVEL_MU")     # dex: set the prior cent
 level_smooth_px = 2.0       # estimate_level: Gaussian smoothing of the residual (data px, sigma) before the log
 level_k_floor = 2.0         # estimate_level: pixels below k sigma of the smoothed noise are floored at k sigma (upper limits)
 level_f_min = 0.5           # estimate_level: use pixels whose unit-disc response is >= this fraction of its median (drops the occulter / edge rims)
-n_outer = 5                 # one more than imlup-gp-radial.py's 4 (stage A starts further from the optimum than the L1/TSV optics)
+n_outer = int(os.environ.get("E2E_N_OUTER", 8))   # v2 (5) exhausted its 4 iterations with the re-linearisation still moving log Z by +330 nats; not in any fingerprint (resumable)
+relin_dlogz_tol = float(os.environ.get("E2E_RELIN_TOL", 10.))   # nats: the loop may only exit when |d log Z| of the re-linearisation (fixed hyper, beta) is below this AND the hyperparameter
+                            # test passes; None-like: set E2E_RELIN_TOL=inf to restore the hyperparameter-only rule
+a3_max_steps = int(os.environ.get("E2E_A3_MAX_STEPS", 1000))   # L-BFGS iterations in A3 only (v2: 400 hit the cap, |sqrt(C) g| 336). Part of fp3: E2E_A3_MAX_STEPS=400 reproduces v2's fp3
 min_outer = 2               # at least this many outer iterations before "converged" (the first only re-linearises at the refit optics)
 lin_dlogz_warn = 5.         # nats: warn if re-linearising changed log Z at fixed hyperparameters (and noise) by more than this
 verify_draw_sigmas = (0.5, 1.0)   # dex rms of the random GP-draw test discs in the response verification (zero disc is always included)
 
 # ---------------------------------------------------------------- pure helpers (tested in a tiny exec harness, no jax needed)
+def fill_floor(a, margin=1.0):
+    """NaN (off-support) -> nanmin - margin (dex), so that 10**disc is finite; returns (filled, floor)."""
+    a = numpy.asarray(a, dtype=float)
+    fin = numpy.isfinite(a)
+    floor = float(a[fin].min() - margin) if fin.any() else -10.
+    return numpy.where(fin, a, floor), floor
+
+
+def amp_params(p, disc_by_key):
+    """imlup-adi/params_amp.npy format: the params dict with params["resolved"] = {key: log10 disc map} and no resolved_level."""
+    return {k_: v_ for k_, v_ in p.items() if k_ != "resolved_level"} | {"resolved": dict(disc_by_key)}
+
+
+def relin_ok_test(relin, tol):
+    """True when the re-linearisation log Z shift at fixed hyperparameters is known and below tol (a failed diagnostic never passes)."""
+    d = relin.get("dlogZ") if isinstance(relin, dict) else None
+    return d is not None and bool(numpy.isfinite(d)) and abs(float(d)) < tol
+
+
 def stage_a_mask(shape, star_cr, scale, r_in, r_out):
     """bool (shape): True (masked in stage A) where r_in <= r <= r_out, r the distance in arcsec from the star at crop pixel
     (col, row) = star_cr (0-indexed pixel centres), scale arcsec / data pixel."""
@@ -1037,7 +1059,7 @@ if optics_source == "calibrator" and a3_enabled:
     print(f"A3 prior sigma {a3_sigma:g} dex, length {a3_length:g} px; error scales (disc-free chi2, clipped to {a3_s_clip}): {numpy.round(s_a3, 3).tolist()}", flush=True)
     exps_a3 = scale_errors(exps_a3, s_a3)
     fp3 = fingerprint(E2E_VERSION, a3_sigma, a3_length, repr(a3_s_clip), s_a3, loop_order, trend_sigma, level_mu[False], level_sd, repr(sorted(things_A3)), fo_lr_opd_A, a3_disc_delay,
-                      stage_a_max_steps, fo_epochs, fo_lr_disc, repr(sorted(precond_kwargs.items())), code_fp, core_fp, data_fp,
+                      a3_max_steps, fo_epochs, fo_lr_disc, repr(sorted(precond_kwargs.items())), code_fp, core_fp, data_fp,
                       *[numpy.asarray(l_) for l_ in jax.tree.leaves({k_: v_ for k_, v_ in ref_params.items() if k_ not in ("resolved", "resolved_level")})])
     p3, i3 = f"{out}/stageA3-{fp3}-params.npy", f"{out}/stageA3-{fp3}-info.json"
     with timed("A3: disc introduction (joint refit, fixed GP prior)"):
@@ -1048,7 +1070,7 @@ if optics_source == "calibrator" and a3_enabled:
         else:
             model_a3 = set_array(NICMOSModel(exps_a3, ref_params, optics, detector))
             opt_a3 = set_array({k_: ref_params[k_] for k_ in things_A3})
-            x3, losses3, optx3 = refit(opt_a3, model_a3, exps_a3, things_A3, lr_opd=fo_lr_opd_A, disc_delay=a3_disc_delay, max_steps=stage_a_max_steps)
+            x3, losses3, optx3 = refit(opt_a3, model_a3, exps_a3, things_A3, lr_opd=fo_lr_opd_A, disc_delay=a3_disc_delay, max_steps=a3_max_steps)
             a3_ok = bool(numpy.all(numpy.isfinite(losses3)) and losses3[-1] <= losses3[0])
             if not a3_ok:   # never adopt a worse / non-finite A3 result: keep stage A's optics (stage E refits them anyway)
                 print(f"WARNING: stage A3 loss {losses3[0]:.1f} -> {losses3[-1]:.1f} (non-finite or worse than the start): keeping stage A's optics", flush=True)
@@ -1063,6 +1085,15 @@ if optics_source == "calibrator" and a3_enabled:
           f"primary_opd rms {a3_info['optics_change']['primary_opd_rms_change_nm']:.2f} nm (new rms {a3_info['optics_change']['primary_opd_rms_new_nm']:.1f}), "
           f"star moved {numpy.round(a3_info['optics_change']['star_shift_px'], 3).tolist()} px, spectrum x{a3_info['optics_change']['spectrum0_ratio']:.3f}", flush=True)
     optics_start = params_a3       # the optics the GP stages start from (od_final compares against these)
+    try:   # imlup-adi's intermediate-* products for A3 (also regenerated on a resumed run); a plotting failure never loses the run
+        save_npy(f"{out}/intermediate-params.npy", to_host(params_a3))
+        if not os.path.exists(f"{out}/intermediate-comparison_0.png"):
+            model_i = set_array(NICMOSModel(exps_a3, params_a3, optics, detector))
+            plot_comparison_detailed(model_i, ModelParams(set_array(params_a3)), exps_a3, quadrature=False, wf_size=wf_wid, percentile=99,
+                                     save=f"{out}/intermediate-comparison")
+            plt.close("all")
+    except Exception as e_i:
+        print(f"[products] intermediate (A3) comparison / params failed: {e_i!r}", flush=True)
     if a3_info.get("adopted", True):
         # A3 moved the spectrum / star position / fnumber: the support (fitted star, pixel scale) and the level prior (data - star over the support) built from
         # stage A's optics are stale. Recompute both at the A3 optics; the stage-A values stay in the diagnostics (a3_info["pre_a3"], level_report["pre_a3"]).
@@ -1392,6 +1423,7 @@ except Exception as e:   # a diagnostic: never lose the stage to it
     print(f"[check] trend surrogate vs full model failed: {e!r}")
 outer_converged, outer_reason = False, "not converged"
 outer_history = []
+params_traj = [dict(current["params"])]     # the optics start and each outer refit's params, for params.png
 lbfgs_info = {}
 for it in range(1, n_outer + 1):
     prior_b = make_b()(**hyp_b)
@@ -1512,7 +1544,10 @@ for it in range(1, n_outer + 1):
     dlogZ_old = float(grid_new["logZ"][old_cell] - grid_new["logZ"][idx_new]) if old_in_grid else float("nan")
     loose = (moved and converge_dlogz is not None and old_in_grid and all(v_ <= 1 + 1e-6 for v_ in steps_moved.values())
              and dlogZ_old > -converge_dlogz and bool(grid_new["converged"][old_cell]))
-    outer_history.append(dict(it=it, refit_at=dict(hyp_b), best=new, moved=bool(moved), steps_moved=steps_moved,
+    hyper_converged = bool(not moved or loose)
+    relin_ok = relin_ok_test(relin, relin_dlogz_tol)
+    outer_history.append(dict(it=it, hyper_converged=hyper_converged, relin_ok=bool(relin_ok), relin_dlogz_tol=relin_dlogz_tol,
+                              refit_at=dict(hyp_b), best=new, moved=bool(moved), steps_moved=steps_moved,
                               dlogZ_refit_cell_minus_best=dlogZ_old, loose_converged=bool(loose),
                               edge_weight=post_new["edge_weight"], contained=bool(post_new["edge_weight"] < edge_target),
                               quantiles={k: list(map(float, v_)) for k, v_ in post_new["quantiles"].items()},
@@ -1520,19 +1555,35 @@ for it in range(1, n_outer + 1):
                               n_points=int(grid_new["logZ"].size), unconverged=int((~grid_new["converged"].astype(bool)).sum()),
                               refit_loss_drop=refit_drop, relinearisation=relin, optics_change=od))
     hyp_b = new
+    params_traj.append(dict(p_new))
     current = dict(params=p_new, resp=resp_new, resp_fp=resp_new_fp, beta=beta_new, s=numpy.asarray(s_new),
                    grid=grid_new, theta=np.asarray(grid_new["thetas"][idx_new]), idx=idx_new, stage=f"E{it}")
-    if (not moved or loose) and it < min_outer:
+    if hyper_converged and it < min_outer:
         print(f"outer {it}: hyperparameters stationary, but at least {min_outer} iterations are required (the first only re-linearises at the "
               "refit optics): continuing")
-    elif not moved or loose:
-        outer_converged, outer_reason = True, ("best cell did not move" if not moved else
-                                               f"moved <= 1 step and {-dlogZ_old:.2f} < {converge_dlogz} nats (refit cell nearly as good)")
+    elif hyper_converged and relin_ok:
+        outer_converged, outer_reason = True, ((f"best cell did not move" if not moved else
+                                                f"moved <= 1 step and {-dlogZ_old:.2f} < {converge_dlogz} nats (refit cell nearly as good)")
+                                               + f"; re-linearisation |d log Z| {abs(relin['dlogZ']):.1f} < {relin_dlogz_tol:g} nats")
         print(f"outer {it}: converged ({outer_reason})")
         break
+    elif hyper_converged:
+        print(f"outer {it}: hyperparameters stationary, but the re-linearisation still moved log Z by {relin.get('dlogZ', float('nan')):+.1f} nats "
+              f"(tolerance {relin_dlogz_tol:g}): continuing", flush=True)
 if not outer_converged:
-    print(f"WARNING: the hyperparameters still moved at outer iteration {n_outer}: the optics were refitted at the "
-          "previous hyperparameters; raise n_outer")
+    _lh = outer_history[-1] if outer_history else {}
+    outer_reason = (f"n_outer = {n_outer} reached without converging: last iteration hyper_converged = {_lh.get('hyper_converged')}, re-linearisation "
+                    f"dlogZ = {_lh.get('relinearisation', {}).get('dlogZ')} (tolerance {relin_dlogz_tol:g})")
+    print(f"WARNING: {outer_reason}; the optics were refitted at the previous hyperparameters; raise n_outer")
+outer_exit = dict(converged=bool(outer_converged), reason=outer_reason, iterations=len(outer_history), n_outer=n_outer, min_outer=min_outer,
+                  relin_dlogz_tol=relin_dlogz_tol, relin_dlogz_sequence=[h_["relinearisation"].get("dlogZ") for h_ in outer_history])
+print(f"[e2e] outer loop exit: {outer_exit}", flush=True)
+try:   # parameter trajectory over the outer iterations (imlup-adi's params.png; plot_params takes any sequence of dicts with .get)
+    groups = [k_ for k_ in things_gp if k_ != "resolved" and all(k_ in p_ for p_ in params_traj)]   # the 3600 disc latents are not plotted
+    plot_params(params_traj, groups, xw=5, save=f"{out}/params")
+    plt.close("all")
+except Exception as e_pp:
+    print(f"[products] params.png failed: {e_pp!r}", flush=True)
 if outer_history and abs(outer_history[-1]["relinearisation"].get("dlogZ", 0.)) > lin_dlogz_warn:
     print(f"WARNING: the last outer iteration's re-linearisation still changed log Z by {outer_history[-1]['relinearisation']['dlogZ']:+.1f} nats "
           f"(> {lin_dlogz_warn:g}) at fixed hyperparameters: the optics are not at the joint optimum; raise n_outer")
@@ -1965,6 +2016,36 @@ with timed("F: products"):
     plot_comparison_detailed(model_f, ModelParams(set_array(p_final)), exps_f, quadrature=False, wf_size=wf_wid,
                              percentile=99, save=f"{out}/comparison")
 
+    # imlup-adi-style products: params_amp.npy (resolved -> {key: log10 disc}), imlup.npy / imlup.png / imlup-log.png, spectrum.png.
+    # Off-support NaNs -> nanmin - 1 dex (a documented floor, only for these adi-style products; pictures.ipynb reads gp-disc-log10.npy). Each in its own try: nothing here may lose the run.
+    try:
+        disc_f, floor_f = fill_floor(log_map)
+        np_amp = amp_params(to_host(p_final), {key: disc_f.astype(numpy.float32)})   # float32 as imlup-adi's params_amp.npy
+        save_npy(f"{out}/params_amp.npy", np_amp)
+        save_npy(f"{out}/imlup.npy", disc_f)
+        print(f"[products] params_amp.npy / imlup.npy written; off-support floor {floor_f:.3f} dex (nanmin - 1)", flush=True)
+        for fname, arr in (("imlup", 10**disc_f), ("imlup-log", disc_f)):
+            fig = plt.figure(figsize=(10, 10))
+            plt.imshow(arr)
+            plt.colorbar()
+            fig.savefig(f"{out}/{fname}.png")
+            plt.close(fig)
+    except Exception as e_p:
+        print(f"[products] params_amp / imlup products failed: {e_p!r}", flush=True)
+    try:
+        exp0 = exps_f[0]
+        spectrum = exp0.fit.source.point.spectrum.set("basis_weights", ModelParams(p_final).get(exp0.fit.map_param(exp0, "spectrum")))
+        wavels = 1e6*spectrum.wavelengths
+        fig, axs = plt.subplots(1, 2, figsize=(20, 8), layout='compressed')
+        axs[0].plot(wavels, spectrum.spec_weights())
+        axs[0].set(xlabel="Wavelength (um)", ylabel="Relative flux", title="Stellar spectrum")
+        axs[1].plot(wavels, spectrum.weights)
+        axs[1].set(xlabel="Wavelength (um)", ylabel="Normalised weight", title="Detected spectrum")
+        fig.savefig(f"{out}/spectrum.png")
+        plt.close(fig)
+    except Exception as e_s:
+        print(f"[products] spectrum.png failed: {e_s!r}", flush=True)
+
     n_good = numpy.asarray(resp_f.n_good)
     od_final = optics_deltas(optics_start, p_final, exposures, wid, support_scale)     # A3 (else stage-A / L1/TSV) optics -> the final ones
     od_final_A = optics_deltas(params_opt, p_final, exposures, wid, support_scale)   # stage-A (or L1/TSV) optics -> the final ones
@@ -1993,7 +2074,7 @@ with timed("F: products"):
         hyper=hyp_b, order=best_trend, trend_sigma=trend_sigma, trend_kinds=list(trend_kinds),
         trend_coef_dex=tc_f["coef"].tolist(), trend_coef_sd_dex=tc_f["coef_sd"].tolist(),
         dct_modes_02_20_z=[float(tc_f["z_dct"][0, 2]), float(tc_f["z_dct"][2, 0])],
-        final_stage=current["stage"], outer_converged=outer_converged, outer_converged_reason=outer_reason,
+        final_stage=current["stage"], outer_converged=outer_converged, outer_converged_reason=outer_reason, outer_exit=outer_exit,
         outer_history=outer_history, comparison_final_stage=comparison_final, data_dir=ddir,
         lbfgs={str(it): info for it, info in lbfgs_info.items()},   # result status, iterations, |sqrt(C) grad| start / end
         noise_scale=dict(zip(resp_f.keys, map(float, current["s"]))),
@@ -2013,11 +2094,12 @@ with timed("F: products"):
 
 # %%
 # ---------------------------------------------------------------- F2: validation hook: compare with the L1/TSV-based run (comparison-l1tsv.json)
-# The reference is the first of compare_dirs holding summary.json + gp-params.npy. Its optics / disc come from the L1/TSV fit, so the
+# The reference is the most recently written of compare_dirs holding summary.json + gp-params.npy. Its optics / disc come from the L1/TSV fit, so the
 # differences are the end-to-end fit's departures from it. Caveats printed in the file: the reference's level prior (L1/TSV, sd 1), noise scales
 # and, for imlup-gp-radial-m12/, its (absent) support differ from this run's, so the evidence difference is indicative, not like-for-like.
 with timed("F2: comparison with the L1/TSV-based run"):
-    ref_dir_c = next((d_ for d_ in compare_dirs if os.path.exists(f"{d_}/summary.json") and os.path.exists(f"{d_}/gp-params.npy")), None)
+    ref_ok = [d_ for d_ in compare_dirs if os.path.exists(f"{d_}/summary.json") and os.path.exists(f"{d_}/gp-params.npy")]
+    ref_dir_c = max(ref_ok, key=lambda d_: os.path.getmtime(f"{d_}/summary.json")) if ref_ok else None
     if ref_dir_c is None:
         print(f"validation hook: none of {compare_dirs} has a summary.json + gp-params.npy; skipped")
     else:
